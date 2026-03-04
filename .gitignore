@@ -1,21 +1,45 @@
-# Python
+# ---- Python ----
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
 *.pyd
+*.pyo
+*.pkl
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# environments
-.env
+# ---- Virtualenv ----
 .venv/
 venv/
+env/
+ENV/
+*.env
+!.env.example
 
-# IDE
+# ---- IDEs ----
 .vscode/
 .idea/
+*.swp
 
-# logs
-*.log
-
-# OS
+# ---- OS ----
 .DS_Store
 Thumbs.db
+
+# ---- Logs / runtime ----
+*.log
+
+# ---- Local secrets / configs ----
+.env.local
+.env.production
+.env.staging
+
+# ---- Optional: local data dumps ----
+*.sqlite
+*.db
+
+# ---- If you create local scratch folders ----
+.tmp/
