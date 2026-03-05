@@ -21,6 +21,19 @@ app = FastAPI(title="Stock Trends API", version="1.0.0")
 
 app.add_middleware(RequestIdMiddleware)
 
+import logging
+
+from middleware.api_key import ApiKeyMiddleware
+from middleware.request_logger import RequestLoggerMiddleware
+
+# Basic logging setup
+logging.basicConfig(level=logging.INFO)
+
+# Protect /v1 with API keys
+app.add_middleware(ApiKeyMiddleware, protected_prefix="/v1")
+
+# Log all requests (including public pages)
+app.add_middleware(RequestLoggerMiddleware)
 # Versioned API
 v1 = FastAPI(title="Stock Trends API v1", version="1.0.0")
 v1.include_router(instruments_router)
@@ -39,4 +52,4 @@ app.mount("/v1", v1)
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"ok": True}
