@@ -12,6 +12,7 @@ from routers.stwr import router as stwr_router
 from routers.meta import router as meta_router
 from routers.breadth import router as breadth_router
 from routers.leadership import router as leadership_router
+from routers.ai import router as ai_router
 
 
 # (you'll add more routers soon)
@@ -32,9 +33,10 @@ v1.include_router(stwr_router)
 v1.include_router(meta_router)
 v1.include_router(breadth_router)
 v1.include_router(leadership_router)
+v1.include_router(ai_router)
 
 app.mount("/v1", v1)
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"status": "ok"}
