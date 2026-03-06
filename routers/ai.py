@@ -8,15 +8,18 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 def get_last_update():
     """
     Returns the most recent weekdate from st_data.
+    Falls back to None if the query fails.
     """
-    engine = get_engine()
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT MAX(weekdate) AS last_update FROM st_data"))
+            row = result.fetchone()
 
-    with engine.connect() as conn:
-        result = conn.execute(text("SELECT MAX(weekdate) AS last_update FROM st_data"))
-        row = result.fetchone()
-
-    if row and row.last_update:
-        return str(row.last_update)
+        if row and row.last_update:
+            return str(row.last_update)
+    except Exception:
+        return None
 
     return None
 
@@ -54,6 +57,5 @@ def ai_context():
             "/v1/breadth/sectors"
         ],
         "docs": "https://api.stocktrends.com/v1/docs",
-        "redoc": "https://api.stocktrends.com/v1/redoc"
         "openapi": "https://api.stocktrends.com/v1/openapi.json"
     }
