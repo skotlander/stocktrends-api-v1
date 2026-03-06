@@ -25,7 +25,9 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/sitemap.xml",
             "/robots.txt",
             "/docs",
+            "/v1/docs",
             "/openapi.json",
+            "/v1/openapi.json",
             "/health",
         }
 
