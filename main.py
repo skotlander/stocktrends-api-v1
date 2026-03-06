@@ -36,7 +36,8 @@ from middleware.request_logger import RequestLoggerMiddleware
 logging.basicConfig(level=logging.INFO)
 
 # Protect /v1 with API keys
-app.add_middleware(ApiKeyMiddleware, protected_prefix="/v1")
+# app.add_middleware(ApiKeyMiddleware, protected_prefix="/v1")
+app.add_middleware(ApiKeyMiddleware)
 
 # Log all requests (including public pages)
 app.add_middleware(RequestLoggerMiddleware)
