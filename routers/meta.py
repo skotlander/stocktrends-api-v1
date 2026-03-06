@@ -99,6 +99,7 @@ def meta_indicators(request: Request):
             "human_guides": [
                 "https://stocktrends.com/learn/stock-trends-guides",
                 "https://stocktrends.com/component/strategy/stdata_layout",
+                "https://stocktrends.com/learn/stock-trends-handbook",
             ],
             "machine_guides": [
                 "/v1/openapi.json",
