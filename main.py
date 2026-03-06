@@ -1,6 +1,10 @@
 # main.py
+import logging
 from fastapi import FastAPI
+
 from middleware.request_id import RequestIdMiddleware
+from middleware.api_key import ApiKeyMiddleware
+from middleware.request_logger import RequestLoggerMiddleware
 
 from routers.instruments import router as instruments_router
 from routers.prices import router as prices_router
@@ -14,12 +18,14 @@ from routers.breadth import router as breadth_router
 from routers.leadership import router as leadership_router
 from routers.ai import router as ai_router
 
-
-# (you'll add more routers soon)
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Stock Trends API", version="1.0.0")
 
+# Middleware order matters
 app.add_middleware(RequestIdMiddleware)
+app.add_middleware(ApiKeyMiddleware)
+app.add_middleware(RequestLoggerMiddleware)
 
 import logging
 

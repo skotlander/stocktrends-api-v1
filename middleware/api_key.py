@@ -7,25 +7,37 @@ from starlette.responses import JSONResponse
 
 
 def _parse_keys(raw: str) -> set[str]:
-    # supports comma-separated or whitespace-separated lists
     parts = [p.strip() for p in raw.replace("\n", ",").replace(" ", ",").split(",")]
     return {p for p in parts if p}
 
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
-    """
-    Protects /v1/* routes with an API key.
-    Allows discovery endpoints (/, /dataset/, /llms.txt, etc) without auth.
-
-    Looks for:
-      - header: X-API-Key
-      - header: Authorization: Bearer <key>
-    """
-
-    def __init__(self, app, protected_prefix: str = "/v1"):
+    def __init__(self, app):
         super().__init__(app)
-        self.protected_prefix = protected_prefix
         self.keys = _parse_keys(os.getenv("API_KEYS", ""))
+
+        self.public_paths = {
+            "/",
+            "/index.html",
+            "/llms.txt",
+            "/ai-dataset.json",
+            "/tools.json",
+            "/sitemap.xml",
+            "/robots.txt",
+            "/docs",
+            "/openapi.json",
+            "/health",
+        }
+
+        self.public_prefixes = (
+            "/dataset/",
+            "/.well-known/",
+        )
+
+        self.free_metered_paths = {
+            "/v1/instruments/lookup",
+            "/v1/ai/context",
+        }
 
     async def dispatch(self, request: Request, call_next):
         start = time.time()
@@ -33,23 +45,31 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         request.state.request_id = request_id
 
         path = request.url.path
+        request.state.auth_mode = "public"
+        request.state.api_key_id = None
 
-        # Only protect /v1/*
-        if path.startswith(self.protected_prefix):
-            if not self.keys:
-                # Fail closed if you forgot to configure keys
-                return JSONResponse(
-                    status_code=500,
-                    content={"detail": "API keys not configured", "request_id": request_id},
-                )
+        is_public = (
+            path in self.public_paths
+            or any(path.startswith(prefix) for prefix in self.public_prefixes)
+        )
 
+        is_free_metered = path in self.free_metered_paths
+
+        protected_v1 = path.startswith("/v1/") and not is_free_metered
+
+        if protected_v1 and not is_public:
             supplied = request.headers.get("X-API-Key", "").strip()
 
-            # Support Authorization: Bearer <key>
             if not supplied:
                 auth = request.headers.get("Authorization", "").strip()
                 if auth.lower().startswith("bearer "):
                     supplied = auth[7:].strip()
+
+            if not self.keys:
+                return JSONResponse(
+                    status_code=500,
+                    content={"detail": "API keys not configured", "request_id": request_id},
+                )
 
             if supplied not in self.keys:
                 return JSONResponse(
@@ -58,8 +78,11 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                     headers={"X-Request-Id": request_id},
                 )
 
-            # optionally expose key id in logs (not the full key)
+            request.state.auth_mode = "api_key"
             request.state.api_key_id = supplied[:6] + "..." + supplied[-4:]
+
+        elif is_free_metered:
+            request.state.auth_mode = "free_metered"
 
         response = await call_next(request)
         response.headers["X-Request-Id"] = request_id
