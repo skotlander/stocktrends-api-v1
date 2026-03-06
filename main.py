@@ -27,20 +27,6 @@ app.add_middleware(RequestIdMiddleware)
 app.add_middleware(ApiKeyMiddleware)
 app.add_middleware(RequestLoggerMiddleware)
 
-import logging
-
-from middleware.api_key import ApiKeyMiddleware
-from middleware.request_logger import RequestLoggerMiddleware
-
-# Basic logging setup
-logging.basicConfig(level=logging.INFO)
-
-# Protect /v1 with API keys
-# app.add_middleware(ApiKeyMiddleware, protected_prefix="/v1")
-app.add_middleware(ApiKeyMiddleware)
-
-# Log all requests (including public pages)
-app.add_middleware(RequestLoggerMiddleware)
 # Versioned API
 v1 = FastAPI(title="Stock Trends API v1", version="1.0.0")
 v1.include_router(instruments_router)
