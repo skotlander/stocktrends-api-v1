@@ -1,14 +1,48 @@
 import os
 from urllib.parse import quote_plus
+
 from sqlalchemy import create_engine
 
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = int(os.getenv("DB_PORT", 3306))
-DB_NAME = os.getenv("DB_NAME")
 
-def get_engine():
-    password = quote_plus(DB_PASSWORD)
-    url = f"mysql+mysqlconnector://{DB_USER}:{password}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+def _build_mysql_url(
+    user: str,
+    password: str,
+    host: str,
+    port: int,
+    db_name: str,
+) -> str:
+    password_escaped = quote_plus(password)
+    return f"mysql+mysqlconnector://{user}:{password_escaped}@{host}:{port}/{db_name}"
+
+
+def get_market_engine():
+    user = os.getenv("MARKET_DB_USER")
+    password = os.getenv("MARKET_DB_PASSWORD")
+    host = os.getenv("MARKET_DB_HOST")
+    port = int(os.getenv("MARKET_DB_PORT", 3306))
+    db_name = os.getenv("MARKET_DB_NAME")
+
+    if not all([user, password, host, db_name]):
+        raise RuntimeError("Market DB environment variables are not fully configured.")
+
+    url = _build_mysql_url(user, password, host, port, db_name)
     return create_engine(url, pool_pre_ping=True)
+
+
+def get_auth_engine():
+    user = os.getenv("AUTH_DB_USER")
+    password = os.getenv("AUTH_DB_PASSWORD")
+    host = os.getenv("AUTH_DB_HOST")
+    port = int(os.getenv("AUTH_DB_PORT", 3306))
+    db_name = os.getenv("AUTH_DB_NAME")
+
+    if not all([user, password, host, db_name]):
+        raise RuntimeError("Auth DB environment variables are not fully configured.")
+
+    url = _build_mysql_url(user, password, host, port, db_name)
+    return create_engine(url, pool_pre_ping=True)
+
+
+# backward-compat helper for older routes not yet refactored
+def get_engine():
+    return get_market_engine()

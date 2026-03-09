@@ -2,7 +2,9 @@
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import text
-from db import get_engine
+from db import get_market_engine
+from api.auth.api_key import get_api_key
+from fastapi import Depends
 
 router = APIRouter(prefix="/instruments", tags=["instruments"])
 
@@ -22,9 +24,11 @@ def _norm_exchange(ex: str) -> str:
     return ex
 
 
+
 @router.get("/lookup")
 def instrument_lookup(
     request: Request,
+    api_key: str = Depends(get_api_key),
     symbol: str = Query(..., description="Ticker symbol, e.g. ABC"),
     cs_only: bool = Query(default=True, description="Filter to Common Stocks only (type='CS')"),
     limit: int = Query(default=50, ge=1, le=500, description="Safety limit"),
@@ -35,7 +39,7 @@ def instrument_lookup(
     Uses st_mast (fast). Returns symbol_exchange keys like IBM-N.
     """
     s = _norm_symbol(symbol)
-    engine = get_engine()
+    engine = get_market_engine()
 
     if not details:
         sql = text("""
@@ -151,7 +155,7 @@ def instrument_resolve(
             },
         )
 
-    engine = get_engine()
+    engine = get_market_engine()
 
     # Choose SQL based on details flag
     if not details:
