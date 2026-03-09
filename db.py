@@ -26,7 +26,13 @@ def get_market_engine():
         raise RuntimeError("Market DB environment variables are not fully configured.")
 
     url = _build_mysql_url(user, password, host, port, db_name)
-    return create_engine(url, pool_pre_ping=True)
+    return create_engine(
+    url,
+    pool_pre_ping=True,
+    connect_args={
+        "connection_timeout": 5,
+    },
+)
 
 
 def get_auth_engine():
@@ -40,7 +46,13 @@ def get_auth_engine():
         raise RuntimeError("Auth DB environment variables are not fully configured.")
 
     url = _build_mysql_url(user, password, host, port, db_name)
-    return create_engine(url, pool_pre_ping=True)
+    return create_engine(
+    url,
+    pool_pre_ping=True,
+    connect_args={
+        "connection_timeout": 5,
+    },
+)
 
 
 # backward-compat helper for older routes not yet refactored
