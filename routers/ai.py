@@ -52,9 +52,8 @@ def ai_context():
         "description": "Weekly dataset covering North American equities and ETFs with trend classification, momentum, and breadth indicators.",
         "example_queries": [
             "/v1/instruments/lookup?symbol=AAPL",
-            "/v1/instruments/lookup?symbol=NVDA",
             "/v1/stim/top",
-            "/v1/breadth/sectors"
+            "/v1/breadth/sector/latest"
         ],
         "docs": "https://api.stocktrends.com/v1/docs",
         "openapi": "https://api.stocktrends.com/v1/openapi.json"

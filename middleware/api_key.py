@@ -37,8 +37,8 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         )
 
         self.free_metered_paths = {
-            "/v1/instruments/lookup",
             "/v1/ai/context",
+            "/v1/breadth/sector/latest",
         }
 
     async def dispatch(self, request: Request, call_next):
