@@ -14,9 +14,11 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from db import get_engine
@@ -25,6 +27,10 @@ from routers.signals import VALID_EXCHANGES
 router = APIRouter(prefix="/breadth", tags=["breadth"])
 
 GroupLevel = Literal["sector", "industry_group", "industry"]
+
+# Simple per-process cache for latest breadth endpoint
+_BREADTH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_BREADTH_CACHE_TTL_SECONDS = 900  # 15 minutes
 
 
 # --- Normalizers ------------------------------------------------------------
@@ -151,7 +157,6 @@ def _breadth_sql(
         include_unknown=include_unknown,
     )
 
-    # Trend buckets (as per your definitions)
     bullish_set = "('^+','^-','v^')"
     bearish_set = "('v-','v+','^v')"
     neutral_set = "('--','=')"
@@ -167,24 +172,20 @@ def _breadth_sql(
             SUM(d.trend IN {bearish_set}) AS bearish_count,
             SUM(d.trend IN {neutral_set}) AS neutral_count,
 
-            -- Maturity (trend_cnt) overall and within bullish/bearish
             AVG(d.trend_cnt) AS avg_trend_cnt,
             AVG(CASE WHEN d.trend IN {bullish_set} THEN d.trend_cnt END) AS avg_trend_cnt_bullish,
             AVG(CASE WHEN d.trend IN {bearish_set} THEN d.trend_cnt END) AS avg_trend_cnt_bearish,
             MAX(d.trend_cnt) AS max_trend_cnt,
 
-            -- Major trend maturity (mt_cnt)
             AVG(d.mt_cnt) AS avg_mt_cnt,
             AVG(CASE WHEN d.trend IN {bullish_set} THEN d.mt_cnt END) AS avg_mt_cnt_bullish,
             AVG(CASE WHEN d.trend IN {bearish_set} THEN d.mt_cnt END) AS avg_mt_cnt_bearish,
             MAX(d.mt_cnt) AS max_mt_cnt,
 
-            -- RSI strength
             AVG(d.rsi) AS avg_rsi,
             SUM(d.rsi >= 110) AS rsi_ge_110_count,
             SUM(d.rsi >= 120) AS rsi_ge_120_count,
 
-            -- "Young vs mature" bullish trend_age slices (useful for rotation)
             SUM(d.trend IN {bullish_set} AND d.trend_cnt <= 4) AS young_bullish_count,
             SUM(d.trend IN {bullish_set} AND d.trend_cnt >= 20) AS mature_bullish_count
 
@@ -232,8 +233,35 @@ def _postprocess(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _sort_key_for_level(level: GroupLevel) -> str:
-    # sort by bullish_count desc, then avg_rsi desc (as a tiebreaker)
     return " ORDER BY bullish_count DESC, avg_rsi DESC"
+
+
+def _build_latest_cache_key(
+    *,
+    group_level: GroupLevel,
+    exchange: str | None,
+    weekdate: str | None,
+    cs_only: bool,
+    include_unknown: bool,
+    min_price: float | None,
+    min_volume: int | None,
+    vol_scale: int,
+    limit: int,
+) -> str:
+    return "|".join(
+        [
+            "sector_latest",
+            str(group_level),
+            str(exchange),
+            str(weekdate),
+            str(cs_only),
+            str(include_unknown),
+            str(min_price),
+            str(min_volume),
+            str(vol_scale),
+            str(limit),
+        ]
+    )
 
 
 # --- Endpoints --------------------------------------------------------------
@@ -251,9 +279,30 @@ def breadth_sector_latest(
     vol_scale: int = Query(default=100, description="Legacy volume scaling multiplier used in historical rules."),
     limit: int = Query(default=5000, ge=1, le=50000, description="Safety limit on number of groups returned."),
 ):
-    engine = get_engine()
-
     ex = _norm_exchange(exchange) if exchange else None
+
+    cache_key = _build_latest_cache_key(
+        group_level=group_level,
+        exchange=ex,
+        weekdate=weekdate,
+        cs_only=cs_only,
+        include_unknown=include_unknown,
+        min_price=min_price,
+        min_volume=min_volume,
+        vol_scale=vol_scale,
+        limit=int(limit),
+    )
+
+    now = time.time()
+    cached = _BREADTH_CACHE.get(cache_key)
+    if cached:
+        cached_at, payload = cached
+        if now - cached_at < _BREADTH_CACHE_TTL_SECONDS:
+            response = JSONResponse(content=payload)
+            response.headers["X-Cache"] = "HIT"
+            return response
+
+    engine = get_engine()
 
     wd = weekdate
     if wd is None:
@@ -292,7 +341,7 @@ def breadth_sector_latest(
 
     data = _postprocess([dict(r) for r in rows])
 
-    return {
+    payload = {
         "request_id": request.state.request_id,
         "group_level": group_level,
         "exchange": ex,
@@ -303,6 +352,12 @@ def breadth_sector_latest(
         "data": data,
         "hint": "Use /breadth/sector/history for time series. Defaults are tuned for bot efficiency.",
     }
+
+    _BREADTH_CACHE[cache_key] = (now, payload)
+
+    response = JSONResponse(content=payload)
+    response.headers["X-Cache"] = "MISS"
+    return response
 
 
 @router.get("/sector/history")
@@ -336,7 +391,6 @@ def breadth_sector_history(
         include_unknown=include_unknown,
     )
 
-    # For history, ensure deterministic ordering (weekdate then strength)
     order = " ORDER BY d.weekdate ASC, bullish_count DESC, avg_rsi DESC"
     sql = text(f"{sql_base}{order} LIMIT :limit")
     params["limit"] = int(limit)
