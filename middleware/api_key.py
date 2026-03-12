@@ -54,7 +54,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     def _lookup_api_key(self, supplied: str):
         token_hash = hashlib.sha256(supplied.encode("utf-8")).hexdigest()
 
-        with self.auth_engine.connect() as conn:
+        with self.auth_engine.begin() as conn:
             row = conn.execute(
                 text(
                     """
@@ -72,6 +72,18 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 ),
                 {"key_hash": token_hash},
             ).mappings().first()
+
+            if row and row["status"] == "active" and row["revoked_at"] is None:
+                conn.execute(
+                    text(
+                        """
+                        UPDATE api_keys
+                        SET last_used_at = CURRENT_TIMESTAMP
+                        WHERE id = :id
+                        """
+                    ),
+                    {"id": row["id"]},
+                )
 
         return row
 
