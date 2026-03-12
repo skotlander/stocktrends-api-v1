@@ -18,6 +18,7 @@ import time
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
@@ -296,9 +297,9 @@ def breadth_sector_latest(
     now = time.time()
     cached = _BREADTH_CACHE.get(cache_key)
     if cached:
-        cached_at, payload = cached
+        cached_at, encoded_payload = cached
         if now - cached_at < _BREADTH_CACHE_TTL_SECONDS:
-            response = JSONResponse(content=payload)
+            response = JSONResponse(content=encoded_payload)
             response.headers["X-Cache"] = "HIT"
             return response
 
@@ -353,9 +354,10 @@ def breadth_sector_latest(
         "hint": "Use /breadth/sector/history for time series. Defaults are tuned for bot efficiency.",
     }
 
-    _BREADTH_CACHE[cache_key] = (now, payload)
+    encoded_payload = jsonable_encoder(payload)
+    _BREADTH_CACHE[cache_key] = (now, encoded_payload)
 
-    response = JSONResponse(content=payload)
+    response = JSONResponse(content=encoded_payload)
     response.headers["X-Cache"] = "MISS"
     return response
 
