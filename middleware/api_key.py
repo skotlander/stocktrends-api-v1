@@ -87,6 +87,60 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
         return row
 
+    def _write_request_log(
+        self,
+        request_id: str,
+        api_key_id: str | None,
+        customer_id: str | None,
+        path: str,
+        method: str,
+        status_code: int,
+        response_time_ms: int,
+        auth_mode: str,
+    ):
+        with self.auth_engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO api_request_logs
+                    (
+                        id,
+                        request_id,
+                        api_key_id,
+                        customer_id,
+                        path,
+                        method,
+                        status_code,
+                        response_time_ms,
+                        auth_mode
+                    )
+                    VALUES
+                    (
+                        :id,
+                        :request_id,
+                        :api_key_id,
+                        :customer_id,
+                        :path,
+                        :method,
+                        :status_code,
+                        :response_time_ms,
+                        :auth_mode
+                    )
+                    """
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "request_id": request_id,
+                    "api_key_id": api_key_id,
+                    "customer_id": customer_id,
+                    "path": path,
+                    "method": method,
+                    "status_code": status_code,
+                    "response_time_ms": response_time_ms,
+                    "auth_mode": auth_mode,
+                },
+            )
+
     async def dispatch(self, request: Request, call_next):
         start = time.time()
         request_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
@@ -111,16 +165,32 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             supplied = self._extract_supplied_key(request)
 
             if not supplied:
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=401,
                     content={"detail": "Unauthorized", "request_id": request_id},
                     headers={"X-Request-Id": request_id},
                 )
+                response_time_ms = int((time.time() - start) * 1000)
+                try:
+                    self._write_request_log(
+                        request_id=request_id,
+                        api_key_id=None,
+                        customer_id=None,
+                        path=path,
+                        method=request.method,
+                        status_code=401,
+                        response_time_ms=response_time_ms,
+                        auth_mode="public",
+                    )
+                except Exception:
+                    pass
+                response.headers["X-Response-Time-ms"] = str(response_time_ms)
+                return response
 
             try:
                 row = self._lookup_api_key(supplied)
             except Exception as e:
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=500,
                     content={
                         "detail": f"Auth database error: {str(e)}",
@@ -128,20 +198,68 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                     },
                     headers={"X-Request-Id": request_id},
                 )
+                response_time_ms = int((time.time() - start) * 1000)
+                try:
+                    self._write_request_log(
+                        request_id=request_id,
+                        api_key_id=None,
+                        customer_id=None,
+                        path=path,
+                        method=request.method,
+                        status_code=500,
+                        response_time_ms=response_time_ms,
+                        auth_mode="public",
+                    )
+                except Exception:
+                    pass
+                response.headers["X-Response-Time-ms"] = str(response_time_ms)
+                return response
 
             if not row:
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=401,
                     content={"detail": "Invalid API key", "request_id": request_id},
                     headers={"X-Request-Id": request_id},
                 )
+                response_time_ms = int((time.time() - start) * 1000)
+                try:
+                    self._write_request_log(
+                        request_id=request_id,
+                        api_key_id=None,
+                        customer_id=None,
+                        path=path,
+                        method=request.method,
+                        status_code=401,
+                        response_time_ms=response_time_ms,
+                        auth_mode="public",
+                    )
+                except Exception:
+                    pass
+                response.headers["X-Response-Time-ms"] = str(response_time_ms)
+                return response
 
             if row["status"] != "active" or row["revoked_at"] is not None:
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=403,
                     content={"detail": "API key inactive", "request_id": request_id},
                     headers={"X-Request-Id": request_id},
                 )
+                response_time_ms = int((time.time() - start) * 1000)
+                try:
+                    self._write_request_log(
+                        request_id=request_id,
+                        api_key_id=row["id"],
+                        customer_id=row["customer_id"],
+                        path=path,
+                        method=request.method,
+                        status_code=403,
+                        response_time_ms=response_time_ms,
+                        auth_mode="api_key",
+                    )
+                except Exception:
+                    pass
+                response.headers["X-Response-Time-ms"] = str(response_time_ms)
+                return response
 
             request.state.auth_mode = "api_key"
             request.state.api_key_id = row["id"]
@@ -152,6 +270,23 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             request.state.auth_mode = "free_metered"
 
         response = await call_next(request)
+        response_time_ms = int((time.time() - start) * 1000)
+
         response.headers["X-Request-Id"] = request_id
-        response.headers["X-Response-Time-ms"] = str(int((time.time() - start) * 1000))
+        response.headers["X-Response-Time-ms"] = str(response_time_ms)
+
+        try:
+            self._write_request_log(
+                request_id=request_id,
+                api_key_id=request.state.api_key_id,
+                customer_id=request.state.customer_id,
+                path=path,
+                method=request.method,
+                status_code=response.status_code,
+                response_time_ms=response_time_ms,
+                auth_mode=request.state.auth_mode,
+            )
+        except Exception:
+            pass
+
         return response
