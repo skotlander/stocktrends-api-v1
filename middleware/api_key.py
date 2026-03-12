@@ -439,7 +439,10 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 response_time_ms=response_time_ms,
                 auth_mode=request.state.auth_mode,
             )
-        except Exception:
-            pass
+        
+        
+        except Exception as e:
+            import logging
+            logging.exception("API request logging failed")
 
         return response
