@@ -11,15 +11,13 @@
 # Notes:
 # - Defaults to CS-only because ETFs duplicate underlying breadth.
 # - Volume in st_data is legacy-scaled in your rules (volume * 100); keep vol_scale knob.
+# - Caching for /v1/breadth/sector/latest is handled at nginx, not in app memory.
 
 from __future__ import annotations
 
-import time
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from db import get_engine
@@ -28,10 +26,6 @@ from routers.signals import VALID_EXCHANGES
 router = APIRouter(prefix="/breadth", tags=["breadth"])
 
 GroupLevel = Literal["sector", "industry_group", "industry"]
-
-# Simple per-process cache for latest breadth endpoint
-_BREADTH_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-_BREADTH_CACHE_TTL_SECONDS = 900  # 15 minutes
 
 
 # --- Normalizers ------------------------------------------------------------
@@ -237,34 +231,6 @@ def _sort_key_for_level(level: GroupLevel) -> str:
     return " ORDER BY bullish_count DESC, avg_rsi DESC"
 
 
-def _build_latest_cache_key(
-    *,
-    group_level: GroupLevel,
-    exchange: str | None,
-    weekdate: str | None,
-    cs_only: bool,
-    include_unknown: bool,
-    min_price: float | None,
-    min_volume: int | None,
-    vol_scale: int,
-    limit: int,
-) -> str:
-    return "|".join(
-        [
-            "sector_latest",
-            str(group_level),
-            str(exchange),
-            str(weekdate),
-            str(cs_only),
-            str(include_unknown),
-            str(min_price),
-            str(min_volume),
-            str(vol_scale),
-            str(limit),
-        ]
-    )
-
-
 # --- Endpoints --------------------------------------------------------------
 
 @router.get("/sector/latest")
@@ -280,30 +246,9 @@ def breadth_sector_latest(
     vol_scale: int = Query(default=100, description="Legacy volume scaling multiplier used in historical rules."),
     limit: int = Query(default=5000, ge=1, le=50000, description="Safety limit on number of groups returned."),
 ):
-    ex = _norm_exchange(exchange) if exchange else None
-
-    cache_key = _build_latest_cache_key(
-        group_level=group_level,
-        exchange=ex,
-        weekdate=weekdate,
-        cs_only=cs_only,
-        include_unknown=include_unknown,
-        min_price=min_price,
-        min_volume=min_volume,
-        vol_scale=vol_scale,
-        limit=int(limit),
-    )
-
-    now = time.time()
-    cached = _BREADTH_CACHE.get(cache_key)
-    if cached:
-        cached_at, encoded_payload = cached
-        if now - cached_at < _BREADTH_CACHE_TTL_SECONDS:
-            response = JSONResponse(content=encoded_payload)
-            response.headers["X-Cache"] = "HIT"
-            return response
-
     engine = get_engine()
+
+    ex = _norm_exchange(exchange) if exchange else None
 
     wd = weekdate
     if wd is None:
@@ -342,7 +287,7 @@ def breadth_sector_latest(
 
     data = _postprocess([dict(r) for r in rows])
 
-    payload = {
+    return {
         "request_id": request.state.request_id,
         "group_level": group_level,
         "exchange": ex,
@@ -353,13 +298,6 @@ def breadth_sector_latest(
         "data": data,
         "hint": "Use /breadth/sector/history for time series. Defaults are tuned for bot efficiency.",
     }
-
-    encoded_payload = jsonable_encoder(payload)
-    _BREADTH_CACHE[cache_key] = (now, encoded_payload)
-
-    response = JSONResponse(content=encoded_payload)
-    response.headers["X-Cache"] = "MISS"
-    return response
 
 
 @router.get("/sector/history")
