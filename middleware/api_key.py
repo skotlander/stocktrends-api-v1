@@ -92,6 +92,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         request_id: str,
         api_key_id: str | None,
         customer_id: str | None,
+        client_ip: str | None,
         path: str,
         method: str,
         status_code: int,
@@ -108,6 +109,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         request_id,
                         api_key_id,
                         customer_id,
+                        client_ip,
                         path,
                         method,
                         status_code,
@@ -120,6 +122,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         :request_id,
                         :api_key_id,
                         :customer_id,
+                        :client_ip,
                         :path,
                         :method,
                         :status_code,
@@ -133,6 +136,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                     "request_id": request_id,
                     "api_key_id": api_key_id,
                     "customer_id": customer_id,
+                    "client_ip": client_ip,
                     "path": path,
                     "method": method,
                     "status_code": status_code,
@@ -141,9 +145,63 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 },
             )
 
+    def _is_rate_limited(
+        self,
+        identifier: str | None,
+        auth_mode: str,
+        path: str,
+    ):
+        if path == "/health":
+            return False, None
+
+        if auth_mode == "api_key":
+            if not identifier:
+                return False, None
+            limit = 300
+            sql = """
+                SELECT COUNT(*) AS request_count
+                FROM api_request_logs
+                WHERE created_at >= (CURRENT_TIMESTAMP - INTERVAL 1 MINUTE)
+                  AND api_key_id = :identifier
+            """
+            params = {"identifier": identifier}
+
+        elif auth_mode == "free_metered":
+            if not identifier:
+                return False, None
+            limit = 20 if path == "/v1/breadth/sector/latest" else 60
+            sql = """
+                SELECT COUNT(*) AS request_count
+                FROM api_request_logs
+                WHERE created_at >= (CURRENT_TIMESTAMP - INTERVAL 1 MINUTE)
+                  AND client_ip = :identifier
+                  AND path = :path
+            """
+            params = {"identifier": identifier, "path": path}
+
+        else:
+            if not identifier:
+                return False, None
+            limit = 60
+            sql = """
+                SELECT COUNT(*) AS request_count
+                FROM api_request_logs
+                WHERE created_at >= (CURRENT_TIMESTAMP - INTERVAL 1 MINUTE)
+                  AND client_ip = :identifier
+                  AND path = :path
+            """
+            params = {"identifier": identifier, "path": path}
+
+        with self.auth_engine.connect() as conn:
+            row = conn.execute(text(sql), params).mappings().first()
+
+        request_count = row["request_count"] if row else 0
+        return request_count >= limit, limit
+
     async def dispatch(self, request: Request, call_next):
         start = time.time()
         request_id = request.headers.get("X-Request-Id") or str(uuid.uuid4())
+        client_ip = request.client.host if request.client else None
 
         request.state.request_id = request_id
         request.state.auth_mode = "public"
@@ -176,6 +234,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         request_id=request_id,
                         api_key_id=None,
                         customer_id=None,
+                        client_ip=client_ip,
                         path=path,
                         method=request.method,
                         status_code=401,
@@ -204,6 +263,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         request_id=request_id,
                         api_key_id=None,
                         customer_id=None,
+                        client_ip=client_ip,
                         path=path,
                         method=request.method,
                         status_code=500,
@@ -227,6 +287,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         request_id=request_id,
                         api_key_id=None,
                         customer_id=None,
+                        client_ip=client_ip,
                         path=path,
                         method=request.method,
                         status_code=401,
@@ -250,6 +311,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         request_id=request_id,
                         api_key_id=row["id"],
                         customer_id=row["customer_id"],
+                        client_ip=client_ip,
                         path=path,
                         method=request.method,
                         status_code=403,
@@ -266,8 +328,98 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             request.state.customer_id = row["customer_id"]
             request.state.subscription_id = row["subscription_id"]
 
+            limited, _ = self._is_rate_limited(
+                identifier=request.state.api_key_id,
+                auth_mode="api_key",
+                path=path,
+            )
+            if limited:
+                response = JSONResponse(
+                    status_code=429,
+                    content={"detail": "Rate limit exceeded", "request_id": request_id},
+                    headers={"X-Request-Id": request_id},
+                )
+                response_time_ms = int((time.time() - start) * 1000)
+                try:
+                    self._write_request_log(
+                        request_id=request_id,
+                        api_key_id=request.state.api_key_id,
+                        customer_id=request.state.customer_id,
+                        client_ip=client_ip,
+                        path=path,
+                        method=request.method,
+                        status_code=429,
+                        response_time_ms=response_time_ms,
+                        auth_mode="api_key",
+                    )
+                except Exception:
+                    pass
+                response.headers["X-Response-Time-ms"] = str(response_time_ms)
+                return response
+
         elif is_free_metered:
             request.state.auth_mode = "free_metered"
+
+            limited, _ = self._is_rate_limited(
+                identifier=client_ip,
+                auth_mode="free_metered",
+                path=path,
+            )
+            if limited:
+                response = JSONResponse(
+                    status_code=429,
+                    content={"detail": "Rate limit exceeded", "request_id": request_id},
+                    headers={"X-Request-Id": request_id},
+                )
+                response_time_ms = int((time.time() - start) * 1000)
+                try:
+                    self._write_request_log(
+                        request_id=request_id,
+                        api_key_id=None,
+                        customer_id=None,
+                        client_ip=client_ip,
+                        path=path,
+                        method=request.method,
+                        status_code=429,
+                        response_time_ms=response_time_ms,
+                        auth_mode="free_metered",
+                    )
+                except Exception:
+                    pass
+                response.headers["X-Response-Time-ms"] = str(response_time_ms)
+                return response
+
+        elif is_public:
+            request.state.auth_mode = "public"
+
+            limited, _ = self._is_rate_limited(
+                identifier=client_ip,
+                auth_mode="public",
+                path=path,
+            )
+            if limited:
+                response = JSONResponse(
+                    status_code=429,
+                    content={"detail": "Rate limit exceeded", "request_id": request_id},
+                    headers={"X-Request-Id": request_id},
+                )
+                response_time_ms = int((time.time() - start) * 1000)
+                try:
+                    self._write_request_log(
+                        request_id=request_id,
+                        api_key_id=None,
+                        customer_id=None,
+                        client_ip=client_ip,
+                        path=path,
+                        method=request.method,
+                        status_code=429,
+                        response_time_ms=response_time_ms,
+                        auth_mode="public",
+                    )
+                except Exception:
+                    pass
+                response.headers["X-Response-Time-ms"] = str(response_time_ms)
+                return response
 
         response = await call_next(request)
         response_time_ms = int((time.time() - start) * 1000)
@@ -280,6 +432,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 request_id=request_id,
                 api_key_id=request.state.api_key_id,
                 customer_id=request.state.customer_id,
+                client_ip=client_ip,
                 path=path,
                 method=request.method,
                 status_code=response.status_code,
