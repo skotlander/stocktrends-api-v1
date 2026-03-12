@@ -3,8 +3,7 @@
 from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import text
 from db import get_market_engine
-from api.auth.api_key import get_api_key
-from fastapi import Depends
+
 
 router = APIRouter(prefix="/instruments", tags=["instruments"])
 
@@ -28,7 +27,6 @@ def _norm_exchange(ex: str) -> str:
 @router.get("/lookup")
 def instrument_lookup(
     request: Request,
-    api_key: str = Depends(get_api_key),
     symbol: str = Query(..., description="Ticker symbol, e.g. ABC"),
     cs_only: bool = Query(default=True, description="Filter to Common Stocks only (type='CS')"),
     limit: int = Query(default=50, ge=1, le=500, description="Safety limit"),
