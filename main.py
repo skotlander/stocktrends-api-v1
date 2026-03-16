@@ -1,6 +1,7 @@
 # main.py
 import logging
 from fastapi import FastAPI
+from fastapi.openapi.utils import get_openapi
 
 from middleware.request_id import RequestIdMiddleware
 from middleware.api_key import ApiKeyMiddleware
@@ -20,15 +21,99 @@ from routers.ai import router as ai_router
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="Stock Trends API", version="1.0.0")
+APP_TITLE = "Stock Trends API"
+APP_VERSION = "1.0.0"
+
+FREE_METERED_V1_PATHS = {
+    "/ai/context",
+    "/breadth/sector/latest",
+}
+
+
+def is_protected_v1_path(path: str) -> bool:
+    """
+    In the live middleware, most /v1/* paths are protected except:
+    - public/static/docs/openapi paths
+    - specific free-metered endpoints
+
+    Since this schema is for the mounted /v1 app, its paths do not include
+    the /v1 prefix. So we only need to exempt the known free-metered routes.
+    """
+    return path not in FREE_METERED_V1_PATHS
+
+
+def apply_api_key_security_to_openapi(v1_app: FastAPI) -> dict:
+    if v1_app.openapi_schema:
+        return v1_app.openapi_schema
+
+    openapi_schema = get_openapi(
+        title=f"{APP_TITLE} v1",
+        version=APP_VERSION,
+        description=(
+            "Stock Trends API v1.\n\n"
+            "Most `/v1/*` endpoints require authentication.\n\n"
+            "Use the **Authorize** button and provide either:\n"
+            "- `X-API-Key` header, or\n"
+            "- `Authorization: Bearer <API_KEY>`\n\n"
+            "Public / free-metered endpoints remain callable without a key."
+        ),
+        routes=v1_app.routes,
+    )
+
+    components = openapi_schema.setdefault("components", {})
+    security_schemes = components.setdefault("securitySchemes", {})
+
+    security_schemes["ApiKeyAuth"] = {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Paste your Stock Trends API key. It will be sent as the `X-API-Key` header.",
+    }
+
+    security_schemes["BearerAuth"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "API Key",
+        "description": "Alternative format: `Authorization: Bearer <API_KEY>`",
+    }
+
+    for path, path_item in openapi_schema.get("paths", {}).items():
+        protected = is_protected_v1_path(path)
+
+        for method, operation in path_item.items():
+            if method not in {"get", "post", "put", "patch", "delete", "options", "head"}:
+                continue
+
+            if protected:
+                operation["security"] = [
+                    {"ApiKeyAuth": []},
+                    {"BearerAuth": []},
+                ]
+            else:
+                operation["security"] = []
+
+    v1_app.openapi_schema = openapi_schema
+    return v1_app.openapi_schema
+
+
+app = FastAPI(
+    title=APP_TITLE,
+    version=APP_VERSION,
+)
 
 # Middleware order matters
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(ApiKeyMiddleware)
 app.add_middleware(RequestLoggerMiddleware)
 
-# Versioned API
-v1 = FastAPI(title="Stock Trends API v1", version="1.0.0")
+# Versioned API sub-application
+v1 = FastAPI(
+    title=f"{APP_TITLE} v1",
+    version=APP_VERSION,
+    docs_url="/docs",
+    openapi_url="/openapi.json",
+)
+
 v1.include_router(instruments_router)
 v1.include_router(prices_router)
 v1.include_router(indicators_router)
@@ -41,7 +126,10 @@ v1.include_router(breadth_router)
 v1.include_router(leadership_router)
 v1.include_router(ai_router)
 
+v1.openapi = lambda: apply_api_key_security_to_openapi(v1)
+
 app.mount("/v1", v1)
+
 
 @app.get("/health")
 def health():
