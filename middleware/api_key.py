@@ -175,17 +175,28 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         # Fallback
         return await call_next(request)
 
+
+
     def is_plan_allowed(self, path: str, plan_code: str) -> bool:
-        """
-        Define which plans can access which endpoints.
-        Start simple and expand later.
-        """
+        sandbox_plus = {"sandbox", "research", "pro", "enterprise"}
+        research_plus = {"research", "pro", "enterprise"}
+        pro_plus = {"pro", "enterprise"}
+        enterprise_only = {"enterprise"}
 
-        # Example rules (adjust as needed):
-
-        # Premium-only endpoint
+        # Research and above
         if path.startswith("/v1/stim"):
-            return plan_code in {"pro", "premium", "internal", "sandbox"}
+            return plan_code in research_plus
 
-        # Default: allow all plans
+        # Pro and above
+        if path.startswith("/v1/advanced") or path.startswith("/v1/batch"):
+            return plan_code in pro_plus
+
+        # Enterprise only
+        if path.startswith("/v1/bulk"):
+            return plan_code in enterprise_only
+
+        # Default protected /v1 endpoints: any paid plan
+        if path.startswith("/v1/"):
+            return plan_code in sandbox_plus
+
         return True
