@@ -40,6 +40,7 @@ def _mast_select(include_mast: bool) -> str:
         ,
         m.name AS mast_name,
         m.shortname AS mast_shortname,
+        m.type,
         m.gm_industry_id,
         m.x_sector_name,
         m.x_industry_group_name,
