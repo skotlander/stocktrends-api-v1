@@ -1,10 +1,10 @@
 import hashlib
-import time
 from typing import Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from sqlalchemy import text
 
 from db import get_auth_engine
 
@@ -17,12 +17,10 @@ def hash_api_key(raw_key: str) -> str:
 
 
 def extract_api_key(request: Request) -> Optional[str]:
-    # Primary: X-API-Key
     api_key = request.headers.get("x-api-key")
     if api_key:
         return api_key.strip()
 
-    # Fallback: Authorization Bearer
     auth = request.headers.get("authorization")
     if auth and auth.lower().startswith("bearer "):
         return auth[7:].strip()
@@ -34,7 +32,6 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     def __init__(self, app):
         super().__init__(app)
 
-        # Public endpoints
         self.public_paths = {
             "/",
             "/index.html",
@@ -55,7 +52,6 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/.well-known/",
         ]
 
-        # Free-tier endpoints (no key required, but metered)
         self.free_metered_paths = {
             "/v1/ai/context",
             "/v1/breadth/sector/latest",
@@ -64,18 +60,17 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # --- Public routes ---
-        if path in self.public_paths or any(path.startswith(p) for p in self.public_prefixes):
+        # Public routes
+        if path in self.public_paths or any(path.startswith(prefix) for prefix in self.public_prefixes):
             return await call_next(request)
 
-        # --- Free metered routes ---
+        # Free-metered routes
         if path in self.free_metered_paths:
             return await call_next(request)
 
-        # --- Protected routes ---
+        # Protected API routes
         if path.startswith("/v1/"):
             raw_key = extract_api_key(request)
-
             if not raw_key:
                 return JSONResponse(
                     {"detail": "Missing API key"},
@@ -83,28 +78,31 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 )
 
             key_hash = hash_api_key(raw_key)
-
             engine = get_auth_engine()
 
-            with engine.connect() as conn:
+            with engine.begin() as conn:
                 result = conn.execute(
-                    """
-                    SELECT 
-                        k.id,
-                        k.customer_id,
-                        k.subscription_id,
-                        k.status,
-                        k.revoked_at,
-                        s.status AS subscription_status,
-                        p.code AS plan_code,
-                        p.active AS plan_active
-                    FROM api_keys k
-                    LEFT JOIN api_subscriptions s ON k.subscription_id = s.id
-                    LEFT JOIN api_plans p ON s.plan_id = p.id
-                    WHERE k.key_hash = %s
-                    LIMIT 1
-                    """,
-                    (key_hash,),
+                    text(
+                        """
+                        SELECT
+                            k.id,
+                            k.customer_id,
+                            k.subscription_id,
+                            k.status,
+                            k.revoked_at,
+                            s.status AS subscription_status,
+                            p.code AS plan_code,
+                            p.active AS plan_active
+                        FROM api_keys k
+                        LEFT JOIN api_subscriptions s
+                            ON k.subscription_id = s.id
+                        LEFT JOIN api_plans p
+                            ON s.plan_id = p.id
+                        WHERE k.key_hash = :key_hash
+                        LIMIT 1
+                        """
+                    ),
+                    {"key_hash": key_hash},
                 ).fetchone()
 
                 if not result:
@@ -113,25 +111,23 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         status_code=401,
                     )
 
-                (
-                    key_id,
-                    customer_id,
-                    subscription_id,
-                    key_status,
-                    revoked_at,
-                    subscription_status,
-                    plan_code,
-                    plan_active,
-                ) = result
+                key_id = result[0]
+                customer_id = result[1]
+                subscription_id = result[2]
+                key_status = result[3]
+                revoked_at = result[4]
+                subscription_status = result[5]
+                plan_code = result[6]
+                plan_active = result[7]
 
-                # --- Key validation ---
+                # Key validation
                 if key_status != "active" or revoked_at is not None:
                     return JSONResponse(
                         {"detail": "API key inactive"},
                         status_code=403,
                     )
 
-                # --- Subscription validation ---
+                # Subscription validation
                 if not subscription_id:
                     return JSONResponse(
                         {"detail": "No subscription linked to API key"},
@@ -144,38 +140,47 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         status_code=403,
                     )
 
-                # --- Plan validation ---
+                # Plan validation
+                if not plan_code:
+                    return JSONResponse(
+                        {"detail": "No plan linked to subscription"},
+                        status_code=403,
+                    )
+
                 if not plan_active:
                     return JSONResponse(
                         {"detail": "Plan is inactive"},
                         status_code=403,
                     )
 
-                # --- OPTIONAL: Plan-based route restrictions ---
+                # Plan-based route gating
                 if not self.is_plan_allowed(path, plan_code):
                     return JSONResponse(
                         {"detail": f"Plan '{plan_code}' does not allow this endpoint"},
                         status_code=403,
                     )
 
-                # --- Update last_used_at ---
+                # Update last_used_at
                 conn.execute(
-                    """
-                    UPDATE api_keys
-                    SET last_used_at = NOW()
-                    WHERE id = %s
-                    """,
-                    (key_id,),
+                    text(
+                        """
+                        UPDATE api_keys
+                        SET last_used_at = NOW()
+                        WHERE id = :key_id
+                        """
+                    ),
+                    {"key_id": key_id},
                 )
 
-            # Continue request
-            response = await call_next(request)
-            return response
+                # Optional request context for downstream use
+                request.state.api_key_id = key_id
+                request.state.customer_id = customer_id
+                request.state.subscription_id = subscription_id
+                request.state.plan_code = plan_code
 
-        # Fallback
+            return await call_next(request)
+
         return await call_next(request)
-
-
 
     def is_plan_allowed(self, path: str, plan_code: str) -> bool:
         sandbox_plus = {"sandbox", "research", "pro", "enterprise"}
@@ -184,7 +189,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         enterprise_only = {"enterprise"}
 
         # Research and above
-        if path.startswith("/v1/stim"):
+        if path.startswith("/v1/selections"):
             return plan_code in research_plus
 
         # Pro and above
@@ -195,7 +200,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         if path.startswith("/v1/bulk"):
             return plan_code in enterprise_only
 
-        # Default protected /v1 endpoints: any paid plan
+        # Default protected /v1 endpoints
         if path.startswith("/v1/"):
             return plan_code in sandbox_plus
 
