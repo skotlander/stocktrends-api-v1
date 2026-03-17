@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import text
-from db import get_engine
 
+from db import get_engine
 from routers.signals import VALID_EXCHANGES
 
 router = APIRouter(prefix="/selections", tags=["selections"])
@@ -25,6 +27,34 @@ def _norm_exchange(ex: str) -> str:
     return ex
 
 
+def _mast_select(include_mast: bool) -> str:
+    if not include_mast:
+        return ""
+
+    return """
+        ,
+        m.name AS mast_name,
+        m.shortname AS mast_shortname,
+        m.gm_industry_id,
+        m.x_sector_name,
+        m.x_industry_group_name,
+        m.x_industry_name,
+        m.website,
+        m.location
+    """
+
+
+def _mast_join(include_mast: bool) -> str:
+    if not include_mast:
+        return ""
+
+    return """
+        LEFT JOIN st_mast m
+          ON m.exchange = s.exchange
+         AND m.symbol = s.symbol
+    """
+
+
 @router.get("/latest")
 def selections_latest(
     request: Request,
@@ -32,6 +62,7 @@ def selections_latest(
     min_prob13wk: float | None = Query(default=None, description="Optional minimum prob13wk threshold"),
     limit: int = Query(default=2000, ge=1, le=20000, description="Safety limit"),
     include_data: bool = Query(default=False, description="Join st_data for context fields"),
+    include_mast: bool = Query(default=False, description="Join st_mast for sector/industry and metadata fields"),
     cs_only: bool = Query(default=True, description="When include_data=true, filter st_data to CS"),
 ):
     """
@@ -40,7 +71,6 @@ def selections_latest(
     ex = _norm_exchange(exchange) if exchange else None
     engine = get_engine()
 
-    # 1) Find most recent weekdate available in st_select
     sql_latest_week = text("SELECT MAX(weekdate) AS weekdate FROM st_select")
 
     try:
@@ -63,7 +93,7 @@ def selections_latest(
             detail={"request_id": request.state.request_id, "error": "no_selection_data"},
         )
 
-    params: dict = {"weekdate": latest_week, "limit": limit}
+    params: dict[str, Any] = {"weekdate": latest_week, "limit": limit}
     where = "WHERE s.weekdate = :weekdate"
 
     if ex:
@@ -81,13 +111,14 @@ def selections_latest(
                 s.exchange,
                 s.symbol,
                 s.prob13wk
+                {_mast_select(include_mast)}
             FROM st_select s
+            {_mast_join(include_mast)}
             {where}
             ORDER BY s.prob13wk DESC
             LIMIT :limit
         """)
     else:
-        # Join st_data for context (name, type, trend, rsi, etc.) on the same weekdate
         sql = text(f"""
             SELECT
                 s.weekdate,
@@ -109,12 +140,14 @@ def selections_latest(
                 d.adj_close,
                 d.pr_change,
                 d.pr_chg13
+                {_mast_select(include_mast)}
             FROM st_select s
             LEFT JOIN st_data d
               ON d.weekdate = s.weekdate
              AND d.exchange = s.exchange
              AND d.symbol = s.symbol
              AND (:cs_only = 0 OR d.type = 'CS')
+            {_mast_join(include_mast)}
             {where}
             ORDER BY s.prob13wk DESC
             LIMIT :limit
@@ -144,6 +177,7 @@ def selections_latest(
         "exchange": ex,
         "min_prob13wk": min_prob13wk,
         "include_data": include_data,
+        "include_mast": include_mast,
         "cs_only": (cs_only if include_data else None),
         "count": len(data),
         "data": data,
@@ -153,19 +187,15 @@ def selections_latest(
 @router.get("/history")
 def selections_history(
     request: Request,
-    # Instrument targeting (optional)
     symbol_exchange: str | None = Query(default=None, description="e.g., IBM-N"),
     symbol: str | None = Query(default=None, description="e.g., IBM"),
-    # Exchange is now a true optional FILTER (works with or without symbol)
     exchange: str | None = Query(default=None, description="Optional exchange filter: N,Q,A,B,T,I"),
-    # Date filters (optional)
     start: str | None = Query(default=None, description="Start date YYYY-MM-DD (inclusive)"),
     end: str | None = Query(default=None, description="End date YYYY-MM-DD (inclusive)"),
-    # Prob filter (optional)
     min_prob13wk: float | None = Query(default=None, description="Optional minimum prob13wk threshold"),
-    # Output controls
     limit: int = Query(default=520, ge=1, le=5200, description="Safety limit"),
     include_data: bool = Query(default=False, description="Join st_data for context fields"),
+    include_mast: bool = Query(default=False, description="Join st_mast for sector/industry and metadata fields"),
     cs_only: bool = Query(default=True, description="When include_data=true, filter st_data to CS"),
 ):
     """
@@ -183,7 +213,6 @@ def selections_history(
     s = None
     ex = None
 
-    # Resolve explicit symbol_exchange first (strongest)
     if symbol_exchange:
         if "-" not in symbol_exchange:
             raise HTTPException(
@@ -198,15 +227,13 @@ def selections_history(
         s = _norm_symbol(s_part)
         ex = _norm_exchange(ex_part)
 
-    # If symbol provided, normalize it (exchange becomes optional filter)
     elif symbol:
         s = _norm_symbol(symbol)
 
-    # If exchange provided as a filter (even without symbol), normalize it
     if exchange:
         ex = _norm_exchange(exchange)
 
-    params: dict = {"limit": limit}
+    params: dict[str, Any] = {"limit": limit}
     where = "WHERE 1=1"
 
     if s:
@@ -236,7 +263,9 @@ def selections_history(
                 s.exchange,
                 s.symbol,
                 s.prob13wk
+                {_mast_select(include_mast)}
             FROM st_select s
+            {_mast_join(include_mast)}
             {where}
             ORDER BY s.weekdate DESC, s.prob13wk DESC
             LIMIT :limit
@@ -263,12 +292,14 @@ def selections_history(
                 d.adj_close,
                 d.pr_change,
                 d.pr_chg13
+                {_mast_select(include_mast)}
             FROM st_select s
             LEFT JOIN st_data d
               ON d.weekdate = s.weekdate
              AND d.exchange = s.exchange
              AND d.symbol = s.symbol
              AND (:cs_only = 0 OR d.type = 'CS')
+            {_mast_join(include_mast)}
             {where}
             ORDER BY s.weekdate DESC, s.prob13wk DESC
             LIMIT :limit
@@ -292,7 +323,6 @@ def selections_history(
     for d in data_desc:
         d["symbol_exchange"] = f'{d["symbol"]}-{d["exchange"]}'
 
-    # If it's clearly a single instrument (symbol+exchange), return ascending for charting
     if s and ex:
         data = list(reversed(data_desc))
     else:
@@ -307,6 +337,7 @@ def selections_history(
         "end": end,
         "min_prob13wk": min_prob13wk,
         "include_data": include_data,
+        "include_mast": include_mast,
         "cs_only": (cs_only if include_data else None),
         "count": len(data),
         "data": data,
