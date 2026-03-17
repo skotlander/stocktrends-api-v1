@@ -172,7 +172,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                     {"key_id": key_id},
                 )
 
-                # Optional request context for downstream use
+                # Downstream request context
                 request.state.api_key_id = key_id
                 request.state.customer_id = customer_id
                 request.state.subscription_id = subscription_id
@@ -185,22 +185,12 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     def is_plan_allowed(self, path: str, plan_code: str) -> bool:
         sandbox_plus = {"sandbox", "research", "pro", "enterprise"}
         research_plus = {"research", "pro", "enterprise"}
-        pro_plus = {"pro", "enterprise"}
-        enterprise_only = {"enterprise"}
 
-        # Research and above
-        if path.startswith("/v1/selections"):
+        # STIM endpoints require Research or above
+        if path.startswith("/v1/stim"):
             return plan_code in research_plus
 
-        # Pro and above
-        if path.startswith("/v1/advanced") or path.startswith("/v1/batch"):
-            return plan_code in pro_plus
-
-        # Enterprise only
-        if path.startswith("/v1/bulk"):
-            return plan_code in enterprise_only
-
-        # Default protected /v1 endpoints
+        # Default protected /v1 endpoints: any paid plan
         if path.startswith("/v1/"):
             return plan_code in sandbox_plus
 
