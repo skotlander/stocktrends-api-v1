@@ -26,18 +26,24 @@ def get_api_key(
             row = conn.execute(
                 text("""
                     SELECT
-                        id,
-                        customer_id,
-                        plan_code,
-                        active
-                    FROM api_keys
-                    WHERE api_key_hash = :api_key_hash
+                        k.id,
+                        k.customer_id,
+                        k.status,
+                        s.status AS subscription_status,
+                        p.code AS plan_code
+                    FROM api_keys k
+                    LEFT JOIN api_subscriptions s
+                        ON k.subscription_id = s.id
+                    LEFT JOIN api_plans p
+                        ON s.plan_id = p.id
+                    WHERE k.key_hash = :key_hash
                     LIMIT 1
                 """),
-                {"api_key_hash": token_hash},
+                {"key_hash": token_hash},
             ).mappings().first()
 
             if row:
+                # update last_used_at
                 conn.execute(
                     text("""
                         UPDATE api_keys
@@ -57,8 +63,11 @@ def get_api_key(
     if not row:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    if not row["active"]:
-        raise HTTPException(status_code=403, detail="API key inactive")
+    if row["status"] != "active":
+        raise HTTPException(status_code=403, detail="API key revoked")
+
+    if row["subscription_status"] not in ("active", "trialing"):
+        raise HTTPException(status_code=403, detail="Subscription inactive")
 
     return {
         "api_key_id": row["id"],
