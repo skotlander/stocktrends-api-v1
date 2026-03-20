@@ -27,12 +27,12 @@ def get_market_engine():
 
     url = _build_mysql_url(user, password, host, port, db_name)
     return create_engine(
-    url,
-    pool_pre_ping=True,
-    connect_args={
-        "connection_timeout": 5,
-    },
-)
+        url,
+        pool_pre_ping=True,
+        connect_args={
+            "connection_timeout": 5,
+        },
+    )
 
 
 def get_auth_engine():
@@ -47,12 +47,32 @@ def get_auth_engine():
 
     url = _build_mysql_url(user, password, host, port, db_name)
     return create_engine(
-    url,
-    pool_pre_ping=True,
-    connect_args={
-        "connection_timeout": 5,
-    },
-)
+        url,
+        pool_pre_ping=True,
+        connect_args={
+            "connection_timeout": 5,
+        },
+    )
+
+
+def get_metering_engine():
+    user = os.getenv("METERING_DB_USER")
+    password = os.getenv("METERING_DB_PASSWORD")
+    host = os.getenv("METERING_DB_HOST")
+    port = int(os.getenv("METERING_DB_PORT", 3306))
+    db_name = os.getenv("METERING_DB_NAME")
+
+    if not all([user, password, host, db_name]):
+        raise RuntimeError("Metering DB environment variables are not fully configured.")
+
+    url = _build_mysql_url(user, password, host, port, db_name)
+    return create_engine(
+        url,
+        pool_pre_ping=True,
+        connect_args={
+            "connection_timeout": 5,
+        },
+    )
 
 
 # backward-compat helper for older routes not yet refactored
