@@ -1,4 +1,5 @@
 import hashlib
+from types import SimpleNamespace
 from typing import Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -60,12 +61,17 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
+        # Default request auth context
+        request.state.auth_mode = "public"
+        request.state.actor_type = "unknown"
+
         # Public routes
         if path in self.public_paths or any(path.startswith(prefix) for prefix in self.public_prefixes):
             return await call_next(request)
 
         # Free-metered routes
         if path in self.free_metered_paths:
+            request.state.auth_mode = "free_metered"
             return await call_next(request)
 
         # Protected API routes
@@ -177,6 +183,15 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 request.state.customer_id = customer_id
                 request.state.subscription_id = subscription_id
                 request.state.plan_code = plan_code
+                request.state.auth_mode = "api_key"
+                request.state.actor_type = "external_customer"
+                request.state.auth_context = SimpleNamespace(
+                    api_key_id=key_id,
+                    customer_id=customer_id,
+                    subscription_id=subscription_id,
+                    plan_code=plan_code,
+                    actor_type="external_customer",
+                )
 
             return await call_next(request)
 

@@ -6,6 +6,7 @@ from fastapi.openapi.utils import get_openapi
 from middleware.request_id import RequestIdMiddleware
 from middleware.api_key import ApiKeyMiddleware
 from middleware.request_logger import RequestLoggerMiddleware
+from middleware.metering import MeteringMiddleware
 
 from routers.instruments import router as instruments_router
 from routers.prices import router as prices_router
@@ -18,6 +19,7 @@ from routers.meta import router as meta_router
 from routers.breadth import router as breadth_router
 from routers.leadership import router as leadership_router
 from routers.ai import router as ai_router
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -104,6 +106,7 @@ app = FastAPI(
 # Middleware order matters
 app.add_middleware(RequestIdMiddleware)
 app.add_middleware(ApiKeyMiddleware)
+app.add_middleware(MeteringMiddleware)
 app.add_middleware(RequestLoggerMiddleware)
 
 # Versioned API sub-application
