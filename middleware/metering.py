@@ -96,7 +96,6 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         method = request.method
         query_string = request.url.query or None
-        request_id = getattr(request.state, "request_id", None)
 
         user_agent = request.headers.get("user-agent")
         referer = request.headers.get("referer")
@@ -107,26 +106,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             request.client.host if request.client else None
         )
 
-        auth_ctx = getattr(request.state, "auth_context", None)
-
-        api_key_id = getattr(auth_ctx, "api_key_id", None)
-        customer_id = getattr(auth_ctx, "customer_id", None)
-        subscription_id = getattr(auth_ctx, "subscription_id", None)
-        plan_code = getattr(auth_ctx, "plan_code", None)
-        actor_type = getattr(auth_ctx, "actor_type", getattr(request.state, "actor_type", "unknown"))
-
-        workflow_type = infer_workflow_type(user_agent, agent_identifier, actor_type)
-        endpoint_family = infer_endpoint_family(path)
-
         symbol, exchange, symbol_exchange = extract_symbol_info(request)
-
-        is_metered = 0
-        if path in FREE_METERED_PATHS:
-            is_metered = 1
-        elif path not in NON_METERED_PATHS and path.startswith("/v1/") and (api_key_id or customer_id):
-            is_metered = 1
-
-        is_billable = 0
+        endpoint_family = infer_endpoint_family(path)
 
         status_code = 500
         response_size_bytes = None
@@ -149,6 +130,24 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         finally:
             latency_ms = int((time.perf_counter() - start) * 1000)
             success = 1 if 200 <= status_code < 400 else 0
+
+            # IMPORTANT: read request.state only after downstream middleware ran
+            request_id = getattr(request.state, "request_id", None)
+
+            auth_ctx = getattr(request.state, "auth_context", None)
+            api_key_id = getattr(auth_ctx, "api_key_id", getattr(request.state, "api_key_id", None))
+            customer_id = getattr(auth_ctx, "customer_id", getattr(request.state, "customer_id", None))
+            subscription_id = getattr(auth_ctx, "subscription_id", getattr(request.state, "subscription_id", None))
+            plan_code = getattr(auth_ctx, "plan_code", getattr(request.state, "plan_code", None))
+            actor_type = getattr(auth_ctx, "actor_type", getattr(request.state, "actor_type", "unknown"))
+
+            workflow_type = infer_workflow_type(user_agent, agent_identifier, actor_type)
+
+            is_metered = 0
+            if path in FREE_METERED_PATHS:
+                is_metered = 1
+            elif path not in NON_METERED_PATHS and path.startswith("/v1/") and (api_key_id or customer_id):
+                is_metered = 1
 
             event = {
                 "event_time_utc": datetime.now(timezone.utc),
@@ -177,7 +176,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 "user_agent": user_agent,
                 "referer": referer,
                 "is_metered": is_metered,
-                "is_billable": is_billable,
+                "is_billable": 0,
                 "error_code": error_code,
                 "notes": None,
             }
