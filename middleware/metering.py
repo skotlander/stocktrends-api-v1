@@ -1,5 +1,6 @@
 import os
 import time
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -7,6 +8,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from metering.logger import log_api_request_event
+
+
+logger = logging.getLogger("stocktrends_api.metering")
 
 
 NON_METERED_PATHS = {
@@ -180,5 +184,5 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
             try:
                 log_api_request_event(event)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.exception("Metering insert failed: %s", exc)
