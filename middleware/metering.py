@@ -8,30 +8,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from metering.logger import log_api_request_event, log_api_request_economics
+from pricing.classifier import classify_request
 
 
 logger = logging.getLogger("stocktrends_api.metering")
-
-
-NON_METERED_PATHS = {
-    "/",
-    "/index.html",
-    "/llms.txt",
-    "/ai-dataset.json",
-    "/tools.json",
-    "/sitemap.xml",
-    "/robots.txt",
-    "/docs",
-    "/v1/docs",
-    "/openapi.json",
-    "/v1/openapi.json",
-    "/health",
-}
-
-FREE_METERED_PATHS = {
-    "/v1/ai/context",
-    "/v1/breadth/sector/latest",
-}
 
 
 ENDPOINT_FAMILY_PREFIXES = {
@@ -149,15 +129,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
             workflow_type = infer_workflow_type(user_agent, agent_identifier, actor_type)
 
-            is_metered = 0
-            if path in FREE_METERED_PATHS:
-                is_metered = 1
-            elif path not in NON_METERED_PATHS and path.startswith("/v1/") and (api_key_id or customer_id):
-                is_metered = 1
-
-            # api_request_logs defaults requested by you
-            log_payment_method = "none"
-            log_pricing_rule_id = "default_free"
+            has_paid_auth = bool(api_key_id or customer_id)
+            decision = classify_request(path, has_paid_auth)
 
             event = {
                 "event_time_utc": datetime.now(timezone.utc),
@@ -186,10 +159,10 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 "client_ip": client_ip,
                 "user_agent": user_agent,
                 "referer": referer,
-                "is_metered": is_metered,
+                "is_metered": decision.is_metered,
                 "is_billable": 0,
-                "payment_method": log_payment_method,
-                "pricing_rule_id": log_pricing_rule_id,
+                "payment_method": decision.log_payment_method,
+                "pricing_rule_id": decision.log_pricing_rule_id,
                 "error_code": error_code,
                 "notes": None,
             }
@@ -200,16 +173,15 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 logger.exception("Metering request-log insert failed: %s", exc)
                 return
 
-            # api_request_economics defaults requested by you
-            if is_metered and request_id:
+            if decision.is_metered and request_id and decision.econ_pricing_rule_id:
                 econ = {
                     "request_id": request_id,
-                    "pricing_rule_id": "default_subscription",
+                    "pricing_rule_id": decision.econ_pricing_rule_id,
                     "unit_price_usd": None,
                     "billed_amount_usd": None,
-                    "payment_required": 0,
-                    "payment_status": "not_required",
-                    "payment_method": "subscription",
+                    "payment_required": decision.econ_payment_required,
+                    "payment_status": decision.econ_payment_status,
+                    "payment_method": decision.econ_payment_method,
                     "payment_network": None,
                     "payment_token": None,
                     "payment_amount_native": None,
