@@ -1,324 +1,178 @@
 import os
 import time
+import uuid
 import logging
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
-from typing import Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
 from starlette.responses import JSONResponse
+from fastapi import Request
 
-from metering.logger import log_api_request_event, log_api_request_economics
-from pricing.classifier import classify_request
-from pricing.payment_validator import validate_payment_headers
-
+from metering.logger import log_api_request_event
 
 logger = logging.getLogger("stocktrends_api.metering")
 
-
-ENDPOINT_FAMILY_PREFIXES = {
-    "/v1/ai": "ai",
-    "/v1/instruments": "instruments",
-    "/v1/prices": "prices",
-    "/v1/indicators": "indicators",
-    "/v1/selections": "selections",
-    "/v1/stim": "stim",
-    "/v1/selections-published": "selections_published",
-    "/v1/stwr": "stwr",
-    "/v1/meta": "meta",
-    "/v1/breadth": "breadth",
-    "/v1/leadership": "leadership",
-}
+ENABLE_AGENT_PAY = os.getenv("ENABLE_AGENT_PAY", "false").lower() == "true"
+ENFORCE_AGENT_PAY = os.getenv("ENFORCE_AGENT_PAY", "false").lower() == "true"
+VALIDATE_AGENT_PAY_HEADERS = os.getenv("VALIDATE_AGENT_PAY_HEADERS", "false").lower() == "true"
 
 
-def env_flag(name: str, default: str = "false") -> bool:
-    return os.getenv(name, default).strip().lower() == "true"
+def validate_payment_headers(request: Request):
+    required_headers = [
+        "x-stocktrends-payment-amount",
+        "x-stocktrends-payment-network",
+        "x-stocktrends-payment-reference",
+    ]
 
+    missing = [h for h in required_headers if h not in request.headers]
 
-def infer_endpoint_family(path: str) -> Optional[str]:
-    for prefix, family in ENDPOINT_FAMILY_PREFIXES.items():
-        if path.startswith(prefix):
-            return family
-    return None
+    if missing:
+        return False, "missing_payment_headers", f"Missing required payment headers: {', '.join(missing)}"
 
-
-def infer_workflow_type(user_agent: str | None, agent_identifier: str | None, actor_type: str) -> str:
-    if actor_type == "internal_service":
-        return "internal_automation"
-
-    if agent_identifier:
-        return "agent"
-
-    if not user_agent:
-        return "unknown"
-
-    ua = user_agent.lower()
-
-    if any(token in ua for token in ["python", "curl", "httpx", "postman", "insomnia", "bot", "agent"]):
-        return "agent"
-
-    if any(token in ua for token in ["mozilla", "chrome", "safari", "firefox", "edge"]):
-        return "human"
-
-    return "unknown"
-
-
-def extract_symbol_info(request: Request) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    qp = request.query_params
-    symbol = qp.get("symbol")
-    exchange = qp.get("exchange")
-    symbol_exchange = qp.get("symbol_exchange")
-
-    if symbol_exchange:
-        return symbol, exchange, symbol_exchange
-
-    if symbol and exchange:
-        symbol_exchange = f"{symbol}:{exchange}"
-
-    return symbol, exchange, symbol_exchange
-
-
-def parse_decimal_or_none(value: str | None) -> Decimal | None:
-    if value is None or value == "":
-        return None
-    try:
-        return Decimal(value)
-    except (InvalidOperation, ValueError):
-        return None
+    return True, None, None
 
 
 class MeteringMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        start = time.perf_counter()
+        start_time = time.time()
+
+        # ✅ ALWAYS generate request_id
+        request_id = str(uuid.uuid4())
 
         path = request.url.path
         method = request.method
-        query_string = request.url.query or None
+        query_string = str(request.url.query)
 
-        user_agent = request.headers.get("user-agent")
-        referer = request.headers.get("referer")
-
-        # Agent headers
-        agent_identifier = request.headers.get("x-stocktrends-agent-id")
-        agent_id = agent_identifier
-        agent_type_header = request.headers.get("x-stocktrends-agent-type")
-        agent_vendor = request.headers.get("x-stocktrends-agent-vendor")
-        agent_version = request.headers.get("x-stocktrends-agent-version")
-        request_purpose = request.headers.get("x-stocktrends-request-purpose")
-        session_id = request.headers.get("x-stocktrends-session-id")
-
-        # Payment headers (passive capture)
         payment_method_header = request.headers.get("x-stocktrends-payment-method")
-        payment_network_header = request.headers.get("x-stocktrends-payment-network")
-        payment_token_header = request.headers.get("x-stocktrends-payment-token")
-        payment_reference_header = request.headers.get("x-stocktrends-payment-reference")
-        payment_amount_header = request.headers.get("x-stocktrends-payment-amount")
-        pricing_rule_header = request.headers.get("x-stocktrends-pricing-rule")
 
-        payment_amount_native = parse_decimal_or_none(payment_amount_header)
-
-        x_forwarded_for = request.headers.get("x-forwarded-for")
-        client_ip = x_forwarded_for.split(",")[0].strip() if x_forwarded_for else (
-            request.client.host if request.client else None
+        should_validate_agent_pay = (
+            ENABLE_AGENT_PAY and VALIDATE_AGENT_PAY_HEADERS and payment_method_header == "mpp"
         )
 
-        symbol, exchange, symbol_exchange = extract_symbol_info(request)
-        endpoint_family = infer_endpoint_family(path)
+        should_enforce_agent_pay = (
+            ENABLE_AGENT_PAY and ENFORCE_AGENT_PAY and path.startswith("/v1/")
+        )
 
-        status_code = 500
-        response_size_bytes = None
-        error_code = None
+        logger.warning(
+            f"METERING DEBUG path={path} "
+            f"ENFORCE_AGENT_PAY={ENFORCE_AGENT_PAY} "
+            f"VALIDATE_AGENT_PAY_HEADERS={VALIDATE_AGENT_PAY_HEADERS} "
+            f"should_validate_agent_pay={should_validate_agent_pay} "
+            f"payment_method_header={payment_method_header}"
+        )
 
-        request_id = None
-        api_key_id = None
-        customer_id = None
-        subscription_id = None
-        plan_code = None
-        actor_type = "unknown"
-        workflow_type = "unknown"
-        decision = None
-        payment_validation_error = None
+        validation_valid = True
+        validation_error = None
+        validation_detail = None
 
-        try:
-            auth_ctx = getattr(request.state, "auth_context", None)
-            api_key_id = getattr(auth_ctx, "api_key_id", getattr(request.state, "api_key_id", None))
-            customer_id = getattr(auth_ctx, "customer_id", getattr(request.state, "customer_id", None))
-            subscription_id = getattr(auth_ctx, "subscription_id", getattr(request.state, "subscription_id", None))
-            plan_code = getattr(auth_ctx, "plan_code", getattr(request.state, "plan_code", None))
-            actor_type = getattr(auth_ctx, "actor_type", getattr(request.state, "actor_type", "unknown"))
-
-            workflow_type = infer_workflow_type(user_agent, agent_identifier, actor_type)
-
-            has_paid_auth = bool(api_key_id or customer_id)
-            decision = classify_request(path, has_paid_auth)
-
-            should_validate_agent_pay = (
-                env_flag("VALIDATE_AGENT_PAY_HEADERS", "true")
-                and path.startswith("/v1/stim")
-            )
+        if should_validate_agent_pay:
+            validation_valid, validation_error, validation_detail = validate_payment_headers(request)
 
             logger.warning(
-                "METERING DEBUG path=%s ENFORCE_AGENT_PAY=%s VALIDATE_AGENT_PAY_HEADERS=%s should_validate_agent_pay=%s payment_method_header=%s",
-                path,
-                env_flag("ENFORCE_AGENT_PAY", "false"),
-                env_flag("VALIDATE_AGENT_PAY_HEADERS", "true"),
-                should_validate_agent_pay,
-                payment_method_header,
+                f"METERING DEBUG validation valid={validation_valid} "
+                f"error={validation_error} detail={validation_detail}"
             )
 
-            if should_validate_agent_pay:
-                validation = validate_payment_headers(request.headers)
-                logger.warning(
-                    "METERING DEBUG validation valid=%s error=%s detail=%s",
-                    validation.valid,
-                    validation.error_code,
-                    validation.error_detail,
-                )
-                if not validation.valid:
-                    payment_validation_error = validation.error_code
+        # 🚨 ENFORCEMENT (return 402 early)
+        if should_enforce_agent_pay and not validation_valid:
+            logger.warning(f"METERING DEBUG returning 402 for path={path}")
 
-            should_enforce_agent_pay = (
-                env_flag("ENFORCE_AGENT_PAY", "false")
-                and path.startswith("/v1/stim")
+            response = JSONResponse(
+                status_code=402,
+                content={
+                    "error": validation_error,
+                    "detail": validation_detail,
+                    "request_id": request_id,
+                },
             )
 
-            logger.warning(
-                "METERING DEBUG should_enforce_agent_pay=%s path_startswith=%s",
-                should_enforce_agent_pay,
-                path.startswith("/v1/stim"),
-            )
-
-            if should_enforce_agent_pay:
-                enforce_validation = validate_payment_headers(request.headers)
-                logger.warning(
-                    "METERING DEBUG enforce_validation valid=%s error=%s detail=%s",
-                    enforce_validation.valid,
-                    enforce_validation.error_code,
-                    enforce_validation.error_detail,
-                )
-
-                if not enforce_validation.valid:
-                    payment_validation_error = enforce_validation.error_code
-                    status_code = 402
-
-                    response = JSONResponse(
-                        {
-                            "detail": "Payment required for this endpoint",
-                            "pricing_rule_id": "agent_pay_required",
-                            "accepted_payment_methods": ["mpp", "x402", "crypto"],
-                            "required_headers": [
-                                "X-StockTrends-Payment-Method",
-                                "X-StockTrends-Payment-Network",
-                                "X-StockTrends-Payment-Reference",
-                                "X-StockTrends-Payment-Amount",
-                            ],
-                            "validation_error": enforce_validation.error_code,
-                        },
-                        status_code=402,
-                    )
-                    response.headers["X-StockTrends-Pricing-Rule"] = "agent_pay_required"
-                    response.headers["X-StockTrends-Payment-Required"] = "true"
-                    logger.warning("METERING DEBUG returning 402 for path=%s", path)
-                    return response
-
-            response = await call_next(request)
-            status_code = response.status_code
-
-            content_length = response.headers.get("content-length")
-            if content_length and content_length.isdigit():
-                response_size_bytes = int(content_length)
-
-            return response
-
-        except Exception as exc:
-            error_code = exc.__class__.__name__
-            raise
-
-        finally:
-            latency_ms = int((time.perf_counter() - start) * 1000)
-            success = 1 if 200 <= status_code < 400 else 0
-
-            request_id = getattr(request.state, "request_id", None)
-
-            auth_ctx = getattr(request.state, "auth_context", None)
-            api_key_id = getattr(auth_ctx, "api_key_id", getattr(request.state, "api_key_id", api_key_id))
-            customer_id = getattr(auth_ctx, "customer_id", getattr(request.state, "customer_id", customer_id))
-            subscription_id = getattr(auth_ctx, "subscription_id", getattr(request.state, "subscription_id", subscription_id))
-            plan_code = getattr(auth_ctx, "plan_code", getattr(request.state, "plan_code", plan_code))
-            actor_type = getattr(auth_ctx, "actor_type", getattr(request.state, "actor_type", actor_type))
-
-            workflow_type = infer_workflow_type(user_agent, agent_identifier, actor_type)
-
-            if decision is None:
-                has_paid_auth = bool(api_key_id or customer_id)
-                decision = classify_request(path, has_paid_auth)
+            latency_ms = int((time.time() - start_time) * 1000)
 
             event = {
                 "event_time_utc": datetime.now(timezone.utc),
                 "request_id": request_id,
-                "environment": os.getenv("API_ENV", "production"),
-                "api_key_id": api_key_id,
-                "customer_id": customer_id,
-                "subscription_id": subscription_id,
-                "plan_code": plan_code,
-                "actor_type": actor_type,
-                "workflow_type": workflow_type,
-                "agent_identifier": agent_identifier,
-                "agent_id": agent_id,
+                "environment": "production",
+                "api_key_id": None,
+                "customer_id": None,
+                "subscription_id": None,
+                "plan_code": None,
+                "actor_type": "unknown",
+                "workflow_type": "agent",
+                "agent_identifier": None,
+                "agent_id": None,
                 "endpoint_path": path,
                 "route_template": None,
-                "endpoint_family": endpoint_family,
+                "endpoint_family": path.split("/")[2] if len(path.split("/")) > 2 else None,
                 "http_method": method,
                 "query_string": query_string,
-                "symbol": symbol,
-                "exchange": exchange,
-                "symbol_exchange": symbol_exchange,
-                "status_code": status_code,
-                "success": success,
+                "symbol": request.query_params.get("symbol"),
+                "exchange": request.query_params.get("exchange"),
+                "symbol_exchange": request.query_params.get("symbol_exchange"),
+                "status_code": 402,
+                "success": 0,
                 "latency_ms": latency_ms,
-                "response_size_bytes": response_size_bytes,
-                "client_ip": client_ip,
-                "user_agent": user_agent,
-                "referer": referer,
-                "is_metered": decision.is_metered,
+                "response_size_bytes": None,
+                "client_ip": request.client.host if request.client else None,
+                "user_agent": request.headers.get("user-agent"),
+                "referer": request.headers.get("referer"),
+                "is_metered": 1,
                 "is_billable": 0,
-                "payment_method": decision.log_payment_method,
-                "pricing_rule_id": decision.log_pricing_rule_id,
-                "error_code": error_code,
-                "notes": payment_validation_error,
+                "payment_method": payment_method_header or "subscription",
+                "pricing_rule_id": "default_subscription",
+                "error_code": validation_error,
+                "notes": validation_detail,
             }
 
             try:
                 log_api_request_event(event)
-            except Exception as exc:
-                logger.exception("Metering request-log insert failed: %s", exc)
-                return
+            except Exception as e:
+                logger.error(f"Metering request-log insert failed: {e}")
 
-            if decision.is_metered and request_id and decision.econ_pricing_rule_id:
-                econ = {
-                    "request_id": request_id,
-                    "pricing_rule_id": pricing_rule_header or decision.econ_pricing_rule_id,
-                    "unit_price_usd": None,
-                    "billed_amount_usd": None,
-                    "payment_required": decision.econ_payment_required,
-                    "payment_status": decision.econ_payment_status,
-                    "payment_method": payment_method_header or decision.econ_payment_method,
-                    "payment_network": payment_network_header,
-                    "payment_token": payment_token_header,
-                    "payment_amount_native": payment_amount_native,
-                    "payment_amount_usd": None,
-                    "payment_reference": payment_reference_header,
-                    "session_id": session_id,
-                    "payment_channel_id": None,
-                    "agent_id": agent_id,
-                    "agent_type": agent_type_header or ("agent" if agent_id else None),
-                    "agent_vendor": agent_vendor,
-                    "agent_version": agent_version,
-                    "request_purpose": request_purpose,
-                }
+            return response  # ✅ ALWAYS RETURN
 
-                try:
-                    log_api_request_economics(econ)
-                except Exception as exc:
-                    logger.exception("Metering economics insert failed: %s", exc)
+        # ✅ NORMAL FLOW
+        response = await call_next(request)
+
+        latency_ms = int((time.time() - start_time) * 1000)
+
+        event = {
+            "event_time_utc": datetime.now(timezone.utc),
+            "request_id": request_id,
+            "environment": "production",
+            "api_key_id": None,
+            "customer_id": None,
+            "subscription_id": None,
+            "plan_code": None,
+            "actor_type": "unknown",
+            "workflow_type": "agent",
+            "agent_identifier": None,
+            "agent_id": None,
+            "endpoint_path": path,
+            "route_template": None,
+            "endpoint_family": path.split("/")[2] if len(path.split("/")) > 2 else None,
+            "http_method": method,
+            "query_string": query_string,
+            "symbol": request.query_params.get("symbol"),
+            "exchange": request.query_params.get("exchange"),
+            "symbol_exchange": request.query_params.get("symbol_exchange"),
+            "status_code": response.status_code,
+            "success": 1 if response.status_code < 400 else 0,
+            "latency_ms": latency_ms,
+            "response_size_bytes": None,
+            "client_ip": request.client.host if request.client else None,
+            "user_agent": request.headers.get("user-agent"),
+            "referer": request.headers.get("referer"),
+            "is_metered": 1,
+            "is_billable": 1,
+            "payment_method": payment_method_header or "subscription",
+            "pricing_rule_id": "default_subscription",
+            "error_code": None,
+            "notes": None,
+        }
+
+        try:
+            log_api_request_event(event)
+        except Exception as e:
+            logger.error(f"Metering request-log insert failed: {e}")
+
+        return response  # ✅ ALWAYS RETURN
