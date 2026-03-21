@@ -35,6 +35,8 @@ class PricingDecision:
 
 
 def classify_request(path: str, has_paid_auth: bool) -> PricingDecision:
+
+    # 1. Explicit public / non-metered
     if path in NON_METERED_PATHS:
         return PricingDecision(
             is_metered=0,
@@ -46,6 +48,7 @@ def classify_request(path: str, has_paid_auth: bool) -> PricingDecision:
             econ_payment_method=None,
         )
 
+    # 2. Explicit free-metered
     if path in FREE_METERED_PATHS:
         return PricingDecision(
             is_metered=1,
@@ -57,7 +60,8 @@ def classify_request(path: str, has_paid_auth: bool) -> PricingDecision:
             econ_payment_method="free",
         )
 
-    if path.startswith("/v1/") and has_paid_auth:
+    # 3. ALL /v1/ endpoints are metered API surface
+    if path.startswith("/v1/"):
         return PricingDecision(
             is_metered=1,
             log_pricing_rule_id="default_subscription",
@@ -68,6 +72,7 @@ def classify_request(path: str, has_paid_auth: bool) -> PricingDecision:
             econ_payment_method="subscription",
         )
 
+    # 4. fallback
     return PricingDecision(
         is_metered=0,
         log_pricing_rule_id="default_free",
