@@ -7,7 +7,7 @@ from typing import Optional
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from metering.logger import log_api_request_event
+from metering.logger import log_api_request_event, log_api_request_economics
 
 
 logger = logging.getLogger("stocktrends_api.metering")
@@ -99,7 +99,14 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
         user_agent = request.headers.get("user-agent")
         referer = request.headers.get("referer")
+
         agent_identifier = request.headers.get("x-stocktrends-agent-id")
+        agent_id = agent_identifier
+        agent_type_header = request.headers.get("x-stocktrends-agent-type")
+        agent_vendor = request.headers.get("x-stocktrends-agent-vendor")
+        agent_version = request.headers.get("x-stocktrends-agent-version")
+        request_purpose = request.headers.get("x-stocktrends-request-purpose")
+        session_id = request.headers.get("x-stocktrends-session-id")
 
         x_forwarded_for = request.headers.get("x-forwarded-for")
         client_ip = x_forwarded_for.split(",")[0].strip() if x_forwarded_for else (
@@ -131,7 +138,6 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             latency_ms = int((time.perf_counter() - start) * 1000)
             success = 1 if 200 <= status_code < 400 else 0
 
-            # IMPORTANT: read request.state only after downstream middleware ran
             request_id = getattr(request.state, "request_id", None)
 
             auth_ctx = getattr(request.state, "auth_context", None)
@@ -149,6 +155,10 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             elif path not in NON_METERED_PATHS and path.startswith("/v1/") and (api_key_id or customer_id):
                 is_metered = 1
 
+            # api_request_logs defaults requested by you
+            log_payment_method = "none"
+            log_pricing_rule_id = "default_free"
+
             event = {
                 "event_time_utc": datetime.now(timezone.utc),
                 "request_id": request_id,
@@ -160,6 +170,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 "actor_type": actor_type,
                 "workflow_type": workflow_type,
                 "agent_identifier": agent_identifier,
+                "agent_id": agent_id,
                 "endpoint_path": path,
                 "route_template": None,
                 "endpoint_family": endpoint_family,
@@ -177,6 +188,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 "referer": referer,
                 "is_metered": is_metered,
                 "is_billable": 0,
+                "payment_method": log_payment_method,
+                "pricing_rule_id": log_pricing_rule_id,
                 "error_code": error_code,
                 "notes": None,
             }
@@ -184,4 +197,34 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             try:
                 log_api_request_event(event)
             except Exception as exc:
-                logger.exception("Metering insert failed: %s", exc)
+                logger.exception("Metering request-log insert failed: %s", exc)
+                return
+
+            # api_request_economics defaults requested by you
+            if is_metered and request_id:
+                econ = {
+                    "request_id": request_id,
+                    "pricing_rule_id": "default_subscription",
+                    "unit_price_usd": None,
+                    "billed_amount_usd": None,
+                    "payment_required": 0,
+                    "payment_status": "not_required",
+                    "payment_method": "subscription",
+                    "payment_network": None,
+                    "payment_token": None,
+                    "payment_amount_native": None,
+                    "payment_amount_usd": None,
+                    "payment_reference": None,
+                    "session_id": session_id,
+                    "payment_channel_id": None,
+                    "agent_id": agent_id,
+                    "agent_type": agent_type_header or ("agent" if agent_id else None),
+                    "agent_vendor": agent_vendor,
+                    "agent_version": agent_version,
+                    "request_purpose": request_purpose,
+                }
+
+                try:
+                    log_api_request_economics(econ)
+                except Exception as exc:
+                    logger.exception("Metering economics insert failed: %s", exc)
