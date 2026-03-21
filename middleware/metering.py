@@ -17,6 +17,9 @@ ENFORCE_AGENT_PAY = os.getenv("ENFORCE_AGENT_PAY", "false").lower() == "true"
 VALIDATE_AGENT_PAY_HEADERS = os.getenv("VALIDATE_AGENT_PAY_HEADERS", "false").lower() == "true"
 
 
+# -----------------------------
+# Payment validation
+# -----------------------------
 def validate_payment_headers(request: Request):
     required_headers = [
         "x-stocktrends-payment-amount",
@@ -32,11 +35,24 @@ def validate_payment_headers(request: Request):
     return True, None, None
 
 
+# -----------------------------
+# Pricing discovery headers
+# -----------------------------
+def apply_pricing_headers(response, pricing_rule_id: str, payment_required: bool, accepted_methods: str):
+    response.headers["X-StockTrends-Pricing-Rule"] = pricing_rule_id
+    response.headers["X-StockTrends-Payment-Required"] = "true" if payment_required else "false"
+    response.headers["X-StockTrends-Accepted-Payment-Methods"] = accepted_methods
+
+
+# -----------------------------
+# Middleware
+# -----------------------------
 class MeteringMiddleware(BaseHTTPMiddleware):
+
     async def dispatch(self, request: Request, call_next):
         start_time = time.time()
 
-        # ✅ ALWAYS generate request_id
+        # ✅ Always generate request_id
         request_id = str(uuid.uuid4())
 
         path = request.url.path
@@ -73,8 +89,11 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 f"error={validation_error} detail={validation_detail}"
             )
 
-        # 🚨 ENFORCEMENT (return 402 early)
+        # -----------------------------
+        # 🚨 Enforcement branch (402)
+        # -----------------------------
         if should_enforce_agent_pay and not validation_valid:
+
             logger.warning(f"METERING DEBUG returning 402 for path={path}")
 
             response = JSONResponse(
@@ -84,6 +103,14 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     "detail": validation_detail,
                     "request_id": request_id,
                 },
+            )
+
+            # ✅ Pricing headers (ENFORCED)
+            apply_pricing_headers(
+                response,
+                pricing_rule_id="agent_pay_required",
+                payment_required=True,
+                accepted_methods="mpp,x402,crypto",
             )
 
             latency_ms = int((time.time() - start_time) * 1000)
@@ -118,7 +145,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 "is_metered": 1,
                 "is_billable": 0,
                 "payment_method": payment_method_header or "subscription",
-                "pricing_rule_id": "default_subscription",
+                "pricing_rule_id": "agent_pay_required",
                 "error_code": validation_error,
                 "notes": validation_detail,
             }
@@ -130,10 +157,21 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
             return response  # ✅ ALWAYS RETURN
 
-        # ✅ NORMAL FLOW
+        # -----------------------------
+        # ✅ Normal flow
+        # -----------------------------
         response = await call_next(request)
 
         latency_ms = int((time.time() - start_time) * 1000)
+
+        # ✅ Apply pricing headers (PASSIVE DISCOVERY MODE)
+        if path.startswith("/v1/stim"):
+            apply_pricing_headers(
+                response,
+                pricing_rule_id="default_subscription",
+                payment_required=False,
+                accepted_methods="subscription,mpp,x402,crypto",
+            )
 
         event = {
             "event_time_utc": datetime.now(timezone.utc),
