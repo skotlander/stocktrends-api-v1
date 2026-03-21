@@ -7,9 +7,14 @@ from typing import Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from metering.logger import log_api_request_event, log_api_request_economics
-from pricing.classifier import classify_request, VALIDATE_AGENT_PAY_HEADERS
+from pricing.classifier import (
+    classify_request,
+    VALIDATE_AGENT_PAY_HEADERS,
+    ENFORCE_AGENT_PAY,
+)
 from pricing.payment_validator import validate_payment_headers
 
 
@@ -100,7 +105,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         request_purpose = request.headers.get("x-stocktrends-request-purpose")
         session_id = request.headers.get("x-stocktrends-session-id")
 
-        # Future payment headers (passive capture only)
+        # Future payment headers (passive capture + soft validation)
         payment_method_header = request.headers.get("x-stocktrends-payment-method")
         payment_network_header = request.headers.get("x-stocktrends-payment-network")
         payment_token_header = request.headers.get("x-stocktrends-payment-token")
@@ -122,7 +127,67 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         response_size_bytes = None
         error_code = None
 
+        request_id = None
+        api_key_id = None
+        customer_id = None
+        subscription_id = None
+        plan_code = None
+        actor_type = "unknown"
+        workflow_type = "unknown"
+        decision = None
+        payment_validation_error = None
+
         try:
+            auth_ctx = getattr(request.state, "auth_context", None)
+            api_key_id = getattr(auth_ctx, "api_key_id", getattr(request.state, "api_key_id", None))
+            customer_id = getattr(auth_ctx, "customer_id", getattr(request.state, "customer_id", None))
+            subscription_id = getattr(auth_ctx, "subscription_id", getattr(request.state, "subscription_id", None))
+            plan_code = getattr(auth_ctx, "plan_code", getattr(request.state, "plan_code", None))
+            actor_type = getattr(auth_ctx, "actor_type", getattr(request.state, "actor_type", "unknown"))
+
+            workflow_type = infer_workflow_type(user_agent, agent_identifier, actor_type)
+
+            has_paid_auth = bool(api_key_id or customer_id)
+            decision = classify_request(path, has_paid_auth)
+
+            should_validate_agent_pay = (
+                VALIDATE_AGENT_PAY_HEADERS
+                and path.startswith("/v1/stim")
+            )
+
+            validation = None
+            if should_validate_agent_pay:
+                validation = validate_payment_headers(request.headers)
+                if not validation.valid:
+                    payment_validation_error = validation.error_code
+
+            # Dormant enforcement branch: off unless ENFORCE_AGENT_PAY=True
+            should_enforce_agent_pay = (
+                ENFORCE_AGENT_PAY
+                and path.startswith("/v1/stim")
+            )
+
+            if should_enforce_agent_pay and validation is not None and not validation.valid:
+                status_code = 402
+                response = JSONResponse(
+                    {
+                        "detail": "Payment required for this endpoint",
+                        "pricing_rule_id": "agent_pay_required",
+                        "accepted_payment_methods": ["mpp", "x402", "crypto"],
+                        "required_headers": [
+                            "X-StockTrends-Payment-Method",
+                            "X-StockTrends-Payment-Network",
+                            "X-StockTrends-Payment-Reference",
+                            "X-StockTrends-Payment-Amount",
+                        ],
+                        "validation_error": validation.error_code,
+                    },
+                    status_code=402,
+                )
+                response.headers["X-StockTrends-Pricing-Rule"] = "agent_pay_required"
+                response.headers["X-StockTrends-Payment-Required"] = "true"
+                return response
+
             response = await call_next(request)
             status_code = response.status_code
 
@@ -143,28 +208,17 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             request_id = getattr(request.state, "request_id", None)
 
             auth_ctx = getattr(request.state, "auth_context", None)
-            api_key_id = getattr(auth_ctx, "api_key_id", getattr(request.state, "api_key_id", None))
-            customer_id = getattr(auth_ctx, "customer_id", getattr(request.state, "customer_id", None))
-            subscription_id = getattr(auth_ctx, "subscription_id", getattr(request.state, "subscription_id", None))
-            plan_code = getattr(auth_ctx, "plan_code", getattr(request.state, "plan_code", None))
-            actor_type = getattr(auth_ctx, "actor_type", getattr(request.state, "actor_type", "unknown"))
+            api_key_id = getattr(auth_ctx, "api_key_id", getattr(request.state, "api_key_id", api_key_id))
+            customer_id = getattr(auth_ctx, "customer_id", getattr(request.state, "customer_id", customer_id))
+            subscription_id = getattr(auth_ctx, "subscription_id", getattr(request.state, "subscription_id", subscription_id))
+            plan_code = getattr(auth_ctx, "plan_code", getattr(request.state, "plan_code", plan_code))
+            actor_type = getattr(auth_ctx, "actor_type", getattr(request.state, "actor_type", actor_type))
 
             workflow_type = infer_workflow_type(user_agent, agent_identifier, actor_type)
 
-            has_paid_auth = bool(api_key_id or customer_id)
-            decision = classify_request(path, has_paid_auth)
-
-            payment_validation_error = None
-
-            should_validate_agent_pay = (
-                VALIDATE_AGENT_PAY_HEADERS
-                and path.startswith("/v1/stim")
-            )
-
-            if should_validate_agent_pay:
-                validation = validate_payment_headers(request.headers)
-                if not validation.valid:
-                    payment_validation_error = validation.error_code
+            if decision is None:
+                has_paid_auth = bool(api_key_id or customer_id)
+                decision = classify_request(path, has_paid_auth)
 
             event = {
                 "event_time_utc": datetime.now(timezone.utc),
