@@ -46,6 +46,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/openapi.json",
             "/v1/openapi.json",
             "/health",
+            "/v1/pricing",
         }
 
         self.public_prefixes = [
@@ -126,14 +127,12 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 plan_code = result[6]
                 plan_active = result[7]
 
-                # Key validation
                 if key_status != "active" or revoked_at is not None:
                     return JSONResponse(
                         {"detail": "API key inactive"},
                         status_code=403,
                     )
 
-                # Subscription validation
                 if not subscription_id:
                     return JSONResponse(
                         {"detail": "No subscription linked to API key"},
@@ -146,7 +145,6 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         status_code=403,
                     )
 
-                # Plan validation
                 if not plan_code:
                     return JSONResponse(
                         {"detail": "No plan linked to subscription"},
@@ -159,14 +157,12 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         status_code=403,
                     )
 
-                # Plan-based route gating
                 if not self.is_plan_allowed(path, plan_code):
                     return JSONResponse(
                         {"detail": f"Plan '{plan_code}' does not allow this endpoint"},
                         status_code=403,
                     )
 
-                # Update last_used_at
                 conn.execute(
                     text(
                         """
@@ -178,7 +174,6 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                     {"key_id": key_id},
                 )
 
-                # Downstream request context
                 request.state.api_key_id = key_id
                 request.state.customer_id = customer_id
                 request.state.subscription_id = subscription_id
@@ -201,11 +196,9 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         sandbox_plus = {"sandbox", "research", "pro", "enterprise"}
         research_plus = {"research", "pro", "enterprise"}
 
-        # STIM endpoints require Research or above
         if path.startswith("/v1/stim"):
             return plan_code in research_plus
 
-        # Default protected /v1 endpoints: any paid plan
         if path.startswith("/v1/"):
             return plan_code in sandbox_plus
 
