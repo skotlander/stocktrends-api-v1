@@ -68,8 +68,11 @@ def extract_symbol_info(request: Request) -> tuple[Optional[str], Optional[str],
     qp = request.query_params
     symbol = qp.get("symbol")
     exchange = qp.get("exchange")
+    symbol_exchange = qp.get("symbol_exchange")
 
-    symbol_exchange = None
+    if symbol_exchange:
+        return symbol, exchange, symbol_exchange
+
     if symbol and exchange:
         symbol_exchange = f"{symbol}:{exchange}"
 
@@ -96,7 +99,6 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         user_agent = request.headers.get("user-agent")
         referer = request.headers.get("referer")
 
-        # Agent headers
         agent_identifier = request.headers.get("x-stocktrends-agent-id")
         agent_id = agent_identifier
         agent_type_header = request.headers.get("x-stocktrends-agent-type")
@@ -105,7 +107,6 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         request_purpose = request.headers.get("x-stocktrends-request-purpose")
         session_id = request.headers.get("x-stocktrends-session-id")
 
-        # Payment headers (passive capture)
         payment_method_header = request.headers.get("x-stocktrends-payment-method")
         payment_network_header = request.headers.get("x-stocktrends-payment-network")
         payment_token_header = request.headers.get("x-stocktrends-payment-token")
@@ -138,7 +139,6 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         payment_validation_error = None
 
         try:
-            # Auth context
             auth_ctx = getattr(request.state, "auth_context", None)
             api_key_id = getattr(auth_ctx, "api_key_id", getattr(request.state, "api_key_id", None))
             customer_id = getattr(auth_ctx, "customer_id", getattr(request.state, "customer_id", None))
@@ -151,25 +151,50 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             has_paid_auth = bool(api_key_id or customer_id)
             decision = classify_request(path, has_paid_auth)
 
-            # Soft validation (logging only)
             should_validate_agent_pay = (
                 VALIDATE_AGENT_PAY_HEADERS
                 and path.startswith("/v1/stim")
             )
 
+            logger.warning(
+                "METERING DEBUG path=%s ENFORCE_AGENT_PAY=%s VALIDATE_AGENT_PAY_HEADERS=%s should_validate_agent_pay=%s payment_method_header=%s",
+                path,
+                ENFORCE_AGENT_PAY,
+                VALIDATE_AGENT_PAY_HEADERS,
+                should_validate_agent_pay,
+                payment_method_header,
+            )
+
             if should_validate_agent_pay:
                 validation = validate_payment_headers(request.headers)
+                logger.warning(
+                    "METERING DEBUG validation valid=%s error=%s detail=%s",
+                    validation.valid,
+                    validation.error_code,
+                    validation.error_detail,
+                )
                 if not validation.valid:
                     payment_validation_error = validation.error_code
 
-            # 🚨 Enforcement (independent validation)
             should_enforce_agent_pay = (
                 ENFORCE_AGENT_PAY
                 and path.startswith("/v1/stim")
             )
 
+            logger.warning(
+                "METERING DEBUG should_enforce_agent_pay=%s path_startswith=%s",
+                should_enforce_agent_pay,
+                path.startswith("/v1/stim"),
+            )
+
             if should_enforce_agent_pay:
                 enforce_validation = validate_payment_headers(request.headers)
+                logger.warning(
+                    "METERING DEBUG enforce_validation valid=%s error=%s detail=%s",
+                    enforce_validation.valid,
+                    enforce_validation.error_code,
+                    enforce_validation.error_detail,
+                )
 
                 if not enforce_validation.valid:
                     payment_validation_error = enforce_validation.error_code
@@ -192,9 +217,9 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     )
                     response.headers["X-StockTrends-Pricing-Rule"] = "agent_pay_required"
                     response.headers["X-StockTrends-Payment-Required"] = "true"
+                    logger.warning("METERING DEBUG returning 402 for path=%s", path)
                     return response
 
-            # Normal request
             response = await call_next(request)
             status_code = response.status_code
 
