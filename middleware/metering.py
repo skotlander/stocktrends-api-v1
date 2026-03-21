@@ -2,6 +2,7 @@ import os
 import time
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -69,6 +70,15 @@ def extract_symbol_info(request: Request) -> tuple[Optional[str], Optional[str],
     return symbol, exchange, symbol_exchange
 
 
+def parse_decimal_or_none(value: str | None) -> Decimal | None:
+    if value is None or value == "":
+        return None
+    try:
+        return Decimal(value)
+    except (InvalidOperation, ValueError):
+        return None
+
+
 class MeteringMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         start = time.perf_counter()
@@ -80,6 +90,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         user_agent = request.headers.get("user-agent")
         referer = request.headers.get("referer")
 
+        # Agent headers
         agent_identifier = request.headers.get("x-stocktrends-agent-id")
         agent_id = agent_identifier
         agent_type_header = request.headers.get("x-stocktrends-agent-type")
@@ -87,6 +98,16 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         agent_version = request.headers.get("x-stocktrends-agent-version")
         request_purpose = request.headers.get("x-stocktrends-request-purpose")
         session_id = request.headers.get("x-stocktrends-session-id")
+
+        # Future payment headers (passive capture only)
+        payment_method_header = request.headers.get("x-stocktrends-payment-method")
+        payment_network_header = request.headers.get("x-stocktrends-payment-network")
+        payment_token_header = request.headers.get("x-stocktrends-payment-token")
+        payment_reference_header = request.headers.get("x-stocktrends-payment-reference")
+        payment_amount_header = request.headers.get("x-stocktrends-payment-amount")
+        pricing_rule_header = request.headers.get("x-stocktrends-pricing-rule")
+
+        payment_amount_native = parse_decimal_or_none(payment_amount_header)
 
         x_forwarded_for = request.headers.get("x-forwarded-for")
         client_ip = x_forwarded_for.split(",")[0].strip() if x_forwarded_for else (
@@ -132,6 +153,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             has_paid_auth = bool(api_key_id or customer_id)
             decision = classify_request(path, has_paid_auth)
 
+            # Raw request log keeps the existing classification behavior.
+            # Optional client-declared pricing rule is NOT trusted to override the system rule yet.
             event = {
                 "event_time_utc": datetime.now(timezone.utc),
                 "request_id": request_id,
@@ -176,17 +199,17 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             if decision.is_metered and request_id and decision.econ_pricing_rule_id:
                 econ = {
                     "request_id": request_id,
-                    "pricing_rule_id": decision.econ_pricing_rule_id,
+                    "pricing_rule_id": pricing_rule_header or decision.econ_pricing_rule_id,
                     "unit_price_usd": None,
                     "billed_amount_usd": None,
                     "payment_required": decision.econ_payment_required,
                     "payment_status": decision.econ_payment_status,
-                    "payment_method": decision.econ_payment_method,
-                    "payment_network": None,
-                    "payment_token": None,
-                    "payment_amount_native": None,
+                    "payment_method": payment_method_header or decision.econ_payment_method,
+                    "payment_network": payment_network_header,
+                    "payment_token": payment_token_header,
+                    "payment_amount_native": payment_amount_native,
                     "payment_amount_usd": None,
-                    "payment_reference": None,
+                    "payment_reference": payment_reference_header,
                     "session_id": session_id,
                     "payment_channel_id": None,
                     "agent_id": agent_id,
