@@ -10,11 +10,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from metering.logger import log_api_request_event, log_api_request_economics
-from pricing.classifier import (
-    classify_request,
-    VALIDATE_AGENT_PAY_HEADERS,
-    ENFORCE_AGENT_PAY,
-)
+from pricing.classifier import classify_request
 from pricing.payment_validator import validate_payment_headers
 
 
@@ -34,6 +30,10 @@ ENDPOINT_FAMILY_PREFIXES = {
     "/v1/breadth": "breadth",
     "/v1/leadership": "leadership",
 }
+
+
+def env_flag(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() == "true"
 
 
 def infer_endpoint_family(path: str) -> Optional[str]:
@@ -99,6 +99,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         user_agent = request.headers.get("user-agent")
         referer = request.headers.get("referer")
 
+        # Agent headers
         agent_identifier = request.headers.get("x-stocktrends-agent-id")
         agent_id = agent_identifier
         agent_type_header = request.headers.get("x-stocktrends-agent-type")
@@ -107,6 +108,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         request_purpose = request.headers.get("x-stocktrends-request-purpose")
         session_id = request.headers.get("x-stocktrends-session-id")
 
+        # Payment headers (passive capture)
         payment_method_header = request.headers.get("x-stocktrends-payment-method")
         payment_network_header = request.headers.get("x-stocktrends-payment-network")
         payment_token_header = request.headers.get("x-stocktrends-payment-token")
@@ -152,15 +154,15 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             decision = classify_request(path, has_paid_auth)
 
             should_validate_agent_pay = (
-                VALIDATE_AGENT_PAY_HEADERS
+                env_flag("VALIDATE_AGENT_PAY_HEADERS", "true")
                 and path.startswith("/v1/stim")
             )
 
             logger.warning(
                 "METERING DEBUG path=%s ENFORCE_AGENT_PAY=%s VALIDATE_AGENT_PAY_HEADERS=%s should_validate_agent_pay=%s payment_method_header=%s",
                 path,
-                ENFORCE_AGENT_PAY,
-                VALIDATE_AGENT_PAY_HEADERS,
+                env_flag("ENFORCE_AGENT_PAY", "false"),
+                env_flag("VALIDATE_AGENT_PAY_HEADERS", "true"),
                 should_validate_agent_pay,
                 payment_method_header,
             )
@@ -177,7 +179,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     payment_validation_error = validation.error_code
 
             should_enforce_agent_pay = (
-                ENFORCE_AGENT_PAY
+                env_flag("ENFORCE_AGENT_PAY", "false")
                 and path.startswith("/v1/stim")
             )
 
