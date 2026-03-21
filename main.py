@@ -19,6 +19,7 @@ from routers.meta import router as meta_router
 from routers.breadth import router as breadth_router
 from routers.leadership import router as leadership_router
 from routers.ai import router as ai_router
+from routers.pricing import router as pricing_router
 
 
 logging.basicConfig(level=logging.INFO)
@@ -128,6 +129,7 @@ v1.include_router(meta_router)
 v1.include_router(breadth_router)
 v1.include_router(leadership_router)
 v1.include_router(ai_router)
+v1.include_router(pricing_router)
 
 v1.openapi = lambda: apply_api_key_security_to_openapi(v1)
 
