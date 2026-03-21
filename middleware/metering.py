@@ -105,7 +105,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         request_purpose = request.headers.get("x-stocktrends-request-purpose")
         session_id = request.headers.get("x-stocktrends-session-id")
 
-        # Future payment headers (passive capture + soft validation)
+        # Payment headers (passive capture)
         payment_method_header = request.headers.get("x-stocktrends-payment-method")
         payment_network_header = request.headers.get("x-stocktrends-payment-network")
         payment_token_header = request.headers.get("x-stocktrends-payment-token")
@@ -138,6 +138,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         payment_validation_error = None
 
         try:
+            # Auth context
             auth_ctx = getattr(request.state, "auth_context", None)
             api_key_id = getattr(auth_ctx, "api_key_id", getattr(request.state, "api_key_id", None))
             customer_id = getattr(auth_ctx, "customer_id", getattr(request.state, "customer_id", None))
@@ -150,44 +151,50 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             has_paid_auth = bool(api_key_id or customer_id)
             decision = classify_request(path, has_paid_auth)
 
+            # Soft validation (logging only)
             should_validate_agent_pay = (
                 VALIDATE_AGENT_PAY_HEADERS
                 and path.startswith("/v1/stim")
             )
 
-            validation = None
             if should_validate_agent_pay:
                 validation = validate_payment_headers(request.headers)
                 if not validation.valid:
                     payment_validation_error = validation.error_code
 
-            # Dormant enforcement branch: off unless ENFORCE_AGENT_PAY=True
+            # 🚨 Enforcement (independent validation)
             should_enforce_agent_pay = (
                 ENFORCE_AGENT_PAY
                 and path.startswith("/v1/stim")
             )
 
-            if should_enforce_agent_pay and validation is not None and not validation.valid:
-                status_code = 402
-                response = JSONResponse(
-                    {
-                        "detail": "Payment required for this endpoint",
-                        "pricing_rule_id": "agent_pay_required",
-                        "accepted_payment_methods": ["mpp", "x402", "crypto"],
-                        "required_headers": [
-                            "X-StockTrends-Payment-Method",
-                            "X-StockTrends-Payment-Network",
-                            "X-StockTrends-Payment-Reference",
-                            "X-StockTrends-Payment-Amount",
-                        ],
-                        "validation_error": validation.error_code,
-                    },
-                    status_code=402,
-                )
-                response.headers["X-StockTrends-Pricing-Rule"] = "agent_pay_required"
-                response.headers["X-StockTrends-Payment-Required"] = "true"
-                return response
+            if should_enforce_agent_pay:
+                enforce_validation = validate_payment_headers(request.headers)
 
+                if not enforce_validation.valid:
+                    payment_validation_error = enforce_validation.error_code
+                    status_code = 402
+
+                    response = JSONResponse(
+                        {
+                            "detail": "Payment required for this endpoint",
+                            "pricing_rule_id": "agent_pay_required",
+                            "accepted_payment_methods": ["mpp", "x402", "crypto"],
+                            "required_headers": [
+                                "X-StockTrends-Payment-Method",
+                                "X-StockTrends-Payment-Network",
+                                "X-StockTrends-Payment-Reference",
+                                "X-StockTrends-Payment-Amount",
+                            ],
+                            "validation_error": enforce_validation.error_code,
+                        },
+                        status_code=402,
+                    )
+                    response.headers["X-StockTrends-Pricing-Rule"] = "agent_pay_required"
+                    response.headers["X-StockTrends-Payment-Required"] = "true"
+                    return response
+
+            # Normal request
             response = await call_next(request)
             status_code = response.status_code
 
