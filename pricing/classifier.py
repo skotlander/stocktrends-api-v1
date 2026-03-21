@@ -48,6 +48,8 @@ AGENT_PAY_PATH_PREFIXES = {
 
 # Feature flag (OFF for now)
 ENABLE_AGENT_PAY = False
+ENFORCE_AGENT_PAY = False
+VALIDATE_AGENT_PAY_HEADERS = True
 
 
 # -----------------------------

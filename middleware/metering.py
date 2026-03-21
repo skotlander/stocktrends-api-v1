@@ -9,7 +9,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from metering.logger import log_api_request_event, log_api_request_economics
-from pricing.classifier import classify_request
+from pricing.classifier import classify_request, VALIDATE_AGENT_PAY_HEADERS
+from pricing.payment_validator import validate_payment_headers
 
 
 logger = logging.getLogger("stocktrends_api.metering")
@@ -153,8 +154,18 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             has_paid_auth = bool(api_key_id or customer_id)
             decision = classify_request(path, has_paid_auth)
 
-            # Raw request log keeps the existing classification behavior.
-            # Optional client-declared pricing rule is NOT trusted to override the system rule yet.
+            payment_validation_error = None
+
+            should_validate_agent_pay = (
+                VALIDATE_AGENT_PAY_HEADERS
+                and path.startswith("/v1/stim")
+            )
+
+            if should_validate_agent_pay:
+                validation = validate_payment_headers(request.headers)
+                if not validation.valid:
+                    payment_validation_error = validation.error_code
+
             event = {
                 "event_time_utc": datetime.now(timezone.utc),
                 "request_id": request_id,
@@ -187,7 +198,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 "payment_method": decision.log_payment_method,
                 "pricing_rule_id": decision.log_pricing_rule_id,
                 "error_code": error_code,
-                "notes": None,
+                "notes": payment_validation_error,
             }
 
             try:
