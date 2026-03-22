@@ -1,7 +1,9 @@
 # main.py
 import logging
+
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
+from fastapi.responses import FileResponse
 
 from middleware.request_id import RequestIdMiddleware
 from middleware.api_key import ApiKeyMiddleware
@@ -20,12 +22,6 @@ from routers.breadth import router as breadth_router
 from routers.leadership import router as leadership_router
 from routers.ai import router as ai_router
 from routers.pricing import router as pricing_router
-from fastapi.responses import FileResponse
-
-@app.get("/llms.txt", include_in_schema=False)
-def llms_txt():
-    return FileResponse("static/llms.txt", media_type="text/plain")
-
 
 logging.basicConfig(level=logging.INFO)
 
@@ -129,6 +125,12 @@ app = FastAPI(
     title=APP_TITLE,
     version=APP_VERSION,
 )
+
+
+@app.get("/llms.txt", include_in_schema=False)
+def llms_txt():
+    return FileResponse("static/llms.txt", media_type="text/plain")
+
 
 # Middleware order matters
 app.add_middleware(RequestIdMiddleware)
