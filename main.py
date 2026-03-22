@@ -132,11 +132,18 @@ def llms_txt():
     return FileResponse("static/llms.txt", media_type="text/plain")
 
 
-# Middleware order matters
-app.add_middleware(RequestIdMiddleware)
-app.add_middleware(ApiKeyMiddleware)
-app.add_middleware(MeteringMiddleware)
+# IMPORTANT:
+# Starlette/FastAPI middleware execution order is the reverse of registration.
+# To get runtime order:
+#   1) RequestIdMiddleware
+#   2) ApiKeyMiddleware
+#   3) MeteringMiddleware
+#   4) RequestLoggerMiddleware
+# we register them in the opposite order below.
 app.add_middleware(RequestLoggerMiddleware)
+app.add_middleware(MeteringMiddleware)
+app.add_middleware(ApiKeyMiddleware)
+app.add_middleware(RequestIdMiddleware)
 
 # Versioned API sub-application
 v1 = FastAPI(
