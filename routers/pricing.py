@@ -3,7 +3,15 @@ from fastapi import APIRouter
 router = APIRouter(prefix="/pricing", tags=["pricing"])
 
 
-@router.get("")
+@router.get(
+    "",
+    summary="Pricing discovery metadata",
+    description=(
+        "Returns machine-readable pricing metadata for Stock Trends API endpoint families. "
+        "Useful for AI agents, developer tooling, and integrations that need to understand "
+        "which endpoints are free, free-metered, subscription-covered, or support agent-native payment metadata."
+    ),
+)
 def get_pricing():
     return {
         "version": "1",

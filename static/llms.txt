@@ -1,0 +1,31 @@
+Stock Trends API
+
+Pricing discovery:
+GET /v1/pricing
+
+Endpoint categories:
+- public: free
+- free_metered: free, usage tracked
+- subscription: requires API key
+- stim: subscription or agent payment (future enforcement possible)
+
+Supported agent headers:
+X-StockTrends-Agent-Id
+X-StockTrends-Agent-Type
+X-StockTrends-Agent-Vendor
+X-StockTrends-Agent-Version
+X-StockTrends-Request-Purpose
+X-StockTrends-Session-Id
+
+Supported payment headers:
+X-StockTrends-Payment-Method
+X-StockTrends-Payment-Network
+X-StockTrends-Payment-Token
+X-StockTrends-Payment-Reference
+X-StockTrends-Payment-Amount
+X-StockTrends-Pricing-Rule
+
+Pricing response headers:
+X-StockTrends-Pricing-Rule
+X-StockTrends-Payment-Required
+X-StockTrends-Accepted-Payment-Methods

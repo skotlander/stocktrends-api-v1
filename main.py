@@ -20,6 +20,11 @@ from routers.breadth import router as breadth_router
 from routers.leadership import router as leadership_router
 from routers.ai import router as ai_router
 from routers.pricing import router as pricing_router
+from fastapi.responses import FileResponse
+
+@app.get("/llms.txt", include_in_schema=False)
+def llms_txt():
+    return FileResponse("static/llms.txt", media_type="text/plain")
 
 
 logging.basicConfig(level=logging.INFO)
@@ -58,7 +63,28 @@ def apply_api_key_security_to_openapi(v1_app: FastAPI) -> dict:
             "Use the **Authorize** button and provide either:\n"
             "- `X-API-Key` header, or\n"
             "- `Authorization: Bearer <API_KEY>`\n\n"
-            "Public / free-metered endpoints remain callable without a key."
+            "Public / free-metered endpoints remain callable without a key.\n\n"
+            "Pricing discovery:\n"
+            "- `GET /v1/pricing` returns machine-readable pricing metadata.\n"
+            "- Some endpoints, especially `/v1/stim/*`, may support agent payment metadata.\n\n"
+            "Supported agent headers:\n"
+            "- `X-StockTrends-Agent-Id`\n"
+            "- `X-StockTrends-Agent-Type`\n"
+            "- `X-StockTrends-Agent-Vendor`\n"
+            "- `X-StockTrends-Agent-Version`\n"
+            "- `X-StockTrends-Request-Purpose`\n"
+            "- `X-StockTrends-Session-Id`\n\n"
+            "Supported payment headers:\n"
+            "- `X-StockTrends-Payment-Method`\n"
+            "- `X-StockTrends-Payment-Network`\n"
+            "- `X-StockTrends-Payment-Token`\n"
+            "- `X-StockTrends-Payment-Reference`\n"
+            "- `X-StockTrends-Payment-Amount`\n"
+            "- `X-StockTrends-Pricing-Rule`\n\n"
+            "Pricing discovery response headers may include:\n"
+            "- `X-StockTrends-Pricing-Rule`\n"
+            "- `X-StockTrends-Payment-Required`\n"
+            "- `X-StockTrends-Accepted-Payment-Methods`\n"
         ),
         routes=v1_app.routes,
     )
