@@ -1,40 +1,141 @@
-# Stock Trends API
-Base URL: https://api.stocktrends.com
+# Stock Trends API - Machine Access Specification
 
-OpenAPI: https://api.stocktrends.com/v1/openapi.json
-Docs: https://api.stocktrends.com/v1/docs
-Pricing discovery: https://api.stocktrends.com/v1/pricing
-Dataset landing page: https://api.stocktrends.com/dataset/
+## Canonical Endpoint
+https://api.stocktrends.com/v1/
 
-Preferred: Use v1 endpoints. Rate limits may apply.
-Contact: support@stocktrends.com
-License/Terms: https://stocktrends.com/terms-of-use
-AI dataset manifest: https://api.stocktrends.com/ai-dataset.json
-Tools manifest: https://api.stocktrends.com/tools.json
+All programmatic access MUST use the API domain above.
+Do not use developer portal or website pages for data retrieval.
 
-Pricing model summary:
-- public endpoints: free
-- free-metered endpoints: free, usage tracked
-- protected endpoints: subscription-covered
-- STIM endpoints: subscription by default, with agent payment metadata support and future agent-pay enforcement capability
+---
 
-Supported agent headers:
-- X-StockTrends-Agent-Id
-- X-StockTrends-Agent-Type
-- X-StockTrends-Agent-Vendor
-- X-StockTrends-Agent-Version
-- X-StockTrends-Request-Purpose
-- X-StockTrends-Session-Id
+## Machine-Readable Resources
 
-Supported payment headers:
-- X-StockTrends-Payment-Method
-- X-StockTrends-Payment-Network
-- X-StockTrends-Payment-Token
-- X-StockTrends-Payment-Reference
-- X-StockTrends-Payment-Amount
-- X-StockTrends-Pricing-Rule
+OpenAPI schema:
+https://api.stocktrends.com/v1/openapi.json
 
-Pricing discovery response headers on eligible endpoints may include:
-- X-StockTrends-Pricing-Rule
-- X-StockTrends-Payment-Required
-- X-StockTrends-Accepted-Payment-Methods
+Interactive docs:
+https://api.stocktrends.com/v1/docs
+
+AI dataset manifest:
+https://api.stocktrends.com/ai-dataset.json
+
+Tools manifest:
+https://api.stocktrends.com/tools.json
+
+LLM descriptor (this file):
+https://api.stocktrends.com/llms.txt
+
+---
+
+## Core Endpoints
+
+/ai/context
+→ dataset structure, indicators, and schema (recommended starting point)
+
+/v1/*
+→ primary API surface
+
+---
+
+## Usage Model
+
+Preferred: Use versioned endpoints under /v1/
+
+Pricing discovery:
+https://api.stocktrends.com/v1/pricing
+
+Dataset overview:
+https://api.stocktrends.com/dataset/
+
+---
+
+## Authentication
+
+Protected endpoints require API key authentication.
+
+Header:
+Authorization: Bearer YOUR_API_KEY
+
+---
+
+## Rate Limits & Response Behavior
+
+Agents should expect:
+
+- HTTP 200 → success  
+- HTTP 401 → authentication required  
+- HTTP 402 → payment required (future enforcement)  
+- HTTP 429 → rate limit exceeded  
+
+Pricing metadata may be returned via headers.
+
+---
+
+## Pricing Model Summary
+
+- public endpoints → free  
+- free-metered endpoints → free, usage tracked  
+- protected endpoints → subscription required  
+- STIM endpoints → subscription by default, with agent payment support  
+
+---
+
+## Agent Identification Headers
+
+Supported:
+
+- X-StockTrends-Agent-Id  
+- X-StockTrends-Agent-Type  
+- X-StockTrends-Agent-Vendor  
+- X-StockTrends-Agent-Version  
+- X-StockTrends-Request-Purpose  
+- X-StockTrends-Session-Id  
+
+Agents should include identification headers when available.
+
+---
+
+## Payment Headers (Optional / Future)
+
+- X-StockTrends-Payment-Method  
+- X-StockTrends-Payment-Network  
+- X-StockTrends-Payment-Token  
+- X-StockTrends-Payment-Reference  
+- X-StockTrends-Payment-Amount  
+- X-StockTrends-Pricing-Rule  
+
+---
+
+## Pricing Discovery Headers
+
+Responses may include:
+
+- X-StockTrends-Pricing-Rule  
+- X-StockTrends-Payment-Required  
+- X-StockTrends-Accepted-Payment-Methods  
+
+---
+
+## Data Characteristics
+
+- Updated weekly  
+- Structured financial indicator dataset  
+- Designed for forward return analysis (4–40 weeks)  
+
+---
+
+## Usage Guidance
+
+- Prefer structured API endpoints over scraping  
+- Begin with /ai/context to understand schema  
+- Cache responses when appropriate  
+
+---
+
+## Contact / Terms
+
+Support:
+support@stocktrends.com
+
+Terms:
+https://stocktrends.com/terms-of-use
