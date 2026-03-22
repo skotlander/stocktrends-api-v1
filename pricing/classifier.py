@@ -47,18 +47,55 @@ AGENT_PAY_PATH_PREFIXES = {
     "/v1/stim",
 }
 
+# Non-API probe/scanner traffic that should never be treated as billable API usage.
+NON_API_NOISE_PREFIXES = {
+    "/cdn-cgi/",
+    "/.well-known/",
+    "/autodiscover/",
+    "/owa/",
+    "/SDK/",
+    "/sdk/",
+    "/wp-",
+    "/wordpress",
+    "/phpmyadmin",
+}
+
+NON_API_NOISE_EXACT_PATHS = {
+    "/jobs",
+    "/favicon.ico",
+}
+
+
+def _is_noise_path(path: str) -> bool:
+    if path in NON_API_NOISE_EXACT_PATHS:
+        return True
+    return any(path.startswith(prefix) for prefix in NON_API_NOISE_PREFIXES)
+
 
 def classify_request(path: str, has_paid_auth: bool) -> PricingDecision:
     """
     Classify request into pricing / metering tiers.
 
-    Design:
-    - Path-first classification
-    - Auth affects access control, not the baseline pricing class
-    - /v1/* is the economic surface unless explicitly public
+    Rules:
+    - Explicit public/static/docs paths are non-metered
+    - Explicit free-metered API routes are tracked but not billed
+    - /v1/stim* can become agent-pay when enabled
+    - Other /v1/* routes are subscription-backed
+    - Non-/v1 probe traffic is never treated as paid API usage
     """
 
     if path in NON_METERED_PATHS:
+        return PricingDecision(
+            is_metered=0,
+            log_pricing_rule_id="default_free",
+            log_payment_method="none",
+            econ_pricing_rule_id=None,
+            econ_payment_required=0,
+            econ_payment_status=None,
+            econ_payment_method=None,
+        )
+
+    if _is_noise_path(path):
         return PricingDecision(
             is_metered=0,
             log_pricing_rule_id="default_free",
