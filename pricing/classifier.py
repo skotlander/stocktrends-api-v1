@@ -21,10 +21,6 @@ class PricingDecision:
     econ_payment_method: str | None
 
 
-# -----------------------------
-# CONFIGURATION
-# -----------------------------
-
 NON_METERED_PATHS = {
     "/",
     "/index.html",
@@ -39,6 +35,7 @@ NON_METERED_PATHS = {
     "/v1/openapi.json",
     "/health",
     "/favicon.ico",
+    "/v1/pricing",
 }
 
 FREE_METERED_PATHS = {
@@ -46,34 +43,21 @@ FREE_METERED_PATHS = {
     "/v1/breadth/sector/latest",
 }
 
-# Future premium / agent-pay endpoints
 AGENT_PAY_PATH_PREFIXES = {
     "/v1/stim",
 }
 
-# Feature flag (OFF for now)
-ENABLE_AGENT_PAY = False
-ENFORCE_AGENT_PAY = False
-VALIDATE_AGENT_PAY_HEADERS = True
-
-
-# -----------------------------
-# CLASSIFIER
-# -----------------------------
 
 def classify_request(path: str, has_paid_auth: bool) -> PricingDecision:
     """
     Classify request into pricing / metering tiers.
 
-    IMPORTANT DESIGN:
-    - Path-first classification (NOT auth-first)
-    - /v1/* = economic surface
-    - Auth only affects access, not pricing classification
+    Design:
+    - Path-first classification
+    - Auth affects access control, not the baseline pricing class
+    - /v1/* is the economic surface unless explicitly public
     """
 
-    # ----------------------------------------
-    # 1. PUBLIC / NON-METERED
-    # ----------------------------------------
     if path in NON_METERED_PATHS:
         return PricingDecision(
             is_metered=0,
@@ -85,24 +69,18 @@ def classify_request(path: str, has_paid_auth: bool) -> PricingDecision:
             econ_payment_method=None,
         )
 
-    # ----------------------------------------
-    # 2. FREE BUT METERED (ANALYTICS VALUE)
-    # ----------------------------------------
     if path in FREE_METERED_PATHS:
         return PricingDecision(
             is_metered=1,
             log_pricing_rule_id="default_free_metered",
-            log_payment_method="none",
+            log_payment_method="free",
             econ_pricing_rule_id="default_free_metered",
             econ_payment_required=0,
             econ_payment_status="not_required",
             econ_payment_method="free",
         )
 
-    # ----------------------------------------
-    # 3. FUTURE: AGENT PAY (MPP / x402)
-    # ----------------------------------------
-    if ENABLE_AGENT_PAY and any(path.startswith(p) for p in AGENT_PAY_PATH_PREFIXES):
+    if ENABLE_AGENT_PAY and any(path.startswith(prefix) for prefix in AGENT_PAY_PATH_PREFIXES):
         return PricingDecision(
             is_metered=1,
             log_pricing_rule_id="agent_pay_required",
@@ -113,9 +91,6 @@ def classify_request(path: str, has_paid_auth: bool) -> PricingDecision:
             econ_payment_method="mpp",
         )
 
-    # ----------------------------------------
-    # 4. DEFAULT: ALL /v1/* IS SUBSCRIPTION
-    # ----------------------------------------
     if path.startswith("/v1/"):
         return PricingDecision(
             is_metered=1,
@@ -127,9 +102,6 @@ def classify_request(path: str, has_paid_auth: bool) -> PricingDecision:
             econ_payment_method="subscription",
         )
 
-    # ----------------------------------------
-    # 5. FALLBACK (SAFE DEFAULT)
-    # ----------------------------------------
     return PricingDecision(
         is_metered=0,
         log_pricing_rule_id="default_free",
