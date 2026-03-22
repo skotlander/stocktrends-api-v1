@@ -2,12 +2,18 @@ import os
 import time
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 
+from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from fastapi import Request
 
-from metering.logger import log_api_request_event, log_api_request_economics
+from metering.logger import (
+    log_api_request_event,
+    log_api_request_economics,
+    get_metering_engine,
+)
 from pricing.classifier import classify_request
 
 logger = logging.getLogger("stocktrends_api.metering")
@@ -104,6 +110,84 @@ def is_billable_request(decision) -> int:
     return 1 if decision.log_pricing_rule_id in {"default_subscription", "agent_pay_required"} else 0
 
 
+def safe_decimal(value, default: str = "0"):
+    if value is None:
+        return Decimal(default)
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return Decimal(default)
+
+
+def get_active_pricing_rule(rule_name: str | None) -> dict | None:
+    if not rule_name:
+        return None
+
+    try:
+        engine = get_metering_engine()
+        with engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT
+                        id,
+                        rule_name,
+                        endpoint_pattern,
+                        endpoint_family,
+                        api_version,
+                        access_type,
+                        cost_per_request,
+                        cost_unit,
+                        free_tier_limit,
+                        hard_limit,
+                        requires_subscription,
+                        requires_payment,
+                        is_active
+                    FROM api_pricing_rules
+                    WHERE rule_name = :rule_name
+                      AND is_active = 1
+                    LIMIT 1
+                    """
+                ),
+                {"rule_name": rule_name},
+            ).mappings().first()
+
+            return dict(row) if row else None
+
+    except Exception as e:
+        logger.error("Pricing rule lookup failed for %s: %s", rule_name, e, exc_info=True)
+        return None
+
+
+def resolve_economic_amounts(rule_name: str | None) -> tuple[Decimal, Decimal]:
+    """
+    Returns:
+      unit_price_usd, billed_amount_usd
+
+    Current model:
+    - default_free -> 0, 0
+    - default_free_metered -> 0, 0
+    - default_subscription -> use rule unit price if present, but billed amount 0
+        because subscription covers entitlement
+    - agent_pay_required -> billed amount = unit price
+    """
+    rule = get_active_pricing_rule(rule_name)
+    if not rule:
+        return Decimal("0"), Decimal("0")
+
+    unit_price_usd = safe_decimal(rule.get("cost_per_request"), "0")
+    access_type = rule.get("access_type")
+
+    if access_type == "paid":
+        billed_amount_usd = unit_price_usd
+    else:
+        billed_amount_usd = Decimal("0")
+
+    return unit_price_usd, billed_amount_usd
+
+
 class MeteringMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
@@ -157,6 +241,9 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
         if should_validate_agent_pay:
             validation_valid, validation_error, validation_detail = validate_payment_headers(request)
+
+        economic_rule_name = decision.econ_pricing_rule_id or decision.log_pricing_rule_id
+        unit_price_usd, billed_amount_usd = resolve_economic_amounts(economic_rule_name)
 
         if should_enforce_agent_pay and not validation_valid:
             response = JSONResponse(
@@ -221,9 +308,9 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             if should_log_economics(decision):
                 econ = {
                     "request_id": request_id,
-                    "pricing_rule_id": decision.econ_pricing_rule_id,
-                    "unit_price_usd": 0,
-                    "billed_amount_usd": 0,
+                    "pricing_rule_id": economic_rule_name,
+                    "unit_price_usd": unit_price_usd,
+                    "billed_amount_usd": billed_amount_usd,
                     "payment_required": 1,
                     "payment_status": "failed_validation",
                     "payment_method": payment_method_header or decision.econ_payment_method,
@@ -321,9 +408,9 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
                 econ = {
                     "request_id": request_id,
-                    "pricing_rule_id": decision.econ_pricing_rule_id,
-                    "unit_price_usd": 0,
-                    "billed_amount_usd": 0,
+                    "pricing_rule_id": economic_rule_name,
+                    "unit_price_usd": unit_price_usd,
+                    "billed_amount_usd": billed_amount_usd,
                     "payment_required": decision.econ_payment_required,
                     "payment_status": payment_status,
                     "payment_method": payment_method_header or decision.econ_payment_method,
