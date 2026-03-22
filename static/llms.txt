@@ -1,31 +1,40 @@
-Stock Trends API
+# Stock Trends API
+Base URL: https://api.stocktrends.com
 
-Pricing discovery:
-GET /v1/pricing
+OpenAPI: https://api.stocktrends.com/v1/openapi.json
+Docs: https://api.stocktrends.com/v1/docs
+Pricing discovery: https://api.stocktrends.com/v1/pricing
+Dataset landing page: https://api.stocktrends.com/dataset/
 
-Endpoint categories:
-- public: free
-- free_metered: free, usage tracked
-- subscription: requires API key
-- stim: subscription or agent payment (future enforcement possible)
+Preferred: Use v1 endpoints. Rate limits may apply.
+Contact: support@stocktrends.com
+License/Terms: https://stocktrends.com/terms-of-use
+AI dataset manifest: https://api.stocktrends.com/ai-dataset.json
+Tools manifest: https://api.stocktrends.com/tools.json
+
+Pricing model summary:
+- public endpoints: free
+- free-metered endpoints: free, usage tracked
+- protected endpoints: subscription-covered
+- STIM endpoints: subscription by default, with agent payment metadata support and future agent-pay enforcement capability
 
 Supported agent headers:
-X-StockTrends-Agent-Id
-X-StockTrends-Agent-Type
-X-StockTrends-Agent-Vendor
-X-StockTrends-Agent-Version
-X-StockTrends-Request-Purpose
-X-StockTrends-Session-Id
+- X-StockTrends-Agent-Id
+- X-StockTrends-Agent-Type
+- X-StockTrends-Agent-Vendor
+- X-StockTrends-Agent-Version
+- X-StockTrends-Request-Purpose
+- X-StockTrends-Session-Id
 
 Supported payment headers:
-X-StockTrends-Payment-Method
-X-StockTrends-Payment-Network
-X-StockTrends-Payment-Token
-X-StockTrends-Payment-Reference
-X-StockTrends-Payment-Amount
-X-StockTrends-Pricing-Rule
+- X-StockTrends-Payment-Method
+- X-StockTrends-Payment-Network
+- X-StockTrends-Payment-Token
+- X-StockTrends-Payment-Reference
+- X-StockTrends-Payment-Amount
+- X-StockTrends-Pricing-Rule
 
-Pricing response headers:
-X-StockTrends-Pricing-Rule
-X-StockTrends-Payment-Required
-X-StockTrends-Accepted-Payment-Methods
+Pricing discovery response headers on eligible endpoints may include:
+- X-StockTrends-Pricing-Rule
+- X-StockTrends-Payment-Required
+- X-StockTrends-Accepted-Payment-Methods
