@@ -23,6 +23,22 @@ ENFORCE_AGENT_PAY = os.getenv("ENFORCE_AGENT_PAY", "false").lower() == "true"
 VALIDATE_AGENT_PAY_HEADERS = os.getenv("VALIDATE_AGENT_PAY_HEADERS", "false").lower() == "true"
 
 
+def _parse_csv_env(env_name: str, default: str = "") -> set[str]:
+    raw = os.getenv(env_name, default)
+    if not raw:
+        return set()
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
+AGENT_PAY_ENFORCE_PATH_PREFIXES = _parse_csv_env(
+    "AGENT_PAY_ENFORCE_PATH_PREFIXES",
+    "/v1/stim",
+)
+
+AGENT_PAY_TEST_CUSTOMER_IDS = _parse_csv_env("AGENT_PAY_TEST_CUSTOMER_IDS")
+AGENT_PAY_TEST_API_KEY_IDS = _parse_csv_env("AGENT_PAY_TEST_API_KEY_IDS")
+
+
 def validate_payment_headers(request: Request):
     required_headers = [
         "x-stocktrends-payment-amount",
@@ -188,6 +204,51 @@ def resolve_economic_amounts(rule_name: str | None) -> tuple[Decimal, Decimal]:
     return unit_price_usd, billed_amount_usd
 
 
+def _path_matches_enforcement_scope(path: str) -> bool:
+    if not AGENT_PAY_ENFORCE_PATH_PREFIXES:
+        return False
+    return any(path.startswith(prefix) for prefix in AGENT_PAY_ENFORCE_PATH_PREFIXES)
+
+
+def _caller_matches_test_allowlist(request: Request) -> bool:
+    """
+    If neither allowlist is configured, enforcement applies to everyone in scope.
+    If one or both allowlists are configured, a match on either list enables enforcement.
+    """
+    customer_id = getattr(request.state, "customer_id", None)
+    api_key_id = getattr(request.state, "api_key_id", None)
+
+    has_customer_allowlist = bool(AGENT_PAY_TEST_CUSTOMER_IDS)
+    has_api_key_allowlist = bool(AGENT_PAY_TEST_API_KEY_IDS)
+
+    if not has_customer_allowlist and not has_api_key_allowlist:
+        return True
+
+    if has_customer_allowlist and customer_id and customer_id in AGENT_PAY_TEST_CUSTOMER_IDS:
+        return True
+
+    if has_api_key_allowlist and api_key_id and api_key_id in AGENT_PAY_TEST_API_KEY_IDS:
+        return True
+
+    return False
+
+
+def should_enforce_agent_pay_for_request(request: Request, path: str, decision) -> bool:
+    if not ENABLE_AGENT_PAY or not ENFORCE_AGENT_PAY:
+        return False
+
+    if decision.econ_payment_required != 1:
+        return False
+
+    if not _path_matches_enforcement_scope(path):
+        return False
+
+    if not _caller_matches_test_allowlist(request):
+        return False
+
+    return True
+
+
 class MeteringMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
@@ -229,11 +290,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             and payment_method_header == "mpp"
         )
 
-        should_enforce_agent_pay = (
-            ENABLE_AGENT_PAY
-            and ENFORCE_AGENT_PAY
-            and decision.econ_payment_required == 1
-        )
+        should_enforce_agent_pay = should_enforce_agent_pay_for_request(request, path, decision)
 
         validation_valid = True
         validation_error = None
@@ -403,8 +460,12 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
             if should_log_economics(decision):
                 payment_status = decision.econ_payment_status
+
                 if decision.econ_payment_required and payment_method_header == "mpp":
-                    payment_status = "presented"
+                    if validation_valid:
+                        payment_status = "presented"
+                    else:
+                        payment_status = "would_block_under_402" if not should_enforce_agent_pay else "failed_validation"
 
                 econ = {
                     "request_id": request_id,
