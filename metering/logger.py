@@ -77,6 +77,8 @@ INSERT INTO api_request_logs (
 INSERT_REQUEST_ECONOMICS_SQL = text("""
 INSERT INTO api_request_economics (
     request_id,
+    customer_id,
+    api_key_id,
     pricing_rule_id,
     unit_price_usd,
     billed_amount_usd,
@@ -97,6 +99,8 @@ INSERT INTO api_request_economics (
     request_purpose
 ) VALUES (
     :request_id,
+    :customer_id,
+    :api_key_id,
     :pricing_rule_id,
     :unit_price_usd,
     :billed_amount_usd,
