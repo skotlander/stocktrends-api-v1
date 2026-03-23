@@ -316,7 +316,14 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
         auth_mode = getattr(request.state, "auth_mode", "unknown")
         has_paid_auth = auth_mode == "api_key"
-        decision = classify_request(path=path, has_paid_auth=has_paid_auth)
+        plan_code = getattr(request.state, "plan_code", None)
+
+        decision = classify_request(
+            path=path,
+            has_paid_auth=has_paid_auth,
+            payment_method_header=payment_method_header,
+            plan_code=plan_code,
+        )
 
         request.state.pricing_rule_id = decision.log_pricing_rule_id
         request.state.is_metered = decision.is_metered
@@ -324,6 +331,102 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         request.state.payment_method_resolved = decision.econ_payment_method
         request.state.econ_pricing_rule_id = decision.econ_pricing_rule_id
         request.state.econ_payment_status = decision.econ_payment_status
+
+        if not decision.access_granted:
+            response = JSONResponse(
+                status_code=403,
+                content={
+                    "error": decision.deny_reason or "access_denied",
+                    "detail": "STIM access not permitted for this account",
+                    "request_id": request_id,
+                },
+            )
+
+            apply_pricing_headers(
+                response,
+                pricing_rule_id=decision.log_pricing_rule_id,
+                payment_required=bool(decision.econ_payment_required),
+                accepted_methods=get_accepted_payment_methods(path, decision.log_pricing_rule_id),
+            )
+
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            event = {
+                "event_time_utc": datetime.now(timezone.utc),
+                "request_id": request_id,
+                "environment": "production",
+                "api_key_id": getattr(request.state, "api_key_id", None),
+                "customer_id": getattr(request.state, "customer_id", None),
+                "subscription_id": getattr(request.state, "subscription_id", None),
+                "plan_code": plan_code,
+                "actor_type": getattr(request.state, "actor_type", "unknown"),
+                "workflow_type": normalize_workflow_type(auth_mode, agent_id_header),
+                "agent_identifier": agent_id_header,
+                "agent_id": agent_id_header,
+                "endpoint_path": path,
+                "route_template": None,
+                "endpoint_family": get_endpoint_family(path),
+                "http_method": method,
+                "query_string": query_string,
+                "symbol": request.query_params.get("symbol"),
+                "exchange": request.query_params.get("exchange"),
+                "symbol_exchange": request.query_params.get("symbol_exchange"),
+                "status_code": 403,
+                "success": 0,
+                "latency_ms": latency_ms,
+                "response_size_bytes": get_response_size_bytes(response),
+                "client_ip": get_client_ip(request),
+                "user_agent": request.headers.get("user-agent"),
+                "referer": request.headers.get("referer"),
+                "is_metered": decision.is_metered,
+                "is_billable": is_billable_request(decision),
+                "payment_method": payment_method_header or decision.log_payment_method,
+                "pricing_rule_id": decision.log_pricing_rule_id,
+                "error_code": decision.deny_reason or "access_denied",
+                "notes": "STIM access not permitted for this account",
+            }
+
+            try:
+                log_api_request_event(event)
+            except Exception as e:
+                logger.error("Metering request-log insert failed: %s", e, exc_info=True)
+
+            if should_log_economics(decision):
+                econ_payment_fields = build_econ_payment_fields(
+                    payment_required=decision.econ_payment_required,
+                    payment_status=decision.econ_payment_status or "not_required",
+                    payment_method_header=payment_method_header,
+                    payment_network_header=payment_network_header,
+                    payment_token_header=payment_token_header,
+                    payment_amount_header=payment_amount_header,
+                    payment_reference_header=payment_reference_header,
+                    decision=decision,
+                )
+
+                econ = {
+                    "request_id": request_id,
+                    "customer_id": getattr(request.state, "customer_id", None),
+                    "api_key_id": getattr(request.state, "api_key_id", None),
+                    "pricing_rule_id": decision.econ_pricing_rule_id or decision.log_pricing_rule_id,
+                    "unit_price_usd": unit_price_usd if 'unit_price_usd' in locals() else Decimal("0"),
+                    "billed_amount_usd": billed_amount_usd if 'billed_amount_usd' in locals() else Decimal("0"),
+                    "payment_required": decision.econ_payment_required,
+                    **econ_payment_fields,
+                    "session_id": session_id_header,
+                    "payment_channel_id": None,
+                    "agent_id": agent_id_header,
+                    "agent_type": agent_type_header,
+                    "agent_vendor": agent_vendor_header,
+                    "agent_version": agent_version_header,
+                    "request_purpose": request_purpose_header,
+                }
+
+                try:
+                    log_api_request_economics(econ)
+                except Exception as e:
+                    logger.error("Metering economics-log insert failed: %s", e, exc_info=True)
+
+            return response
 
         should_validate_agent_pay = (
             ENABLE_AGENT_PAY
@@ -371,7 +474,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 "api_key_id": getattr(request.state, "api_key_id", None),
                 "customer_id": getattr(request.state, "customer_id", None),
                 "subscription_id": getattr(request.state, "subscription_id", None),
-                "plan_code": getattr(request.state, "plan_code", None),
+                "plan_code": plan_code,
                 "actor_type": getattr(request.state, "actor_type", "unknown"),
                 "workflow_type": normalize_workflow_type(auth_mode, agent_id_header),
                 "agent_identifier": agent_id_header,
@@ -474,7 +577,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 "api_key_id": getattr(request.state, "api_key_id", None),
                 "customer_id": getattr(request.state, "customer_id", None),
                 "subscription_id": getattr(request.state, "subscription_id", None),
-                "plan_code": getattr(request.state, "plan_code", None),
+                "plan_code": plan_code,
                 "actor_type": getattr(request.state, "actor_type", "unknown"),
                 "workflow_type": normalize_workflow_type(auth_mode, agent_id_header),
                 "agent_identifier": agent_id_header,
