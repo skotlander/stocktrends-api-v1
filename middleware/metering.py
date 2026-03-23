@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+from uuid import uuid4
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -266,7 +267,14 @@ def lookup_agent_record(customer_id: str | None, agent_identifier: str | None) -
             row = conn.execute(
                 text(
                     """
-                    SELECT id, status
+                    SELECT
+                        id,
+                        customer_id,
+                        agent_identifier,
+                        agent_type,
+                        agent_vendor,
+                        display_name,
+                        status
                     FROM api_agents
                     WHERE customer_id = :customer_id
                       AND agent_identifier = :agent_identifier
@@ -284,6 +292,65 @@ def lookup_agent_record(customer_id: str | None, agent_identifier: str | None) -
     except Exception as e:
         logger.error("Agent lookup failed: %s", e, exc_info=True)
         return None
+
+
+def ensure_agent_record(
+    customer_id: str | None,
+    agent_identifier: str | None,
+    agent_type_header: str | None,
+    agent_vendor_header: str | None,
+) -> tuple[dict | None, bool]:
+    """
+    Auto-register agent on first use when customer_id + agent_identifier are present.
+    Returns: (agent_record, auto_registered)
+    """
+    if not customer_id or not agent_identifier:
+        return None, False
+
+    existing = lookup_agent_record(customer_id, agent_identifier)
+    if existing:
+        return existing, False
+
+    try:
+        engine = get_metering_engine()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT IGNORE INTO api_agents (
+                        id,
+                        customer_id,
+                        agent_identifier,
+                        agent_type,
+                        agent_vendor,
+                        display_name,
+                        status
+                    ) VALUES (
+                        :id,
+                        :customer_id,
+                        :agent_identifier,
+                        :agent_type,
+                        :agent_vendor,
+                        :display_name,
+                        'active'
+                    )
+                    """
+                ),
+                {
+                    "id": str(uuid4()),
+                    "customer_id": customer_id,
+                    "agent_identifier": agent_identifier,
+                    "agent_type": agent_type_header,
+                    "agent_vendor": agent_vendor_header,
+                    "display_name": agent_identifier,
+                },
+            )
+    except Exception as e:
+        logger.error("Agent auto-registration failed: %s", e, exc_info=True)
+        return lookup_agent_record(customer_id, agent_identifier), False
+
+    created = lookup_agent_record(customer_id, agent_identifier)
+    return created, bool(created)
 
 
 def _path_matches_enforcement_scope(path: str) -> bool:
@@ -362,9 +429,14 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         subscription_id = getattr(request.state, "subscription_id", None)
         actor_type = getattr(request.state, "actor_type", "unknown")
 
-        # --- Agent identity normalization and registry lookup ---
+        # --- Agent identity normalization and auto-registration ---
         agent_identifier = normalize_agent_identifier(agent_id_header, agent_vendor_header)
-        agent_record = lookup_agent_record(customer_id, agent_identifier)
+        agent_record, agent_auto_registered = ensure_agent_record(
+            customer_id=customer_id,
+            agent_identifier=agent_identifier,
+            agent_type_header=agent_type_header,
+            agent_vendor_header=agent_vendor_header,
+        )
 
         agent_registered = bool(agent_record)
         agent_registry_id = agent_record["id"] if agent_record else None
@@ -374,6 +446,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         request.state.agent_registered = agent_registered
         request.state.agent_registry_id = agent_registry_id
         request.state.agent_registry_status = agent_registry_status
+        request.state.agent_auto_registered = agent_auto_registered
 
         decision = classify_request(
             path=path,
