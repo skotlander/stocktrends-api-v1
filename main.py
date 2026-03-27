@@ -212,10 +212,11 @@ def ai_plugin():
             "name_for_human": "Stock Trends API",
             "name_for_model": "stock_trends_api",
             "description_for_human": "Structured market trend and probability data for North American stocks and ETFs.",
-            "description_for_model": "Provides structured financial market data including weekly trend classifications, momentum indicators, relative strength measures, unusual volume signals, market breadth analytics, selections, leadership data, and probabilistic forward return distributions for North American equities and ETFs. Use only documented endpoints and parameters defined in the OpenAPI specification.",
+            "description_for_model": "Provides structured financial market data including weekly trend classifications, momentum indicators, relative strength measures, unusual volume signals, market breadth analytics, selections, leadership data, and probabilistic forward return distributions for North American equities and ETFs. Authentication is primarily via X-API-Key header. Bearer token authentication is also supported using Authorization: Bearer <API_KEY>. Use only documented endpoints and parameters defined in the OpenAPI specification.",
             "auth": {
-                "type": "user_http",
-                "authorization_type": "bearer",
+                "type": "api_key",
+                "in": "header",
+                "name": "X-API-Key",
             },
             "api": {
                 "type": "openapi",
@@ -223,7 +224,7 @@ def ai_plugin():
                 "is_user_authenticated": True,
             },
             "logo_url": "https://stocktrends.com/images/ST-logo2.gif",
-            "contact_email": "info@stocktrends.com",
+            "contact_email": "api@stocktrends.com",
             "legal_info_url": "https://stocktrends.com/stock-trends-data-license",
         }
     )
