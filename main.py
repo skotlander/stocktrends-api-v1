@@ -229,6 +229,9 @@ def ai_plugin():
         }
     )
 
+@app.get("/tools.json", include_in_schema=False)
+def tools_json():
+    return FileResponse("static/tools.json", media_type="application/json")
 
 # Middleware (order matters)
 app.add_middleware(RequestLoggerMiddleware)
