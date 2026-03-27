@@ -1,0 +1,108 @@
+{
+    "version": "1.0",
+    "name": "Stock Trends API Tools",
+    "provider": "Stock Trends Publications",
+    "base_url": "https://api.stocktrends.com/v1",
+    "openapi": "https://api.stocktrends.com/v1/openapi.json",
+    "docs": "https://api.stocktrends.com/v1/docs",
+    "ai_context": "https://api.stocktrends.com/v1/ai/context",
+    "auth": {
+      "primary": {
+        "type": "api_key",
+        "in": "header",
+        "name": "X-API-Key",
+        "example": "X-API-Key: YOUR_API_KEY"
+      },
+      "alternative": {
+        "type": "http_bearer",
+        "header": "Authorization: Bearer YOUR_API_KEY"
+      }
+    },
+    "tools": [
+      {
+        "name": "ai_context",
+        "title": "AI Context",
+        "description": "Returns dataset structure, indicator definitions, coverage, usage guidance, and discovery links for agents.",
+        "method": "GET",
+        "path": "/ai/context",
+        "auth_required": false,
+        "category": "ai"
+      },
+      {
+        "name": "instrument_lookup",
+        "title": "Instrument Lookup",
+        "description": "Looks up a stock or ETF by symbol.",
+        "method": "GET",
+        "path": "/instruments/lookup",
+        "auth_required": false,
+        "category": "instruments",
+        "parameters": [
+          {
+            "name": "symbol",
+            "type": "string",
+            "required": true,
+            "description": "Ticker symbol, for example AAPL."
+          }
+        ]
+      },
+      {
+        "name": "breadth_sector_latest",
+        "title": "Latest Sector Breadth",
+        "description": "Returns the latest sector breadth snapshot.",
+        "method": "GET",
+        "path": "/breadth/sector/latest",
+        "auth_required": false,
+        "category": "breadth"
+      },
+      {
+        "name": "stim_top",
+        "title": "Top STIM Results",
+        "description": "Returns top-ranked STIM results from the Stock Trends Inference Model.",
+        "method": "GET",
+        "path": "/stim/top",
+        "auth_required": true,
+        "category": "stim"
+      },
+      {
+        "name": "selections_latest",
+        "title": "Latest Selections",
+        "description": "Returns the latest Stock Trends selections dataset.",
+        "method": "GET",
+        "path": "/selections/latest",
+        "auth_required": true,
+        "category": "selections"
+      },
+      {
+        "name": "selections_published_latest",
+        "title": "Latest Published Selections",
+        "description": "Returns the latest published selections dataset.",
+        "method": "GET",
+        "path": "/selections-published/latest",
+        "auth_required": false,
+        "category": "selections"
+      },
+      {
+        "name": "leadership_summary_latest",
+        "title": "Latest Leadership Summary",
+        "description": "Returns the latest leadership summary dataset.",
+        "method": "GET",
+        "path": "/leadership/summary/latest",
+        "auth_required": false,
+        "category": "leadership"
+      }
+    ],
+    "usage_guidance": [
+      "Start with /v1/ai/context to understand dataset structure and terminology.",
+      "Use the OpenAPI specification for exact request and response schemas.",
+      "Use X-API-Key as the primary authentication method.",
+      "Bearer token authentication is also supported as an alternative.",
+      "Prefer structured API endpoints over scraping website pages."
+    ],
+    "legal": {
+      "license": "https://stocktrends.com/stock-trends-data-license",
+      "terms": "https://stocktrends.com/terms-of-use"
+    },
+    "support": {
+      "email": "api@stocktrends.com"
+    }
+  }
