@@ -3,7 +3,7 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from middleware.request_id import RequestIdMiddleware
 from middleware.api_key import ApiKeyMiddleware
@@ -22,6 +22,7 @@ from routers.breadth import router as breadth_router
 from routers.leadership import router as leadership_router
 from routers.ai import router as ai_router
 from routers.pricing import router as pricing_router
+from routers.agents import router as agents_router  # ✅ NEW
 
 logging.basicConfig(level=logging.INFO)
 
@@ -33,17 +34,24 @@ FREE_METERED_V1_PATHS = {
     "/breadth/sector/latest",
 }
 
+HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
+
 
 def is_protected_v1_path(path: str) -> bool:
-    """
-    In the live middleware, most /v1/* paths are protected except:
-    - public/static/docs/openapi paths
-    - specific free-metered endpoints
-
-    Since this schema is for the mounted /v1 app, its paths do not include
-    the /v1 prefix. So we only need to exempt the known free-metered routes.
-    """
     return path not in FREE_METERED_V1_PATHS
+
+
+def _ensure_parameter_refs(operation: dict, refs: list[str]) -> None:
+    existing = operation.setdefault("parameters", [])
+    existing_refs = {
+        param.get("$ref")
+        for param in existing
+        if isinstance(param, dict) and "$ref" in param
+    }
+
+    for ref in refs:
+        if ref not in existing_refs:
+            existing.append({"$ref": ref})
 
 
 def apply_api_key_security_to_openapi(v1_app: FastAPI) -> dict:
@@ -53,99 +61,182 @@ def apply_api_key_security_to_openapi(v1_app: FastAPI) -> dict:
     openapi_schema = get_openapi(
         title=f"{APP_TITLE} v1",
         version=APP_VERSION,
-        description=(
-            "Stock Trends API v1.\n\n"
-            "Most `/v1/*` endpoints require authentication.\n\n"
-            "Use the **Authorize** button and provide either:\n"
-            "- `X-API-Key` header, or\n"
-            "- `Authorization: Bearer <API_KEY>`\n\n"
-            "Public / free-metered endpoints remain callable without a key.\n\n"
-            "Pricing discovery:\n"
-            "- `GET /v1/pricing` returns machine-readable pricing metadata.\n"
-            "- Some endpoints, especially `/v1/stim/*`, may support agent payment metadata.\n\n"
-            "Supported agent headers:\n"
-            "- `X-StockTrends-Agent-Id`\n"
-            "- `X-StockTrends-Agent-Type`\n"
-            "- `X-StockTrends-Agent-Vendor`\n"
-            "- `X-StockTrends-Agent-Version`\n"
-            "- `X-StockTrends-Request-Purpose`\n"
-            "- `X-StockTrends-Session-Id`\n\n"
-            "Supported payment headers:\n"
-            "- `X-StockTrends-Payment-Method`\n"
-            "- `X-StockTrends-Payment-Network`\n"
-            "- `X-StockTrends-Payment-Token`\n"
-            "- `X-StockTrends-Payment-Reference`\n"
-            "- `X-StockTrends-Payment-Amount`\n"
-            "- `X-StockTrends-Pricing-Rule`\n\n"
-            "Pricing discovery response headers may include:\n"
-            "- `X-StockTrends-Pricing-Rule`\n"
-            "- `X-StockTrends-Payment-Required`\n"
-            "- `X-StockTrends-Accepted-Payment-Methods`\n"
-        ),
+        description="Stock Trends API v1 with Agent Identity and Pricing.",
         routes=v1_app.routes,
     )
 
+    openapi_schema["servers"] = [
+        {"url": "/v1", "description": "Stock Trends API v1"},
+    ]
+
     components = openapi_schema.setdefault("components", {})
     security_schemes = components.setdefault("securitySchemes", {})
+    parameters = components.setdefault("parameters", {})
 
     security_schemes["ApiKeyAuth"] = {
         "type": "apiKey",
         "in": "header",
         "name": "X-API-Key",
-        "description": "Paste your Stock Trends API key. It will be sent as the `X-API-Key` header.",
     }
 
     security_schemes["BearerAuth"] = {
         "type": "http",
         "scheme": "bearer",
-        "bearerFormat": "API Key",
-        "description": "Alternative format: `Authorization: Bearer <API_KEY>`",
     }
 
-    for path, path_item in openapi_schema.get("paths", {}).items():
-        protected = is_protected_v1_path(path)
+    # Agent headers
+    parameters["StockTrendsAgentId"] = {
+        "name": "X-StockTrends-Agent-Id",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+    }
 
+    parameters["StockTrendsAgentType"] = {
+        "name": "X-StockTrends-Agent-Type",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+    }
+
+    parameters["StockTrendsAgentVendor"] = {
+        "name": "X-StockTrends-Agent-Vendor",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+    }
+
+    parameters["StockTrendsAgentVersion"] = {
+        "name": "X-StockTrends-Agent-Version",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+    }
+
+    parameters["StockTrendsRequestPurpose"] = {
+        "name": "X-StockTrends-Request-Purpose",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+    }
+
+    parameters["StockTrendsSessionId"] = {
+        "name": "X-StockTrends-Session-Id",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+    }
+
+    # Payment headers
+    parameters["StockTrendsPaymentMethod"] = {
+        "name": "X-StockTrends-Payment-Method",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+    }
+
+    parameters["StockTrendsPaymentNetwork"] = {
+        "name": "X-StockTrends-Payment-Network",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+    }
+
+    parameters["StockTrendsPaymentToken"] = {
+        "name": "X-StockTrends-Payment-Token",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+    }
+
+    parameters["StockTrendsPaymentReference"] = {
+        "name": "X-StockTrends-Payment-Reference",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+    }
+
+    parameters["StockTrendsPaymentAmount"] = {
+        "name": "X-StockTrends-Payment-Amount",
+        "in": "header",
+        "required": False,
+        "schema": {"type": "string"},
+    }
+
+    agent_refs = [
+        "#/components/parameters/StockTrendsAgentId",
+        "#/components/parameters/StockTrendsAgentType",
+        "#/components/parameters/StockTrendsAgentVendor",
+        "#/components/parameters/StockTrendsAgentVersion",
+        "#/components/parameters/StockTrendsRequestPurpose",
+        "#/components/parameters/StockTrendsSessionId",
+    ]
+
+    payment_refs = [
+        "#/components/parameters/StockTrendsPaymentMethod",
+        "#/components/parameters/StockTrendsPaymentNetwork",
+        "#/components/parameters/StockTrendsPaymentToken",
+        "#/components/parameters/StockTrendsPaymentReference",
+        "#/components/parameters/StockTrendsPaymentAmount",
+    ]
+
+    for path, path_item in openapi_schema.get("paths", {}).items():
         for method, operation in path_item.items():
-            if method not in {"get", "post", "put", "patch", "delete", "options", "head"}:
+            if method not in HTTP_METHODS:
                 continue
 
-            if protected:
-                operation["security"] = [
-                    {"ApiKeyAuth": []},
-                    {"BearerAuth": []},
-                ]
-            else:
-                operation["security"] = []
+            operation["security"] = [
+                {"ApiKeyAuth": []},
+                {"BearerAuth": []},
+            ]
+
+            if path.startswith("/stim") or path.startswith("/agents") or path == "/pricing":
+                _ensure_parameter_refs(operation, agent_refs + payment_refs)
 
     v1_app.openapi_schema = openapi_schema
-    return v1_app.openapi_schema
+    return openapi_schema
 
 
-app = FastAPI(
-    title=APP_TITLE,
-    version=APP_VERSION,
-)
+app = FastAPI(title=APP_TITLE, version=APP_VERSION)
 
 
 @app.get("/llms.txt", include_in_schema=False)
 def llms_txt():
     return FileResponse("static/llms.txt", media_type="text/plain")
 
+@app.get("/.well-known/ai-plugin.json", include_in_schema=False)
+def ai_plugin():
+    return JSONResponse(
+        {
+            "schema_version": "v1",
+            "name_for_human": "Stock Trends API",
+            "name_for_model": "stock_trends_api",
+            "description_for_human": "Structured market trend and probability data for North American stocks and ETFs.",
+            "description_for_model": "Provides structured financial market data including weekly trend classifications, momentum indicators, relative strength measures, unusual volume signals, market breadth analytics, selections, leadership data, and probabilistic forward return distributions for North American equities and ETFs. Use only documented endpoints and parameters defined in the OpenAPI specification.",
+            "auth": {
+                "type": "user_http",
+                "authorization_type": "bearer",
+            },
+            "api": {
+                "type": "openapi",
+                "url": "https://api.stocktrends.com/v1/openapi.json",
+                "is_user_authenticated": True,
+            },
+            "logo_url": "https://stocktrends.com/images/ST-logo2.gif",
+            "contact_email": "info@stocktrends.com",
+            "legal_info_url": "https://stocktrends.com/stock-trends-data-license",
+        }
+    )
 
-# IMPORTANT:
-# Starlette/FastAPI middleware execution order is the reverse of registration.
-# To get runtime order:
-#   1) RequestIdMiddleware
-#   2) ApiKeyMiddleware
-#   3) MeteringMiddleware
-#   4) RequestLoggerMiddleware
-# we register them in the opposite order below.
+
+# Middleware (order matters)
 app.add_middleware(RequestLoggerMiddleware)
 app.add_middleware(MeteringMiddleware)
 app.add_middleware(ApiKeyMiddleware)
 app.add_middleware(RequestIdMiddleware)
 
-# Versioned API sub-application
+
+# v1 app
 v1 = FastAPI(
     title=f"{APP_TITLE} v1",
     version=APP_VERSION,
@@ -153,6 +244,7 @@ v1 = FastAPI(
     openapi_url="/openapi.json",
 )
 
+# Routers
 v1.include_router(instruments_router)
 v1.include_router(prices_router)
 v1.include_router(indicators_router)
@@ -165,6 +257,7 @@ v1.include_router(breadth_router)
 v1.include_router(leadership_router)
 v1.include_router(ai_router)
 v1.include_router(pricing_router)
+v1.include_router(agents_router)  # ✅ NEW
 
 v1.openapi = lambda: apply_api_key_security_to_openapi(v1)
 
