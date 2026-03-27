@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import os
 
+
 ENABLE_AGENT_PAY = os.getenv("ENABLE_AGENT_PAY", "false").lower() == "true"
 ENFORCE_AGENT_PAY = os.getenv("ENFORCE_AGENT_PAY", "false").lower() == "true"
 VALIDATE_AGENT_PAY_HEADERS = os.getenv("VALIDATE_AGENT_PAY_HEADERS", "true").lower() == "true"
@@ -146,21 +147,51 @@ def _deny_decision(reason: str = "access_denied") -> PricingDecision:
     )
 
 
+def _is_paid_plan(plan_code: str | None) -> bool:
+    if not plan_code:
+        return False
+
+    normalized = str(plan_code).strip().lower()
+    if not normalized:
+        return False
+
+    return normalized not in {"sandbox", "free", "trial", "test"}
+
+
+def _is_identified_agent(agent_identifier: str | None) -> bool:
+    return bool(agent_identifier and str(agent_identifier).strip())
+
+
+def _has_agent_payment_intent(
+    payment_method_header: str | None,
+    agent_identifier: str | None,
+) -> bool:
+    normalized_payment_method = (payment_method_header or "").strip().lower()
+    if not normalized_payment_method:
+        return False
+
+    if not _is_identified_agent(agent_identifier):
+        return False
+
+    return normalized_payment_method in {"mpp", "x402", "crypto"}
+
+
 def classify_request(
     path: str,
     has_paid_auth: bool,
     payment_method_header: str | None = None,
     plan_code: str | None = None,
+    agent_identifier: str | None = None,
 ) -> PricingDecision:
     """
     Classify request into pricing / metering tiers.
 
-    Phase 4 STIM policy:
+    Lane B-aware STIM policy:
     - Public/static/docs paths are non-metered
     - Explicit free-metered API routes are tracked but not billed
     - /v1/stim*:
-        * payment headers present => agent-pay
-        * paid entitled customer without payment headers => subscription
+        * identified agent + supported payment method + agent pay enabled => agent-pay
+        * paid entitled customer => subscription
         * otherwise => deny
     - Other /v1/* routes are subscription-backed
     - Non-/v1 probe traffic is never treated as paid API usage
@@ -176,22 +207,31 @@ def classify_request(
         return _free_metered_decision()
 
     is_stim = any(path.startswith(prefix) for prefix in AGENT_PAY_PATH_PREFIXES)
-    has_payment_headers = bool(payment_method_header)
+    has_paid_plan = _is_paid_plan(plan_code)
+    identified_agent = _is_identified_agent(agent_identifier)
+    has_agent_payment_intent = _has_agent_payment_intent(payment_method_header, agent_identifier)
 
     if is_stim:
-        # Explicit agent-pay intent.
-        if ENABLE_AGENT_PAY and has_payment_headers:
+        # Explicit Lane B path: identified agent presents a machine-payment intent.
+        if ENABLE_AGENT_PAY and identified_agent and has_agent_payment_intent:
             return _agent_pay_decision()
 
-        # Subscription-entitled caller.
-        if has_paid_auth and plan_code not in (None, "", "sandbox"):
+        # Paid subscription customer remains entitled on the subscription lane.
+        if has_paid_auth and has_paid_plan:
             return _subscription_decision()
 
-        # Everyone else is denied.
-        if plan_code == "sandbox":
+        # Sandbox/free/test callers are not entitled to STIM subscription access.
+        normalized_plan = (plan_code or "").strip().lower()
+        if normalized_plan == "sandbox":
             return _deny_decision("sandbox_plan_denied")
+
+        # Agent-like request without valid payment path or paid entitlement.
+        if identified_agent and not has_paid_auth:
+            return _deny_decision("agent_payment_required")
+
         if not has_paid_auth:
             return _deny_decision("authentication_required")
+
         return _deny_decision("stim_access_not_permitted")
 
     if path.startswith("/v1/"):

@@ -14,7 +14,101 @@ router = APIRouter(prefix="/pricing", tags=["pricing"])
 )
 def get_pricing():
     return {
-        "version": "1",
+        "version": "2",
+        "agent_identity": {
+            "supported": True,
+            "purpose": (
+                "Agent identity lets Stock Trends attribute usage to a persistent machine actor "
+                "under a customer account. Identified agents may be auto-registered and can later "
+                "be managed through dashboard and billing workflows."
+            ),
+            "identity_resolution": {
+                "agent_identifier_source": "X-StockTrends-Agent-Id",
+                "canonical_storage": {
+                    "agent_identifier": "normalized external declared identity",
+                    "agent_id": "internal registered api_agents.id when available",
+                },
+                "notes": [
+                    "If X-StockTrends-Agent-Id is present, the request is treated as agent-attributed traffic.",
+                    "Agent identifiers are normalized before lookup and registration.",
+                    "When a valid customer context exists, first-seen agents may be auto-registered.",
+                    "Disabled registered agents may be blocked.",
+                ],
+            },
+            "recommended_headers": [
+                {
+                    "name": "X-StockTrends-Agent-Id",
+                    "required_for_agent_identity": True,
+                    "description": "Stable external identifier for the calling agent.",
+                    "example": "editorial-agent-v1",
+                },
+                {
+                    "name": "X-StockTrends-Agent-Type",
+                    "required_for_agent_identity": False,
+                    "description": "High-level agent category.",
+                    "example": "editorial",
+                },
+                {
+                    "name": "X-StockTrends-Agent-Vendor",
+                    "required_for_agent_identity": False,
+                    "description": "Vendor or platform operating the agent.",
+                    "example": "stocktrends",
+                },
+                {
+                    "name": "X-StockTrends-Agent-Version",
+                    "required_for_agent_identity": False,
+                    "description": "Agent software version.",
+                    "example": "1.0.0",
+                },
+                {
+                    "name": "X-StockTrends-Request-Purpose",
+                    "required_for_agent_identity": False,
+                    "description": "Optional statement of request purpose.",
+                    "example": "weekly-editorial-generation",
+                },
+                {
+                    "name": "X-StockTrends-Session-Id",
+                    "required_for_agent_identity": False,
+                    "description": "Optional session/workflow correlation id.",
+                    "example": "run-2026-03-25-001",
+                },
+            ],
+        },
+        "payment_identity": {
+            "supported_methods": ["subscription", "mpp", "x402", "crypto"],
+            "payment_headers": [
+                {
+                    "name": "X-StockTrends-Payment-Method",
+                    "description": "Declared payment method for machine-pay capable flows.",
+                    "example": "mpp",
+                },
+                {
+                    "name": "X-StockTrends-Payment-Network",
+                    "description": "Payment network identifier.",
+                    "example": "base",
+                },
+                {
+                    "name": "X-StockTrends-Payment-Token",
+                    "description": "Optional payment token or asset identifier.",
+                    "example": "USDC",
+                },
+                {
+                    "name": "X-StockTrends-Payment-Reference",
+                    "description": "Payment or settlement reference.",
+                    "example": "invoice_12345",
+                },
+                {
+                    "name": "X-StockTrends-Payment-Amount",
+                    "description": "Native payment amount as declared by the caller.",
+                    "example": "0.01",
+                },
+            ],
+            "response_headers": [
+                "X-StockTrends-Pricing-Rule",
+                "X-StockTrends-Payment-Required",
+                "X-StockTrends-Accepted-Payment-Methods",
+            ],
+        },
         "endpoint_families": {
             "stim": {
                 "pricing_model": "subscription_or_agent_pay",
@@ -27,14 +121,6 @@ def get_pricing():
                     "x402",
                     "crypto",
                 ],
-                "payment_headers": [
-                    "X-StockTrends-Payment-Method",
-                    "X-StockTrends-Payment-Network",
-                    "X-StockTrends-Payment-Reference",
-                    "X-StockTrends-Payment-Amount",
-                    "X-StockTrends-Payment-Token",
-                    "X-StockTrends-Pricing-Rule",
-                ],
                 "agent_headers": [
                     "X-StockTrends-Agent-Id",
                     "X-StockTrends-Agent-Type",
@@ -43,9 +129,18 @@ def get_pricing():
                     "X-StockTrends-Request-Purpose",
                     "X-StockTrends-Session-Id",
                 ],
+                "payment_headers": [
+                    "X-StockTrends-Payment-Method",
+                    "X-StockTrends-Payment-Network",
+                    "X-StockTrends-Payment-Reference",
+                    "X-StockTrends-Payment-Amount",
+                    "X-StockTrends-Payment-Token",
+                    "X-StockTrends-Pricing-Rule",
+                ],
                 "notes": [
-                    "STIM endpoints are currently subscription-covered by default.",
-                    "Agent payment metadata is supported for discovery and logging.",
+                    "STIM endpoints are currently subscription-covered by default for entitled customers.",
+                    "Identified agents can be attributed and logged even when subscription-backed.",
+                    "Agent-native payment metadata is supported for discovery and logging.",
                     "Payment enforcement may be enabled in the future for selected routes.",
                 ],
             },
@@ -53,6 +148,9 @@ def get_pricing():
                 "pricing_model": "free_metered",
                 "pricing_rule_default": "default_free_metered",
                 "payment_required": False,
+                "notes": [
+                    "Free-metered endpoints are logged but not billed.",
+                ],
             },
             "breadth": {
                 "pricing_model": "mixed",
@@ -70,6 +168,41 @@ def get_pricing():
                 "pricing_model": "free",
                 "pricing_rule_default": "default_free",
                 "payment_required": False,
+            },
+        },
+        "examples": {
+            "subscription_with_agent_identity": {
+                "description": (
+                    "Recommended pattern for subscribed customers that want request attribution "
+                    "to a persistent agent."
+                ),
+                "headers": {
+                    "Authorization": "Bearer <API_KEY>",
+                    "X-StockTrends-Agent-Id": "editorial-agent-v1",
+                    "X-StockTrends-Agent-Type": "editorial",
+                    "X-StockTrends-Agent-Vendor": "stocktrends",
+                    "X-StockTrends-Agent-Version": "1.0.0",
+                    "X-StockTrends-Request-Purpose": "weekly-editorial-generation",
+                    "X-StockTrends-Session-Id": "run-2026-03-25-001",
+                },
+            },
+            "agent_pay_candidate": {
+                "description": (
+                    "Illustrative machine-pay pattern for endpoints that may support agent-native payment."
+                ),
+                "headers": {
+                    "X-StockTrends-Agent-Id": "research-bot-17",
+                    "X-StockTrends-Agent-Type": "research",
+                    "X-StockTrends-Agent-Vendor": "external-lab",
+                    "X-StockTrends-Agent-Version": "0.9.3",
+                    "X-StockTrends-Request-Purpose": "factor-screening",
+                    "X-StockTrends-Session-Id": "job-88421",
+                    "X-StockTrends-Payment-Method": "mpp",
+                    "X-StockTrends-Payment-Network": "base",
+                    "X-StockTrends-Payment-Token": "USDC",
+                    "X-StockTrends-Payment-Reference": "payment-ref-123",
+                    "X-StockTrends-Payment-Amount": "0.01",
+                },
             },
         },
     }

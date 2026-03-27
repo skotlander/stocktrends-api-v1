@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import logging
 from uuid import uuid4
@@ -22,6 +23,14 @@ logger = logging.getLogger("stocktrends_api.metering")
 ENABLE_AGENT_PAY = os.getenv("ENABLE_AGENT_PAY", "false").lower() == "true"
 ENFORCE_AGENT_PAY = os.getenv("ENFORCE_AGENT_PAY", "false").lower() == "true"
 VALIDATE_AGENT_PAY_HEADERS = os.getenv("VALIDATE_AGENT_PAY_HEADERS", "false").lower() == "true"
+
+MAX_AGENT_IDENTIFIER_LENGTH = 255
+MAX_AGENT_TYPE_LENGTH = 32
+MAX_AGENT_VENDOR_LENGTH = 64
+MAX_AGENT_VERSION_LENGTH = 32
+MAX_REQUEST_PURPOSE_LENGTH = 64
+
+_AGENT_IDENTIFIER_ALLOWED_RE = re.compile(r"[^a-zA-Z0-9._:@/\-]+")
 
 
 def _parse_csv_env(env_name: str, default: str = "") -> set[str]:
@@ -247,14 +256,53 @@ def build_econ_payment_fields(
     }
 
 
-def normalize_agent_identifier(agent_id_header: str | None, agent_vendor_header: str | None) -> str | None:
-    if agent_id_header and agent_id_header.strip():
-        return agent_id_header.strip()
+def _clean_header_value(value: str | None, max_length: int) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if len(cleaned) > max_length:
+        cleaned = cleaned[:max_length]
+    return cleaned
 
-    if agent_vendor_header and agent_vendor_header.strip():
-        return f"vendor:{agent_vendor_header.strip()}"
+
+def normalize_agent_identifier(agent_id_header: str | None, agent_vendor_header: str | None) -> str | None:
+    raw = _clean_header_value(agent_id_header, MAX_AGENT_IDENTIFIER_LENGTH)
+    if raw:
+        normalized = raw.lower()
+        normalized = _AGENT_IDENTIFIER_ALLOWED_RE.sub("-", normalized)
+        normalized = re.sub(r"-{2,}", "-", normalized).strip("-")
+        if normalized:
+            return normalized[:MAX_AGENT_IDENTIFIER_LENGTH]
+
+    vendor = _clean_header_value(agent_vendor_header, MAX_AGENT_VENDOR_LENGTH)
+    if vendor:
+        normalized_vendor = vendor.lower()
+        normalized_vendor = _AGENT_IDENTIFIER_ALLOWED_RE.sub("-", normalized_vendor)
+        normalized_vendor = re.sub(r"-{2,}", "-", normalized_vendor).strip("-")
+        if normalized_vendor:
+            fallback = f"vendor:{normalized_vendor}"
+            return fallback[:MAX_AGENT_IDENTIFIER_LENGTH]
 
     return None
+
+
+def normalize_agent_type(value: str | None) -> str | None:
+    return _clean_header_value(value, MAX_AGENT_TYPE_LENGTH)
+
+
+def normalize_agent_vendor(value: str | None) -> str | None:
+    cleaned = _clean_header_value(value, MAX_AGENT_VENDOR_LENGTH)
+    return cleaned.lower() if cleaned else None
+
+
+def normalize_agent_version(value: str | None) -> str | None:
+    return _clean_header_value(value, MAX_AGENT_VERSION_LENGTH)
+
+
+def normalize_request_purpose(value: str | None) -> str | None:
+    return _clean_header_value(value, MAX_REQUEST_PURPOSE_LENGTH)
 
 
 def lookup_agent_record(customer_id: str | None, agent_identifier: str | None) -> dict | None:
@@ -398,8 +446,104 @@ def should_enforce_agent_pay_for_request(request: Request, path: str, decision) 
     return True
 
 
-class MeteringMiddleware(BaseHTTPMiddleware):
+def build_request_event(
+    *,
+    request_id: str | None,
+    environment: str,
+    api_key_id: str | None,
+    customer_id: str | None,
+    subscription_id: str | None,
+    plan_code: str | None,
+    actor_type: str | None,
+    workflow_type: str,
+    agent_identifier: str | None,
+    agent_registry_id: str | None,
+    path: str,
+    method: str,
+    query_string: str,
+    request: Request,
+    status_code: int,
+    success: int,
+    latency_ms: int,
+    response,
+    decision,
+    payment_method: str | None,
+    error_code: str | None,
+    notes: str | None,
+) -> dict:
+    return {
+        "event_time_utc": datetime.now(timezone.utc),
+        "request_id": request_id,
+        "environment": environment,
+        "api_key_id": api_key_id,
+        "customer_id": customer_id,
+        "subscription_id": subscription_id,
+        "plan_code": plan_code,
+        "actor_type": actor_type or "unknown",
+        "workflow_type": workflow_type,
+        "agent_identifier": agent_identifier,
+        "agent_id": agent_registry_id,
+        "endpoint_path": path,
+        "route_template": None,
+        "endpoint_family": get_endpoint_family(path),
+        "http_method": method,
+        "query_string": query_string,
+        "symbol": request.query_params.get("symbol"),
+        "exchange": request.query_params.get("exchange"),
+        "symbol_exchange": request.query_params.get("symbol_exchange"),
+        "status_code": status_code,
+        "success": success,
+        "latency_ms": latency_ms,
+        "response_size_bytes": get_response_size_bytes(response),
+        "client_ip": get_client_ip(request),
+        "user_agent": request.headers.get("user-agent"),
+        "referer": request.headers.get("referer"),
+        "is_metered": decision.is_metered,
+        "is_billable": is_billable_request(decision),
+        "payment_method": payment_method,
+        "pricing_rule_id": decision.log_pricing_rule_id,
+        "error_code": error_code,
+        "notes": notes[:255] if notes else None,
+    }
 
+
+def build_request_econ(
+    *,
+    request_id: str | None,
+    customer_id: str | None,
+    api_key_id: str | None,
+    pricing_rule_id: str | None,
+    unit_price_usd: Decimal,
+    billed_amount_usd: Decimal,
+    payment_required: int,
+    econ_payment_fields: dict,
+    session_id_header: str | None,
+    agent_registry_id: str | None,
+    agent_type: str | None,
+    agent_vendor: str | None,
+    agent_version: str | None,
+    request_purpose: str | None,
+) -> dict:
+    return {
+        "request_id": request_id,
+        "customer_id": customer_id,
+        "api_key_id": api_key_id,
+        "pricing_rule_id": pricing_rule_id,
+        "unit_price_usd": unit_price_usd,
+        "billed_amount_usd": billed_amount_usd,
+        "payment_required": payment_required,
+        **econ_payment_fields,
+        "session_id": session_id_header,
+        "payment_channel_id": None,
+        "agent_id": agent_registry_id,
+        "agent_type": agent_type,
+        "agent_vendor": agent_vendor,
+        "agent_version": agent_version,
+        "request_purpose": request_purpose,
+    }
+
+
+class MeteringMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         start_time = time.time()
 
@@ -415,10 +559,10 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         payment_amount_header = request.headers.get("x-stocktrends-payment-amount")
 
         agent_id_header = request.headers.get("x-stocktrends-agent-id")
-        agent_type_header = request.headers.get("x-stocktrends-agent-type")
-        agent_vendor_header = request.headers.get("x-stocktrends-agent-vendor")
-        agent_version_header = request.headers.get("x-stocktrends-agent-version")
-        request_purpose_header = request.headers.get("x-stocktrends-request-purpose")
+        agent_type_header = normalize_agent_type(request.headers.get("x-stocktrends-agent-type"))
+        agent_vendor_header = normalize_agent_vendor(request.headers.get("x-stocktrends-agent-vendor"))
+        agent_version_header = normalize_agent_version(request.headers.get("x-stocktrends-agent-version"))
+        request_purpose_header = normalize_request_purpose(request.headers.get("x-stocktrends-request-purpose"))
         session_id_header = request.headers.get("x-stocktrends-session-id")
 
         auth_mode = getattr(request.state, "auth_mode", "unknown")
@@ -429,7 +573,6 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         subscription_id = getattr(request.state, "subscription_id", None)
         actor_type = getattr(request.state, "actor_type", "unknown")
 
-        # --- Agent identity normalization and auto-registration ---
         agent_identifier = normalize_agent_identifier(agent_id_header, agent_vendor_header)
         agent_record, agent_auto_registered = ensure_agent_record(
             customer_id=customer_id,
@@ -453,6 +596,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             has_paid_auth=has_paid_auth,
             payment_method_header=payment_method_header,
             plan_code=plan_code,
+            agent_identifier=agent_identifier,
         )
 
         request.state.pricing_rule_id = decision.log_pricing_rule_id
@@ -464,8 +608,9 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
         economic_rule_name = decision.econ_pricing_rule_id or decision.log_pricing_rule_id
         unit_price_usd, billed_amount_usd = resolve_economic_amounts(economic_rule_name)
+        workflow_type = normalize_workflow_type(auth_mode, agent_identifier)
+        resolved_payment_method = payment_method_header or decision.log_payment_method
 
-        # --- Disabled registered agent enforcement ---
         if agent_identifier and agent_registered and agent_registry_status == "disabled":
             response = JSONResponse(
                 status_code=403,
@@ -485,40 +630,30 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
             latency_ms = int((time.time() - start_time) * 1000)
 
-            event = {
-                "event_time_utc": datetime.now(timezone.utc),
-                "request_id": request_id,
-                "environment": "production",
-                "api_key_id": api_key_id,
-                "customer_id": customer_id,
-                "subscription_id": subscription_id,
-                "plan_code": plan_code,
-                "actor_type": actor_type,
-                "workflow_type": normalize_workflow_type(auth_mode, agent_identifier),
-                "agent_identifier": agent_identifier,
-                "agent_id": agent_identifier,
-                "endpoint_path": path,
-                "route_template": None,
-                "endpoint_family": get_endpoint_family(path),
-                "http_method": method,
-                "query_string": query_string,
-                "symbol": request.query_params.get("symbol"),
-                "exchange": request.query_params.get("exchange"),
-                "symbol_exchange": request.query_params.get("symbol_exchange"),
-                "status_code": 403,
-                "success": 0,
-                "latency_ms": latency_ms,
-                "response_size_bytes": get_response_size_bytes(response),
-                "client_ip": get_client_ip(request),
-                "user_agent": request.headers.get("user-agent"),
-                "referer": request.headers.get("referer"),
-                "is_metered": decision.is_metered,
-                "is_billable": is_billable_request(decision),
-                "payment_method": payment_method_header or decision.log_payment_method,
-                "pricing_rule_id": decision.log_pricing_rule_id,
-                "error_code": "agent_disabled",
-                "notes": "This agent is disabled for this customer",
-            }
+            event = build_request_event(
+                request_id=request_id,
+                environment="production",
+                api_key_id=api_key_id,
+                customer_id=customer_id,
+                subscription_id=subscription_id,
+                plan_code=plan_code,
+                actor_type=actor_type,
+                workflow_type=workflow_type,
+                agent_identifier=agent_identifier,
+                agent_registry_id=agent_registry_id,
+                path=path,
+                method=method,
+                query_string=query_string,
+                request=request,
+                status_code=403,
+                success=0,
+                latency_ms=latency_ms,
+                response=response,
+                decision=decision,
+                payment_method=resolved_payment_method,
+                error_code="agent_disabled",
+                notes="This agent is disabled for this customer",
+            )
 
             try:
                 log_api_request_event(event)
@@ -537,23 +672,22 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     decision=decision,
                 )
 
-                econ = {
-                    "request_id": request_id,
-                    "customer_id": customer_id,
-                    "api_key_id": api_key_id,
-                    "pricing_rule_id": decision.econ_pricing_rule_id or decision.log_pricing_rule_id,
-                    "unit_price_usd": unit_price_usd,
-                    "billed_amount_usd": billed_amount_usd,
-                    "payment_required": decision.econ_payment_required,
-                    **econ_payment_fields,
-                    "session_id": session_id_header,
-                    "payment_channel_id": None,
-                    "agent_id": agent_identifier,
-                    "agent_type": agent_type_header,
-                    "agent_vendor": agent_vendor_header,
-                    "agent_version": agent_version_header,
-                    "request_purpose": request_purpose_header,
-                }
+                econ = build_request_econ(
+                    request_id=request_id,
+                    customer_id=customer_id,
+                    api_key_id=api_key_id,
+                    pricing_rule_id=decision.econ_pricing_rule_id or decision.log_pricing_rule_id,
+                    unit_price_usd=unit_price_usd,
+                    billed_amount_usd=billed_amount_usd,
+                    payment_required=decision.econ_payment_required,
+                    econ_payment_fields=econ_payment_fields,
+                    session_id_header=session_id_header,
+                    agent_registry_id=agent_registry_id,
+                    agent_type=agent_type_header,
+                    agent_vendor=agent_vendor_header,
+                    agent_version=agent_version_header,
+                    request_purpose=request_purpose_header,
+                )
 
                 try:
                     log_api_request_economics(econ)
@@ -581,40 +715,30 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
             latency_ms = int((time.time() - start_time) * 1000)
 
-            event = {
-                "event_time_utc": datetime.now(timezone.utc),
-                "request_id": request_id,
-                "environment": "production",
-                "api_key_id": api_key_id,
-                "customer_id": customer_id,
-                "subscription_id": subscription_id,
-                "plan_code": plan_code,
-                "actor_type": actor_type,
-                "workflow_type": normalize_workflow_type(auth_mode, agent_identifier),
-                "agent_identifier": agent_identifier,
-                "agent_id": agent_identifier,
-                "endpoint_path": path,
-                "route_template": None,
-                "endpoint_family": get_endpoint_family(path),
-                "http_method": method,
-                "query_string": query_string,
-                "symbol": request.query_params.get("symbol"),
-                "exchange": request.query_params.get("exchange"),
-                "symbol_exchange": request.query_params.get("symbol_exchange"),
-                "status_code": 403,
-                "success": 0,
-                "latency_ms": latency_ms,
-                "response_size_bytes": get_response_size_bytes(response),
-                "client_ip": get_client_ip(request),
-                "user_agent": request.headers.get("user-agent"),
-                "referer": request.headers.get("referer"),
-                "is_metered": decision.is_metered,
-                "is_billable": is_billable_request(decision),
-                "payment_method": payment_method_header or decision.log_payment_method,
-                "pricing_rule_id": decision.log_pricing_rule_id,
-                "error_code": decision.deny_reason or "access_denied",
-                "notes": "STIM access not permitted for this account",
-            }
+            event = build_request_event(
+                request_id=request_id,
+                environment="production",
+                api_key_id=api_key_id,
+                customer_id=customer_id,
+                subscription_id=subscription_id,
+                plan_code=plan_code,
+                actor_type=actor_type,
+                workflow_type=workflow_type,
+                agent_identifier=agent_identifier,
+                agent_registry_id=agent_registry_id,
+                path=path,
+                method=method,
+                query_string=query_string,
+                request=request,
+                status_code=403,
+                success=0,
+                latency_ms=latency_ms,
+                response=response,
+                decision=decision,
+                payment_method=resolved_payment_method,
+                error_code=decision.deny_reason or "access_denied",
+                notes="STIM access not permitted for this account",
+            )
 
             try:
                 log_api_request_event(event)
@@ -633,23 +757,22 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     decision=decision,
                 )
 
-                econ = {
-                    "request_id": request_id,
-                    "customer_id": customer_id,
-                    "api_key_id": api_key_id,
-                    "pricing_rule_id": decision.econ_pricing_rule_id or decision.log_pricing_rule_id,
-                    "unit_price_usd": unit_price_usd,
-                    "billed_amount_usd": billed_amount_usd,
-                    "payment_required": decision.econ_payment_required,
-                    **econ_payment_fields,
-                    "session_id": session_id_header,
-                    "payment_channel_id": None,
-                    "agent_id": agent_identifier,
-                    "agent_type": agent_type_header,
-                    "agent_vendor": agent_vendor_header,
-                    "agent_version": agent_version_header,
-                    "request_purpose": request_purpose_header,
-                }
+                econ = build_request_econ(
+                    request_id=request_id,
+                    customer_id=customer_id,
+                    api_key_id=api_key_id,
+                    pricing_rule_id=decision.econ_pricing_rule_id or decision.log_pricing_rule_id,
+                    unit_price_usd=unit_price_usd,
+                    billed_amount_usd=billed_amount_usd,
+                    payment_required=decision.econ_payment_required,
+                    econ_payment_fields=econ_payment_fields,
+                    session_id_header=session_id_header,
+                    agent_registry_id=agent_registry_id,
+                    agent_type=agent_type_header,
+                    agent_vendor=agent_vendor_header,
+                    agent_version=agent_version_header,
+                    request_purpose=request_purpose_header,
+                )
 
                 try:
                     log_api_request_economics(econ)
@@ -694,40 +817,30 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
             latency_ms = int((time.time() - start_time) * 1000)
 
-            event = {
-                "event_time_utc": datetime.now(timezone.utc),
-                "request_id": request_id,
-                "environment": "production",
-                "api_key_id": api_key_id,
-                "customer_id": customer_id,
-                "subscription_id": subscription_id,
-                "plan_code": plan_code,
-                "actor_type": actor_type,
-                "workflow_type": normalize_workflow_type(auth_mode, agent_identifier),
-                "agent_identifier": agent_identifier,
-                "agent_id": agent_identifier,
-                "endpoint_path": path,
-                "route_template": None,
-                "endpoint_family": get_endpoint_family(path),
-                "http_method": method,
-                "query_string": query_string,
-                "symbol": request.query_params.get("symbol"),
-                "exchange": request.query_params.get("exchange"),
-                "symbol_exchange": request.query_params.get("symbol_exchange"),
-                "status_code": 402,
-                "success": 0,
-                "latency_ms": latency_ms,
-                "response_size_bytes": get_response_size_bytes(response),
-                "client_ip": get_client_ip(request),
-                "user_agent": request.headers.get("user-agent"),
-                "referer": request.headers.get("referer"),
-                "is_metered": decision.is_metered,
-                "is_billable": is_billable_request(decision),
-                "payment_method": payment_method_header or decision.log_payment_method,
-                "pricing_rule_id": decision.log_pricing_rule_id,
-                "error_code": validation_error,
-                "notes": validation_detail,
-            }
+            event = build_request_event(
+                request_id=request_id,
+                environment="production",
+                api_key_id=api_key_id,
+                customer_id=customer_id,
+                subscription_id=subscription_id,
+                plan_code=plan_code,
+                actor_type=actor_type,
+                workflow_type=workflow_type,
+                agent_identifier=agent_identifier,
+                agent_registry_id=agent_registry_id,
+                path=path,
+                method=method,
+                query_string=query_string,
+                request=request,
+                status_code=402,
+                success=0,
+                latency_ms=latency_ms,
+                response=response,
+                decision=decision,
+                payment_method=resolved_payment_method,
+                error_code=validation_error,
+                notes=validation_detail,
+            )
 
             try:
                 log_api_request_event(event)
@@ -746,23 +859,22 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     decision=decision,
                 )
 
-                econ = {
-                    "request_id": request_id,
-                    "customer_id": customer_id,
-                    "api_key_id": api_key_id,
-                    "pricing_rule_id": economic_rule_name,
-                    "unit_price_usd": unit_price_usd,
-                    "billed_amount_usd": billed_amount_usd,
-                    "payment_required": 1,
-                    **econ_payment_fields,
-                    "session_id": session_id_header,
-                    "payment_channel_id": None,
-                    "agent_id": agent_identifier,
-                    "agent_type": agent_type_header,
-                    "agent_vendor": agent_vendor_header,
-                    "agent_version": agent_version_header,
-                    "request_purpose": request_purpose_header,
-                }
+                econ = build_request_econ(
+                    request_id=request_id,
+                    customer_id=customer_id,
+                    api_key_id=api_key_id,
+                    pricing_rule_id=economic_rule_name,
+                    unit_price_usd=unit_price_usd,
+                    billed_amount_usd=billed_amount_usd,
+                    payment_required=1,
+                    econ_payment_fields=econ_payment_fields,
+                    session_id_header=session_id_header,
+                    agent_registry_id=agent_registry_id,
+                    agent_type=agent_type_header,
+                    agent_vendor=agent_vendor_header,
+                    agent_version=agent_version_header,
+                    request_purpose=request_purpose_header,
+                )
 
                 try:
                     log_api_request_economics(econ)
@@ -797,40 +909,30 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     accepted_methods=accepted_methods,
                 )
 
-            event = {
-                "event_time_utc": datetime.now(timezone.utc),
-                "request_id": request_id,
-                "environment": "production",
-                "api_key_id": api_key_id,
-                "customer_id": customer_id,
-                "subscription_id": subscription_id,
-                "plan_code": plan_code,
-                "actor_type": actor_type,
-                "workflow_type": normalize_workflow_type(auth_mode, agent_identifier),
-                "agent_identifier": agent_identifier,
-                "agent_id": agent_identifier,
-                "endpoint_path": path,
-                "route_template": None,
-                "endpoint_family": get_endpoint_family(path),
-                "http_method": method,
-                "query_string": query_string,
-                "symbol": request.query_params.get("symbol"),
-                "exchange": request.query_params.get("exchange"),
-                "symbol_exchange": request.query_params.get("symbol_exchange"),
-                "status_code": status_code,
-                "success": success,
-                "latency_ms": latency_ms,
-                "response_size_bytes": get_response_size_bytes(response),
-                "client_ip": get_client_ip(request),
-                "user_agent": request.headers.get("user-agent"),
-                "referer": request.headers.get("referer"),
-                "is_metered": decision.is_metered,
-                "is_billable": is_billable_request(decision),
-                "payment_method": payment_method_header or decision.log_payment_method,
-                "pricing_rule_id": decision.log_pricing_rule_id,
-                "error_code": caught_exception.__class__.__name__ if caught_exception else None,
-                "notes": str(caught_exception)[:255] if caught_exception else None,
-            }
+            event = build_request_event(
+                request_id=request_id,
+                environment="production",
+                api_key_id=api_key_id,
+                customer_id=customer_id,
+                subscription_id=subscription_id,
+                plan_code=plan_code,
+                actor_type=actor_type,
+                workflow_type=workflow_type,
+                agent_identifier=agent_identifier,
+                agent_registry_id=agent_registry_id,
+                path=path,
+                method=method,
+                query_string=query_string,
+                request=request,
+                status_code=status_code,
+                success=success,
+                latency_ms=latency_ms,
+                response=response,
+                decision=decision,
+                payment_method=resolved_payment_method,
+                error_code=caught_exception.__class__.__name__ if caught_exception else None,
+                notes=str(caught_exception) if caught_exception else None,
+            )
 
             try:
                 log_api_request_event(event)
@@ -844,11 +946,11 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     if validation_valid:
                         payment_status = "presented"
                     else:
-                        payment_status = "would_block_under_402" if not should_enforce_agent_pay else "failed_validation"
+                        payment_status = "failed_validation" if should_enforce_agent_pay else "pending"
 
                 econ_payment_fields = build_econ_payment_fields(
                     payment_required=decision.econ_payment_required,
-                    payment_status=payment_status,
+                    payment_status=payment_status or "pending",
                     payment_method_header=payment_method_header,
                     payment_network_header=payment_network_header,
                     payment_token_header=payment_token_header,
@@ -857,23 +959,22 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     decision=decision,
                 )
 
-                econ = {
-                    "request_id": request_id,
-                    "customer_id": customer_id,
-                    "api_key_id": api_key_id,
-                    "pricing_rule_id": economic_rule_name,
-                    "unit_price_usd": unit_price_usd,
-                    "billed_amount_usd": billed_amount_usd,
-                    "payment_required": decision.econ_payment_required,
-                    **econ_payment_fields,
-                    "session_id": session_id_header,
-                    "payment_channel_id": None,
-                    "agent_id": agent_identifier,
-                    "agent_type": agent_type_header,
-                    "agent_vendor": agent_vendor_header,
-                    "agent_version": agent_version_header,
-                    "request_purpose": request_purpose_header,
-                }
+                econ = build_request_econ(
+                    request_id=request_id,
+                    customer_id=customer_id,
+                    api_key_id=api_key_id,
+                    pricing_rule_id=economic_rule_name,
+                    unit_price_usd=unit_price_usd,
+                    billed_amount_usd=billed_amount_usd,
+                    payment_required=decision.econ_payment_required,
+                    econ_payment_fields=econ_payment_fields,
+                    session_id_header=session_id_header,
+                    agent_registry_id=agent_registry_id,
+                    agent_type=agent_type_header,
+                    agent_vendor=agent_vendor_header,
+                    agent_version=agent_version_header,
+                    request_purpose=request_purpose_header,
+                )
 
                 try:
                     log_api_request_economics(econ)
