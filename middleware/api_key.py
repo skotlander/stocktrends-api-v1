@@ -59,6 +59,105 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/v1/breadth/sector/latest",
         }
 
+    def _authenticate_api_key(self, path: str, raw_key: str) -> tuple[bool, dict]:
+        key_hash = hash_api_key(raw_key)
+        engine = get_auth_engine()
+
+        with engine.begin() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    SELECT
+                        k.id,
+                        k.customer_id,
+                        k.subscription_id,
+                        k.status,
+                        k.revoked_at,
+                        s.status AS subscription_status,
+                        p.code AS plan_code,
+                        p.active AS plan_active
+                    FROM api_keys k
+                    LEFT JOIN api_subscriptions s
+                        ON k.subscription_id = s.id
+                    LEFT JOIN api_plans p
+                        ON s.plan_id = p.id
+                    WHERE k.key_hash = :key_hash
+                    LIMIT 1
+                    """
+                ),
+                {"key_hash": key_hash},
+            ).fetchone()
+
+            if not result:
+                return False, {"detail": "Invalid API key", "status_code": 401}
+
+            key_id = result[0]
+            customer_id = result[1]
+            subscription_id = result[2]
+            key_status = result[3]
+            revoked_at = result[4]
+            subscription_status = result[5]
+            plan_code = result[6]
+            plan_active = result[7]
+
+            if key_status != "active" or revoked_at is not None:
+                return False, {"detail": "API key inactive", "status_code": 403}
+
+            if not subscription_id:
+                return False, {"detail": "No subscription linked to API key", "status_code": 403}
+
+            if subscription_status not in ALLOWED_SUBSCRIPTION_STATUSES:
+                return False, {
+                    "detail": f"Subscription not active ({subscription_status})",
+                    "status_code": 403,
+                }
+
+            if not plan_code:
+                return False, {"detail": "No plan linked to subscription", "status_code": 403}
+
+            if not plan_active:
+                return False, {"detail": "Plan is inactive", "status_code": 403}
+
+            if not self.is_plan_allowed(path, plan_code):
+                return False, {
+                    "detail": f"Plan '{plan_code}' does not allow this endpoint",
+                    "status_code": 403,
+                }
+
+            conn.execute(
+                text(
+                    """
+                    UPDATE api_keys
+                    SET last_used_at = NOW()
+                    WHERE id = :key_id
+                    """
+                ),
+                {"key_id": key_id},
+            )
+
+            return True, {
+                "api_key_id": key_id,
+                "customer_id": customer_id,
+                "subscription_id": subscription_id,
+                "plan_code": plan_code,
+                "actor_type": "external_customer",
+            }
+
+    def _apply_auth_context(self, request: Request, auth: dict) -> None:
+        request.state.api_key_id = auth["api_key_id"]
+        request.state.customer_id = auth["customer_id"]
+        request.state.subscription_id = auth["subscription_id"]
+        request.state.plan_code = auth["plan_code"]
+        request.state.auth_mode = "api_key"
+        request.state.actor_type = auth["actor_type"]
+        request.state.auth_context = SimpleNamespace(
+            api_key_id=auth["api_key_id"],
+            customer_id=auth["customer_id"],
+            subscription_id=auth["subscription_id"],
+            plan_code=auth["plan_code"],
+            actor_type=auth["actor_type"],
+        )
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
@@ -70,124 +169,39 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         if path in self.public_paths or any(path.startswith(prefix) for prefix in self.public_prefixes):
             return await call_next(request)
 
-        # Free-metered routes
+        raw_key = extract_api_key(request)
+
+        # Free-metered routes:
+        # allow anonymous access, but if an API key is supplied, resolve and attach customer context
         if path in self.free_metered_paths:
-            request.state.auth_mode = "free_metered"
+            if raw_key:
+                ok, auth = self._authenticate_api_key(path, raw_key)
+                if not ok:
+                    return JSONResponse(
+                        {"detail": auth["detail"]},
+                        status_code=auth["status_code"],
+                    )
+                self._apply_auth_context(request, auth)
+            else:
+                request.state.auth_mode = "free_metered"
             return await call_next(request)
 
         # Protected API routes
         if path.startswith("/v1/"):
-            raw_key = extract_api_key(request)
             if not raw_key:
                 return JSONResponse(
                     {"detail": "Missing API key"},
                     status_code=401,
                 )
 
-            key_hash = hash_api_key(raw_key)
-            engine = get_auth_engine()
-
-            with engine.begin() as conn:
-                result = conn.execute(
-                    text(
-                        """
-                        SELECT
-                            k.id,
-                            k.customer_id,
-                            k.subscription_id,
-                            k.status,
-                            k.revoked_at,
-                            s.status AS subscription_status,
-                            p.code AS plan_code,
-                            p.active AS plan_active
-                        FROM api_keys k
-                        LEFT JOIN api_subscriptions s
-                            ON k.subscription_id = s.id
-                        LEFT JOIN api_plans p
-                            ON s.plan_id = p.id
-                        WHERE k.key_hash = :key_hash
-                        LIMIT 1
-                        """
-                    ),
-                    {"key_hash": key_hash},
-                ).fetchone()
-
-                if not result:
-                    return JSONResponse(
-                        {"detail": "Invalid API key"},
-                        status_code=401,
-                    )
-
-                key_id = result[0]
-                customer_id = result[1]
-                subscription_id = result[2]
-                key_status = result[3]
-                revoked_at = result[4]
-                subscription_status = result[5]
-                plan_code = result[6]
-                plan_active = result[7]
-
-                if key_status != "active" or revoked_at is not None:
-                    return JSONResponse(
-                        {"detail": "API key inactive"},
-                        status_code=403,
-                    )
-
-                if not subscription_id:
-                    return JSONResponse(
-                        {"detail": "No subscription linked to API key"},
-                        status_code=403,
-                    )
-
-                if subscription_status not in ALLOWED_SUBSCRIPTION_STATUSES:
-                    return JSONResponse(
-                        {"detail": f"Subscription not active ({subscription_status})"},
-                        status_code=403,
-                    )
-
-                if not plan_code:
-                    return JSONResponse(
-                        {"detail": "No plan linked to subscription"},
-                        status_code=403,
-                    )
-
-                if not plan_active:
-                    return JSONResponse(
-                        {"detail": "Plan is inactive"},
-                        status_code=403,
-                    )
-
-                if not self.is_plan_allowed(path, plan_code):
-                    return JSONResponse(
-                        {"detail": f"Plan '{plan_code}' does not allow this endpoint"},
-                        status_code=403,
-                    )
-
-                conn.execute(
-                    text(
-                        """
-                        UPDATE api_keys
-                        SET last_used_at = NOW()
-                        WHERE id = :key_id
-                        """
-                    ),
-                    {"key_id": key_id},
+            ok, auth = self._authenticate_api_key(path, raw_key)
+            if not ok:
+                return JSONResponse(
+                    {"detail": auth["detail"]},
+                    status_code=auth["status_code"],
                 )
 
-                request.state.api_key_id = key_id
-                request.state.customer_id = customer_id
-                request.state.subscription_id = subscription_id
-                request.state.plan_code = plan_code
-                request.state.auth_mode = "api_key"
-                request.state.actor_type = "external_customer"
-                request.state.auth_context = SimpleNamespace(
-                    api_key_id=key_id,
-                    customer_id=customer_id,
-                    subscription_id=subscription_id,
-                    plan_code=plan_code,
-                    actor_type="external_customer",
-                )
-
+            self._apply_auth_context(request, auth)
             return await call_next(request)
 
         return await call_next(request)
