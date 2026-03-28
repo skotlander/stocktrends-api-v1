@@ -188,17 +188,6 @@ def get_active_pricing_rule(rule_name: str | None) -> dict | None:
 
 
 def resolve_economic_amounts(rule_name: str | None) -> tuple[Decimal, Decimal]:
-    """
-    Returns:
-      unit_price_usd, billed_amount_usd
-
-    Current model:
-    - default_free -> 0, 0
-    - default_free_metered -> 0, 0
-    - default_subscription -> use rule unit price if present, but billed amount 0
-      because subscription covers entitlement
-    - agent_pay_required -> billed amount = unit price
-    """
     rule = get_active_pricing_rule(rule_name)
     if not rule:
         return Decimal("0"), Decimal("0")
@@ -224,9 +213,6 @@ def build_econ_payment_fields(
     payment_reference_header: str | None,
     decision,
 ) -> dict:
-    """
-    Prevent pollution of economics rows for non-required requests.
-    """
     if not payment_required:
         return {
             "payment_status": "not_required",
@@ -322,7 +308,9 @@ def lookup_agent_record(customer_id: str | None, agent_identifier: str | None) -
                         agent_type,
                         agent_vendor,
                         display_name,
-                        status
+                        status,
+                        created_at,
+                        updated_at
                     FROM api_agents
                     WHERE customer_id = :customer_id
                       AND agent_identifier = :agent_identifier
@@ -349,15 +337,65 @@ def ensure_agent_record(
     agent_vendor_header: str | None,
 ) -> tuple[dict | None, bool]:
     """
-    Auto-register agent on first use when customer_id + agent_identifier are present.
+    Create agent on first use, and refresh agent metadata / updated_at on subsequent use.
     Returns: (agent_record, auto_registered)
     """
     if not customer_id or not agent_identifier:
         return None, False
 
     existing = lookup_agent_record(customer_id, agent_identifier)
+
     if existing:
-        return existing, False
+        try:
+            display_name = existing.get("display_name") or agent_identifier
+            needs_refresh = (
+                existing.get("agent_type") != agent_type_header
+                or existing.get("agent_vendor") != agent_vendor_header
+                or existing.get("display_name") != display_name
+            )
+
+            if needs_refresh:
+                engine = get_metering_engine()
+                with engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE api_agents
+                            SET
+                                agent_type = :agent_type,
+                                agent_vendor = :agent_vendor,
+                                display_name = :display_name,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = :id
+                            """
+                        ),
+                        {
+                            "id": existing["id"],
+                            "agent_type": agent_type_header,
+                            "agent_vendor": agent_vendor_header,
+                            "display_name": display_name,
+                        },
+                    )
+            else:
+                engine = get_metering_engine()
+                with engine.begin() as conn:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE api_agents
+                            SET updated_at = CURRENT_TIMESTAMP
+                            WHERE id = :id
+                            """
+                        ),
+                        {"id": existing["id"]},
+                    )
+
+            refreshed = lookup_agent_record(customer_id, agent_identifier)
+            return refreshed or existing, False
+
+        except Exception as e:
+            logger.error("Agent refresh failed: %s", e, exc_info=True)
+            return existing, False
 
     try:
         engine = get_metering_engine()
@@ -408,10 +446,6 @@ def _path_matches_enforcement_scope(path: str) -> bool:
 
 
 def _caller_matches_test_allowlist(request: Request) -> bool:
-    """
-    If neither allowlist is configured, enforcement applies to everyone in scope.
-    If one or both allowlists are configured, a match on either list enables enforcement.
-    """
     customer_id = getattr(request.state, "customer_id", None)
     api_key_id = getattr(request.state, "api_key_id", None)
 
