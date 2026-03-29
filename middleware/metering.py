@@ -102,8 +102,21 @@ def get_response_size_bytes(response) -> int | None:
         return None
 
 
-def get_accepted_payment_methods(path: str, pricing_rule_id: str | None) -> str:
+def get_accepted_payment_methods(
+    path: str,
+    pricing_rule_id: str | None,
+    *,
+    enforced_payment_method: str | None = None,
+) -> str:
+    normalized_method = (enforced_payment_method or "").strip().lower()
+
     if pricing_rule_id == "agent_pay_required":
+        if normalized_method == "x402":
+            return "x402"
+        if normalized_method == "mpp":
+            return "mpp"
+        if normalized_method == "crypto":
+            return "crypto"
         return "mpp,x402,crypto"
 
     if path.startswith("/v1/stim"):
@@ -444,6 +457,139 @@ def ensure_agent_record(
     return created, bool(created)
 
 
+def lookup_external_agent_record(agent_identifier: str | None) -> dict | None:
+    if not agent_identifier:
+        return None
+
+    try:
+        engine = get_metering_engine()
+        with engine.begin() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT
+                        id,
+                        agent_identifier,
+                        agent_type,
+                        agent_vendor,
+                        display_name,
+                        status,
+                        created_at,
+                        updated_at
+                    FROM api_external_agents
+                    WHERE agent_identifier = :agent_identifier
+                    LIMIT 1
+                    """
+                ),
+                {"agent_identifier": agent_identifier},
+            ).mappings().first()
+
+            return dict(row) if row else None
+
+    except Exception as e:
+        logger.error("External agent lookup failed: %s", e, exc_info=True)
+        return None
+
+
+def ensure_external_agent_record(
+    agent_identifier: str | None,
+    agent_type_header: str | None,
+    agent_vendor_header: str | None,
+) -> tuple[dict | None, bool]:
+    if not agent_identifier:
+        return None, False
+
+    existing = lookup_external_agent_record(agent_identifier)
+
+    if existing:
+        try:
+            display_name = existing.get("display_name") or agent_identifier
+            needs_refresh = (
+                existing.get("agent_type") != agent_type_header
+                or existing.get("agent_vendor") != agent_vendor_header
+                or existing.get("display_name") != display_name
+            )
+
+            engine = get_metering_engine()
+            with engine.begin() as conn:
+                if needs_refresh:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE api_external_agents
+                            SET
+                                agent_type = :agent_type,
+                                agent_vendor = :agent_vendor,
+                                display_name = :display_name,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = :id
+                            """
+                        ),
+                        {
+                            "id": existing["id"],
+                            "agent_type": agent_type_header,
+                            "agent_vendor": agent_vendor_header,
+                            "display_name": display_name,
+                        },
+                    )
+                else:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE api_external_agents
+                            SET updated_at = CURRENT_TIMESTAMP
+                            WHERE id = :id
+                            """
+                        ),
+                        {"id": existing["id"]},
+                    )
+
+            refreshed = lookup_external_agent_record(agent_identifier)
+            return refreshed or existing, False
+
+        except Exception as e:
+            logger.error("External agent refresh failed: %s", e, exc_info=True)
+            return existing, False
+
+    try:
+        engine = get_metering_engine()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT IGNORE INTO api_external_agents (
+                        id,
+                        agent_identifier,
+                        agent_type,
+                        agent_vendor,
+                        display_name,
+                        status
+                    ) VALUES (
+                        :id,
+                        :agent_identifier,
+                        :agent_type,
+                        :agent_vendor,
+                        :display_name,
+                        'active'
+                    )
+                    """
+                ),
+                {
+                    "id": str(uuid4()),
+                    "agent_identifier": agent_identifier,
+                    "agent_type": agent_type_header,
+                    "agent_vendor": agent_vendor_header,
+                    "display_name": agent_identifier,
+                },
+            )
+    except Exception as e:
+        logger.error("External agent auto-registration failed: %s", e, exc_info=True)
+        return lookup_external_agent_record(agent_identifier), False
+
+    created = lookup_external_agent_record(agent_identifier)
+    return created, bool(created)
+
+
 def _path_matches_enforcement_scope(path: str) -> bool:
     if not AGENT_PAY_ENFORCE_PATH_PREFIXES:
         return False
@@ -613,12 +759,20 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         actor_type = getattr(request.state, "actor_type", "unknown")
 
         agent_identifier = normalize_agent_identifier(agent_id_header, agent_vendor_header)
-        agent_record, agent_auto_registered = ensure_agent_record(
-            customer_id=customer_id,
-            agent_identifier=agent_identifier,
-            agent_type_header=agent_type_header,
-            agent_vendor_header=agent_vendor_header,
-        )
+
+        if customer_id:
+            agent_record, agent_auto_registered = ensure_agent_record(
+                customer_id=customer_id,
+                agent_identifier=agent_identifier,
+                agent_type_header=agent_type_header,
+                agent_vendor_header=agent_vendor_header,
+            )
+        else:
+            agent_record, agent_auto_registered = ensure_external_agent_record(
+                agent_identifier=agent_identifier,
+                agent_type_header=agent_type_header,
+                agent_vendor_header=agent_vendor_header,
+            )
 
         agent_registered = bool(agent_record)
         agent_registry_id = agent_record["id"] if agent_record else None
@@ -870,7 +1024,11 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         response,
                         pricing_rule_id=pricing_rule_for_headers,
                         payment_required=True,
-                        accepted_methods=get_accepted_payment_methods(path, pricing_rule_for_headers),
+                        accepted_methods=get_accepted_payment_methods(
+                            path,
+                            pricing_rule_for_headers,
+                            enforced_payment_method="x402",
+                        ),
                     )
 
                     latency_ms = int((time.time() - start_time) * 1000)
@@ -956,7 +1114,11 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     response,
                     pricing_rule_id=pricing_rule_for_headers,
                     payment_required=True,
-                    accepted_methods=get_accepted_payment_methods(path, pricing_rule_for_headers),
+                    accepted_methods=get_accepted_payment_methods(
+                        path,
+                        pricing_rule_for_headers,
+                        enforced_payment_method="x402" if is_x402_payment_method(normalized_payment_method) else None,
+                    ),
                 )
 
                 latency_ms = int((time.time() - start_time) * 1000)
@@ -1046,6 +1208,13 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             accepted_methods = get_accepted_payment_methods(path, pricing_rule_for_headers)
 
             if response is not None:
+                if decision.econ_payment_required and is_x402_payment_method(normalized_payment_method):
+                    accepted_methods = get_accepted_payment_methods(
+                        path,
+                        pricing_rule_for_headers,
+                        enforced_payment_method="x402",
+                    )
+
                 apply_pricing_headers(
                     response,
                     pricing_rule_id=pricing_rule_for_headers,
