@@ -4,8 +4,8 @@ import os
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
-
-import requests
+from urllib import request as urllib_request
+from urllib import error as urllib_error
 
 
 X402_FACILITATOR_URL = os.getenv(
@@ -37,13 +37,6 @@ class X402ValidationResult:
     settlement_response: Optional[dict[str, Any]] = None
 
 
-REQUIRED_STOCKTRENDS_X402_HEADERS = {
-    "x-stocktrends-payment-reference",
-    "x-stocktrends-payment-amount",
-    "x-stocktrends-payment-network",
-}
-
-
 def _parse_decimal(value: str | None) -> Decimal | None:
     if value is None or value == "":
         return None
@@ -67,14 +60,42 @@ def _facilitator_headers() -> dict[str, str]:
     headers = {
         "Content-Type": "application/json",
     }
-
     if X402_FACILITATOR_API_KEY:
         headers["x-api-key"] = X402_FACILITATOR_API_KEY
-
     if X402_FACILITATOR_API_SECRET:
         headers["x-api-secret"] = X402_FACILITATOR_API_SECRET
-
     return headers
+
+
+def _post_json(url: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any] | None, str | None]:
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib_request.Request(
+        url,
+        data=data,
+        headers=_facilitator_headers(),
+        method="POST",
+    )
+
+    try:
+        with urllib_request.urlopen(req, timeout=X402_TIMEOUT_SECONDS) as resp:
+            body = resp.read().decode("utf-8")
+            try:
+                parsed = json.loads(body) if body else {}
+            except ValueError:
+                parsed = None
+            return resp.status, parsed, body
+    except urllib_error.HTTPError as e:
+        try:
+            body = e.read().decode("utf-8")
+        except Exception:
+            body = str(e)
+        try:
+            parsed = json.loads(body) if body else {}
+        except ValueError:
+            parsed = None
+        return e.code, parsed, body
+    except Exception as e:
+        return 0, None, str(e)
 
 
 def is_x402_payment_method(payment_method: str | None) -> bool:
@@ -103,14 +124,6 @@ def build_x402_requirements(
     pay_to: str = X402_SELLER_ADDRESS,
     max_timeout_seconds: int = 300,
 ) -> dict[str, Any]:
-    """
-    Builds a pragmatic payment requirements object for x402 challenge/verification.
-
-    This is the object we will:
-    - include in the response body for human inspection
-    - base64-encode into PAYMENT-REQUIRED for compliant x402 clients
-    - send to facilitator /verify and /settle once you switch to full verification
-    """
     return {
         "x402Version": 1,
         "accepts": [
@@ -169,39 +182,62 @@ def build_x402_challenge(
     return body, payment_required_header
 
 
-def validate_stocktrends_x402_headers(
+def validate_x402_payment(
     headers,
     *,
     required_amount_usd: Decimal,
 ) -> X402ValidationResult:
-    """
-    Backward-compatible validator for your current Stock Trends transitional headers.
-    Keep this until your clients switch to official PAYMENT-SIGNATURE flow.
-    """
-    missing = [h for h in REQUIRED_STOCKTRENDS_X402_HEADERS if not headers.get(h)]
-    if missing:
+    signature = extract_payment_signature(headers)
+    if not signature:
         return X402ValidationResult(
             valid=False,
-            error_code="missing_payment_headers",
-            error_detail="Missing required x402 headers: " + ", ".join(sorted(missing)),
+            error_code="missing_payment_signature",
+            error_detail="PAYMENT-SIGNATURE header is required for x402 settlement.",
         )
 
-    amount_native = _parse_decimal(headers.get("x-stocktrends-payment-amount"))
-    if amount_native is None:
+    try:
+        payload = _decode_b64_json(signature)
+    except Exception as e:
         return X402ValidationResult(
             valid=False,
-            error_code="invalid_payment_amount",
-            error_detail="Payment amount is not a valid decimal.",
+            error_code="invalid_payment_signature",
+            error_detail=f"Could not decode PAYMENT-SIGNATURE: {e}",
         )
 
-    if amount_native <= 0:
-        return X402ValidationResult(
-            valid=False,
-            error_code="nonpositive_payment_amount",
-            error_detail="Payment amount must be greater than zero.",
+    amount_native: Optional[Decimal] = None
+    payment_reference: Optional[str] = None
+    payment_network: Optional[str] = None
+    payment_token: Optional[str] = None
+
+    if isinstance(payload, dict):
+        payment_reference = str(
+            payload.get("paymentIdentifier")
+            or payload.get("payment_id")
+            or payload.get("id")
+            or signature
         )
 
-    if amount_native < required_amount_usd:
+        payment_network = (
+            payload.get("network")
+            or payload.get("chain")
+            or payload.get("paymentNetwork")
+        )
+
+        payment_token = (
+            payload.get("asset")
+            or payload.get("token")
+            or payload.get("paymentToken")
+        )
+
+        raw_amount = (
+            payload.get("maxAmountRequired")
+            or payload.get("amount")
+            or payload.get("value")
+            or payload.get("paymentAmount")
+        )
+        amount_native = _parse_decimal(str(raw_amount)) if raw_amount is not None else None
+
+    if amount_native is not None and amount_native < required_amount_usd:
         return X402ValidationResult(
             valid=False,
             error_code="insufficient_payment_amount",
@@ -209,48 +245,22 @@ def validate_stocktrends_x402_headers(
                 f"Presented payment amount {amount_native} is less than "
                 f"required amount {required_amount_usd}."
             ),
+            payment_signature=signature,
+            payment_payload=payload,
+            payment_reference=payment_reference,
+            payment_network=payment_network,
+            payment_token=payment_token,
             payment_amount_native=amount_native,
         )
 
     return X402ValidationResult(
         valid=True,
-        payment_reference=headers.get("x-stocktrends-payment-reference"),
-        payment_network=headers.get("x-stocktrends-payment-network"),
-        payment_token=headers.get("x-stocktrends-payment-token"),
+        payment_signature=signature,
+        payment_payload=payload,
+        payment_reference=payment_reference or signature,
+        payment_network=payment_network,
+        payment_token=payment_token,
         payment_amount_native=amount_native,
-    )
-
-
-def validate_x402_payment(
-    headers,
-    *,
-    required_amount_usd: Decimal,
-) -> X402ValidationResult:
-    """
-    Transitional validator:
-    - prefers official PAYMENT-SIGNATURE if present
-    - otherwise falls back to Stock Trends compatibility headers
-    """
-    signature = extract_payment_signature(headers)
-    if signature:
-        try:
-            payload = _decode_b64_json(signature)
-        except Exception as e:
-            return X402ValidationResult(
-                valid=False,
-                error_code="invalid_payment_signature",
-                error_detail=f"Could not decode PAYMENT-SIGNATURE: {e}",
-            )
-
-        return X402ValidationResult(
-            valid=True,
-            payment_signature=signature,
-            payment_payload=payload,
-        )
-
-    return validate_stocktrends_x402_headers(
-        headers,
-        required_amount_usd=required_amount_usd,
     )
 
 
@@ -259,44 +269,31 @@ def verify_with_facilitator(
     payment_signature: str,
     payment_requirements: dict[str, Any],
 ) -> X402ValidationResult:
-    """
-    Full x402 verification path via facilitator /verify.
-    """
-    try:
-        resp = requests.post(
-            f"{X402_FACILITATOR_URL}/verify",
-            headers=_facilitator_headers(),
-            json={
-                "x402Version": 1,
-                "paymentHeader": payment_signature,
-                "paymentRequirements": payment_requirements,
-            },
-            timeout=X402_TIMEOUT_SECONDS,
-        )
-    except requests.RequestException as e:
+    status, data, raw = _post_json(
+        f"{X402_FACILITATOR_URL}/verify",
+        {
+            "x402Version": 1,
+            "paymentHeader": payment_signature,
+            "paymentRequirements": payment_requirements,
+        },
+    )
+
+    if status == 0:
         return X402ValidationResult(
             valid=False,
             error_code="facilitator_verify_unreachable",
-            error_detail=str(e),
+            error_detail=raw,
         )
 
-    if resp.status_code >= 400:
+    if status >= 400:
         return X402ValidationResult(
             valid=False,
             error_code="facilitator_verify_failed",
-            error_detail=f"Facilitator /verify returned HTTP {resp.status_code}",
+            error_detail=f"Facilitator /verify returned HTTP {status}",
+            verification_response=data,
         )
 
-    try:
-        data = resp.json()
-    except ValueError:
-        return X402ValidationResult(
-            valid=False,
-            error_code="facilitator_verify_invalid_json",
-            error_detail="Facilitator /verify returned non-JSON response.",
-        )
-
-    verified = bool(data.get("isValid") or data.get("valid"))
+    verified = bool((data or {}).get("isValid") or (data or {}).get("valid"))
     if not verified:
         return X402ValidationResult(
             valid=False,
@@ -316,44 +313,31 @@ def settle_with_facilitator(
     payment_signature: str,
     payment_requirements: dict[str, Any],
 ) -> X402ValidationResult:
-    """
-    Full x402 settlement path via facilitator /settle.
-    """
-    try:
-        resp = requests.post(
-            f"{X402_FACILITATOR_URL}/settle",
-            headers=_facilitator_headers(),
-            json={
-                "x402Version": 1,
-                "paymentHeader": payment_signature,
-                "paymentRequirements": payment_requirements,
-            },
-            timeout=X402_TIMEOUT_SECONDS,
-        )
-    except requests.RequestException as e:
+    status, data, raw = _post_json(
+        f"{X402_FACILITATOR_URL}/settle",
+        {
+            "x402Version": 1,
+            "paymentHeader": payment_signature,
+            "paymentRequirements": payment_requirements,
+        },
+    )
+
+    if status == 0:
         return X402ValidationResult(
             valid=False,
             error_code="facilitator_settle_unreachable",
-            error_detail=str(e),
+            error_detail=raw,
         )
 
-    if resp.status_code >= 400:
+    if status >= 400:
         return X402ValidationResult(
             valid=False,
             error_code="facilitator_settle_failed",
-            error_detail=f"Facilitator /settle returned HTTP {resp.status_code}",
+            error_detail=f"Facilitator /settle returned HTTP {status}",
+            settlement_response=data,
         )
 
-    try:
-        data = resp.json()
-    except ValueError:
-        return X402ValidationResult(
-            valid=False,
-            error_code="facilitator_settle_invalid_json",
-            error_detail="Facilitator /settle returned non-JSON response.",
-        )
-
-    settled = bool(data.get("success") or data.get("settled") or data.get("txHash"))
+    settled = bool((data or {}).get("success") or (data or {}).get("settled") or (data or {}).get("txHash"))
     if not settled:
         return X402ValidationResult(
             valid=False,
