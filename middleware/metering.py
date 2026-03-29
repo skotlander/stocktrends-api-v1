@@ -17,6 +17,11 @@ from metering.logger import (
     get_metering_engine,
 )
 from pricing.classifier import classify_request
+from payments.x402 import (
+    is_x402_payment_method,
+    build_x402_challenge,
+    validate_x402_payment,
+)
 
 logger = logging.getLogger("stocktrends_api.metering")
 
@@ -645,6 +650,9 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         workflow_type = normalize_workflow_type(auth_mode, agent_identifier)
         resolved_payment_method = payment_method_header or decision.log_payment_method
 
+        request.state.unit_price_usd = unit_price_usd
+        request.state.billed_amount_usd = billed_amount_usd
+
         if agent_identifier and agent_registered and agent_registry_status == "disabled":
             response = JSONResponse(
                 status_code=403,
@@ -815,11 +823,13 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
             return response
 
+        normalized_payment_method = (payment_method_header or "").strip().lower()
+
         should_validate_agent_pay = (
             ENABLE_AGENT_PAY
             and VALIDATE_AGENT_PAY_HEADERS
             and decision.econ_payment_required == 1
-            and payment_method_header == "mpp"
+            and normalized_payment_method in {"mpp", "x402"}
         )
 
         should_enforce_agent_pay = should_enforce_agent_pay_for_request(request, path, decision)
@@ -829,93 +839,193 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         validation_detail = None
 
         if should_validate_agent_pay:
-            validation_valid, validation_error, validation_detail = validate_payment_headers(request)
+            if is_x402_payment_method(normalized_payment_method):
+                x402_result = validate_x402_payment(
+                    request.headers,
+                    required_amount_usd=unit_price_usd,
+                )
+                validation_valid = x402_result.valid
+                validation_error = x402_result.error_code
+                validation_detail = x402_result.error_detail
+            else:
+                validation_valid, validation_error, validation_detail = validate_payment_headers(request)
 
-        if should_enforce_agent_pay and not validation_valid:
-            response = JSONResponse(
-                status_code=402,
-                content={
-                    "error": validation_error,
-                    "detail": validation_detail,
-                    "request_id": request_id,
-                },
-            )
+        if should_enforce_agent_pay and decision.econ_payment_required == 1:
+            if is_x402_payment_method(normalized_payment_method):
+                has_x402_reference = bool(payment_reference_header)
 
-            pricing_rule_for_headers = decision.econ_pricing_rule_id or decision.log_pricing_rule_id
-            apply_pricing_headers(
-                response,
-                pricing_rule_id=pricing_rule_for_headers,
-                payment_required=True,
-                accepted_methods=get_accepted_payment_methods(path, pricing_rule_for_headers),
-            )
+                if not has_x402_reference:
+                    response = JSONResponse(
+                        status_code=402,
+                        content=build_x402_challenge(
+                            path=path,
+                            amount_usd=unit_price_usd,
+                            network="base",
+                            token=(payment_token_header or "usdc").lower(),
+                        ),
+                    )
 
-            latency_ms = int((time.time() - start_time) * 1000)
+                    pricing_rule_for_headers = decision.econ_pricing_rule_id or decision.log_pricing_rule_id
+                    apply_pricing_headers(
+                        response,
+                        pricing_rule_id=pricing_rule_for_headers,
+                        payment_required=True,
+                        accepted_methods=get_accepted_payment_methods(path, pricing_rule_for_headers),
+                    )
 
-            event = build_request_event(
-                request_id=request_id,
-                environment="production",
-                api_key_id=api_key_id,
-                customer_id=customer_id,
-                subscription_id=subscription_id,
-                plan_code=plan_code,
-                actor_type=actor_type,
-                workflow_type=workflow_type,
-                agent_identifier=agent_identifier,
-                agent_registry_id=agent_registry_id,
-                path=path,
-                method=method,
-                query_string=query_string,
-                request=request,
-                status_code=402,
-                success=0,
-                latency_ms=latency_ms,
-                response=response,
-                decision=decision,
-                payment_method=resolved_payment_method,
-                error_code=validation_error,
-                notes=validation_detail,
-            )
+                    latency_ms = int((time.time() - start_time) * 1000)
 
-            try:
-                log_api_request_event(event)
-            except Exception as e:
-                logger.error("Metering request-log insert failed: %s", e, exc_info=True)
+                    event = build_request_event(
+                        request_id=request_id,
+                        environment="production",
+                        api_key_id=api_key_id,
+                        customer_id=customer_id,
+                        subscription_id=subscription_id,
+                        plan_code=plan_code,
+                        actor_type=actor_type,
+                        workflow_type=workflow_type,
+                        agent_identifier=agent_identifier,
+                        agent_registry_id=agent_registry_id,
+                        path=path,
+                        method=method,
+                        query_string=query_string,
+                        request=request,
+                        status_code=402,
+                        success=0,
+                        latency_ms=latency_ms,
+                        response=response,
+                        decision=decision,
+                        payment_method=resolved_payment_method,
+                        error_code="payment_required",
+                        notes="x402 payment required",
+                    )
 
-            if should_log_economics(decision):
-                econ_payment_fields = build_econ_payment_fields(
-                    payment_required=1,
-                    payment_status="failed_validation",
-                    payment_method_header=payment_method_header,
-                    payment_network_header=payment_network_header,
-                    payment_token_header=payment_token_header,
-                    payment_amount_header=payment_amount_header,
-                    payment_reference_header=payment_reference_header,
-                    decision=decision,
+                    try:
+                        log_api_request_event(event)
+                    except Exception as e:
+                        logger.error("Metering request-log insert failed: %s", e, exc_info=True)
+
+                    if should_log_economics(decision):
+                        econ_payment_fields = build_econ_payment_fields(
+                            payment_required=1,
+                            payment_status="pending",
+                            payment_method_header=payment_method_header,
+                            payment_network_header=payment_network_header,
+                            payment_token_header=payment_token_header,
+                            payment_amount_header=payment_amount_header,
+                            payment_reference_header=payment_reference_header,
+                            decision=decision,
+                        )
+
+                        econ = build_request_econ(
+                            request_id=request_id,
+                            customer_id=customer_id,
+                            api_key_id=api_key_id,
+                            pricing_rule_id=economic_rule_name,
+                            unit_price_usd=unit_price_usd,
+                            billed_amount_usd=billed_amount_usd,
+                            payment_required=1,
+                            econ_payment_fields=econ_payment_fields,
+                            session_id_header=session_id_header,
+                            agent_registry_id=agent_registry_id,
+                            agent_type=agent_type_header,
+                            agent_vendor=agent_vendor_header,
+                            agent_version=agent_version_header,
+                            request_purpose=request_purpose_header,
+                        )
+
+                        try:
+                            log_api_request_economics(econ)
+                        except Exception as e:
+                            logger.error("Metering economics-log insert failed: %s", e, exc_info=True)
+
+                    return response
+
+            if not validation_valid:
+                response = JSONResponse(
+                    status_code=402,
+                    content={
+                        "error": validation_error,
+                        "detail": validation_detail,
+                        "request_id": request_id,
+                    },
                 )
 
-                econ = build_request_econ(
+                pricing_rule_for_headers = decision.econ_pricing_rule_id or decision.log_pricing_rule_id
+                apply_pricing_headers(
+                    response,
+                    pricing_rule_id=pricing_rule_for_headers,
+                    payment_required=True,
+                    accepted_methods=get_accepted_payment_methods(path, pricing_rule_for_headers),
+                )
+
+                latency_ms = int((time.time() - start_time) * 1000)
+
+                event = build_request_event(
                     request_id=request_id,
-                    customer_id=customer_id,
+                    environment="production",
                     api_key_id=api_key_id,
-                    pricing_rule_id=economic_rule_name,
-                    unit_price_usd=unit_price_usd,
-                    billed_amount_usd=billed_amount_usd,
-                    payment_required=1,
-                    econ_payment_fields=econ_payment_fields,
-                    session_id_header=session_id_header,
+                    customer_id=customer_id,
+                    subscription_id=subscription_id,
+                    plan_code=plan_code,
+                    actor_type=actor_type,
+                    workflow_type=workflow_type,
+                    agent_identifier=agent_identifier,
                     agent_registry_id=agent_registry_id,
-                    agent_type=agent_type_header,
-                    agent_vendor=agent_vendor_header,
-                    agent_version=agent_version_header,
-                    request_purpose=request_purpose_header,
+                    path=path,
+                    method=method,
+                    query_string=query_string,
+                    request=request,
+                    status_code=402,
+                    success=0,
+                    latency_ms=latency_ms,
+                    response=response,
+                    decision=decision,
+                    payment_method=resolved_payment_method,
+                    error_code=validation_error,
+                    notes=validation_detail,
                 )
 
                 try:
-                    log_api_request_economics(econ)
+                    log_api_request_event(event)
                 except Exception as e:
-                    logger.error("Metering economics-log insert failed: %s", e, exc_info=True)
+                    logger.error("Metering request-log insert failed: %s", e, exc_info=True)
 
-            return response
+                if should_log_economics(decision):
+                    econ_payment_fields = build_econ_payment_fields(
+                        payment_required=1,
+                        payment_status="failed_validation",
+                        payment_method_header=payment_method_header,
+                        payment_network_header=payment_network_header,
+                        payment_token_header=payment_token_header,
+                        payment_amount_header=payment_amount_header,
+                        payment_reference_header=payment_reference_header,
+                        decision=decision,
+                    )
+
+                    econ = build_request_econ(
+                        request_id=request_id,
+                        customer_id=customer_id,
+                        api_key_id=api_key_id,
+                        pricing_rule_id=economic_rule_name,
+                        unit_price_usd=unit_price_usd,
+                        billed_amount_usd=billed_amount_usd,
+                        payment_required=1,
+                        econ_payment_fields=econ_payment_fields,
+                        session_id_header=session_id_header,
+                        agent_registry_id=agent_registry_id,
+                        agent_type=agent_type_header,
+                        agent_vendor=agent_vendor_header,
+                        agent_version=agent_version_header,
+                        request_purpose=request_purpose_header,
+                    )
+
+                    try:
+                        log_api_request_economics(econ)
+                    except Exception as e:
+                        logger.error("Metering economics-log insert failed: %s", e, exc_info=True)
+
+                return response
 
         response = None
         caught_exception = None
@@ -976,11 +1086,19 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             if should_log_economics(decision):
                 payment_status = decision.econ_payment_status
 
-                if decision.econ_payment_required and payment_method_header == "mpp":
-                    if validation_valid:
-                        payment_status = "presented"
-                    else:
-                        payment_status = "failed_validation" if should_enforce_agent_pay else "pending"
+                if decision.econ_payment_required:
+                    if is_x402_payment_method(normalized_payment_method):
+                        if validation_valid and payment_reference_header:
+                            payment_status = "authorized"
+                        elif payment_reference_header and not validation_valid:
+                            payment_status = "failed_validation"
+                        else:
+                            payment_status = "pending"
+                    elif normalized_payment_method == "mpp":
+                        if validation_valid and payment_reference_header:
+                            payment_status = "presented"
+                        elif not validation_valid:
+                            payment_status = "failed_validation" if should_enforce_agent_pay else "pending"
 
                 econ_payment_fields = build_econ_payment_fields(
                     payment_required=decision.econ_payment_required,

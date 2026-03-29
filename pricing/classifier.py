@@ -119,17 +119,19 @@ def _subscription_decision() -> PricingDecision:
     )
 
 
-def _agent_pay_decision() -> PricingDecision:
+def _agent_pay_decision(method: str) -> PricingDecision:
+    normalized_method = (method or "").strip().lower() or "mpp"
+
     return PricingDecision(
         is_metered=1,
         access_granted=True,
         deny_reason=None,
         log_pricing_rule_id="agent_pay_required",
-        log_payment_method="mpp",
+        log_payment_method=normalized_method,
         econ_pricing_rule_id="agent_pay_required",
         econ_payment_required=1,
         econ_payment_status="pending",
-        econ_payment_method="mpp",
+        econ_payment_method=normalized_method,
     )
 
 
@@ -162,11 +164,15 @@ def _is_identified_agent(agent_identifier: str | None) -> bool:
     return bool(agent_identifier and str(agent_identifier).strip())
 
 
+def _normalize_payment_method(payment_method_header: str | None) -> str:
+    return (payment_method_header or "").strip().lower()
+
+
 def _has_agent_payment_intent(
     payment_method_header: str | None,
     agent_identifier: str | None,
 ) -> bool:
-    normalized_payment_method = (payment_method_header or "").strip().lower()
+    normalized_payment_method = _normalize_payment_method(payment_method_header)
     if not normalized_payment_method:
         return False
 
@@ -210,11 +216,12 @@ def classify_request(
     has_paid_plan = _is_paid_plan(plan_code)
     identified_agent = _is_identified_agent(agent_identifier)
     has_agent_payment_intent = _has_agent_payment_intent(payment_method_header, agent_identifier)
+    normalized_payment_method = _normalize_payment_method(payment_method_header)
 
     if is_stim:
         # Explicit Lane B path: identified agent presents a machine-payment intent.
         if ENABLE_AGENT_PAY and identified_agent and has_agent_payment_intent:
-            return _agent_pay_decision()
+            return _agent_pay_decision(normalized_payment_method)
 
         # Paid subscription customer remains entitled on the subscription lane.
         if has_paid_auth and has_paid_plan:
