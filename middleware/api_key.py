@@ -1,4 +1,5 @@
 import hashlib
+import os
 from types import SimpleNamespace
 from typing import Optional
 
@@ -11,6 +12,10 @@ from db import get_auth_engine
 
 
 ALLOWED_SUBSCRIPTION_STATUSES = {"active", "trialing"}
+
+ENABLE_AGENT_PAY = os.getenv("ENABLE_AGENT_PAY", "false").lower() == "true"
+
+_AGENT_PAY_METHODS = {"mpp", "x402", "crypto"}
 
 
 def hash_api_key(raw_key: str) -> str:
@@ -27,6 +32,13 @@ def extract_api_key(request: Request) -> Optional[str]:
         return auth[7:].strip()
 
     return None
+
+
+def _normalize_header(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
 
 
 class ApiKeyMiddleware(BaseHTTPMiddleware):
@@ -58,6 +70,43 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/v1/ai/context",
             "/v1/breadth/sector/latest",
         }
+
+        self.agent_pay_prefixes = [
+            "/v1/stim",
+        ]
+
+    def _is_agent_pay_candidate(self, request: Request) -> bool:
+        if not ENABLE_AGENT_PAY:
+            return False
+
+        path = request.url.path
+        if not any(path.startswith(prefix) for prefix in self.agent_pay_prefixes):
+            return False
+
+        agent_id = _normalize_header(request.headers.get("x-stocktrends-agent-id"))
+        if not agent_id:
+            return False
+
+        payment_method = (_normalize_header(request.headers.get("x-stocktrends-payment-method")) or "").lower()
+        if payment_method not in _AGENT_PAY_METHODS:
+            return False
+
+        return True
+
+    def _apply_agent_pay_context(self, request: Request) -> None:
+        request.state.api_key_id = None
+        request.state.customer_id = None
+        request.state.subscription_id = None
+        request.state.plan_code = None
+        request.state.auth_mode = "agent_pay"
+        request.state.actor_type = "external_customer"
+        request.state.auth_context = SimpleNamespace(
+            api_key_id=None,
+            customer_id=None,
+            subscription_id=None,
+            plan_code=None,
+            actor_type="external_customer",
+        )
 
     def _authenticate_api_key(self, path: str, raw_key: str) -> tuple[bool, dict]:
         key_hash = hash_api_key(raw_key)
@@ -164,6 +213,10 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         # Default request auth context
         request.state.auth_mode = "public"
         request.state.actor_type = "unknown"
+        request.state.api_key_id = None
+        request.state.customer_id = None
+        request.state.subscription_id = None
+        request.state.plan_code = None
 
         # Public routes
         if path in self.public_paths or any(path.startswith(prefix) for prefix in self.public_prefixes):
@@ -184,6 +237,13 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 self._apply_auth_context(request, auth)
             else:
                 request.state.auth_mode = "free_metered"
+            return await call_next(request)
+
+        # Lane B anonymous agent-pay entry:
+        # allow /v1/stim* through without an API key only when the request clearly presents
+        # as an agent payment attempt. Subscription callers can still use API keys normally.
+        if self._is_agent_pay_candidate(request):
+            self._apply_agent_pay_context(request)
             return await call_next(request)
 
         # Protected API routes
