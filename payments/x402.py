@@ -269,11 +269,11 @@ def validate_x402_payment(
         )
 
         raw_amount = (
-            payload.get("maxAmountRequired")
-            or payload.get("amount")
+            payload.get("amount")
+            or payload.get("maxAmountRequired")
             or payload.get("value")
             or payload.get("paymentAmount")
-        )
+    )
         amount_native = _parse_decimal(str(raw_amount)) if raw_amount is not None else None
 
     required_amount_atomic = Decimal(
