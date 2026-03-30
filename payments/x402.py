@@ -382,12 +382,18 @@ def verify_with_facilitator(
         )
 
     if status >= 400:
-        return X402ValidationResult(
-            valid=False,
-            error_code="facilitator_verify_failed",
-            error_detail=f"Facilitator /verify returned HTTP {status}",
-            verification_response=data,
-        )
+            detail = f"Facilitator /verify returned HTTP {status}"
+        if data:
+            detail = f"{detail}: {json.dumps(data)}"
+        elif raw:
+            detail = f"{detail}: {raw}"
+
+    return X402ValidationResult(
+        valid=False,
+        error_code="facilitator_verify_failed",
+        error_detail=detail,
+        verification_response=data,
+    )
 
     verified = bool((data or {}).get("isValid") or (data or {}).get("valid"))
     if not verified:
@@ -426,10 +432,16 @@ def settle_with_facilitator(
         )
 
     if status >= 400:
+        detail = f"Facilitator /settle returned HTTP {status}"
+        if data:
+            detail = f"{detail}: {json.dumps(data)}"
+        elif raw:
+            detail = f"{detail}: {raw}"
+
         return X402ValidationResult(
             valid=False,
             error_code="facilitator_settle_failed",
-            error_detail=f"Facilitator /settle returned HTTP {status}",
+            error_detail=detail,
             settlement_response=data,
         )
 
