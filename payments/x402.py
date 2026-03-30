@@ -187,6 +187,13 @@ def build_x402_challenge(
 # VALIDATION
 # =========================================================
 
+def is_x402_payment_method(payment_method: str | None) -> bool:
+    return (payment_method or "").strip().lower() == "x402"
+
+
+def has_payment_signature(headers) -> bool:
+    return bool(headers.get("payment-signature"))
+
 def extract_payment_signature(headers) -> Optional[str]:
     value = headers.get("payment-signature")
     return value.strip() if value else None
