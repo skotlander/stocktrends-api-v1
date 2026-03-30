@@ -27,7 +27,28 @@ X402_SELLER_ADDRESS = os.getenv("X402_SELLER_ADDRESS")
 
 USDC_DECIMALS = 6  # Base USDC
 
+# =========================
+# UTILITY
+# =========================
 
+
+def is_x402_payment_method(headers: dict) -> bool:
+    """
+    Detect if request is attempting x402 payment.
+    """
+    if not headers:
+        return False
+
+    # Standard header used by clients
+    if "x-payment" in headers:
+        return True
+
+    # Fallback (some clients may use Authorization-style header)
+    auth = headers.get("authorization", "")
+    if auth.lower().startswith("x402"):
+        return True
+
+    return False
 # =========================
 # DATA STRUCTURE
 # =========================
