@@ -3,3 +3,4 @@ uvicorn
 sqlalchemy
 pymysql
 python-dotenv
+requests>=2.31.0
