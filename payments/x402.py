@@ -6,8 +6,8 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
-from urllib import request as urllib_request
 from urllib import error as urllib_error
+from urllib import request as urllib_request
 from urllib.parse import urlparse
 
 import jwt
@@ -171,16 +171,74 @@ def _post_json(url: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any] |
         return 0, None, str(e)
 
 
+def _normalize_payment_requirements_input(payment_requirements: Any) -> Any:
+    """
+    Accepts:
+    - already-parsed dict
+    - JSON string
+    - base64-encoded JSON string
+    """
+    if isinstance(payment_requirements, dict):
+        return payment_requirements
+
+    if isinstance(payment_requirements, str):
+        value = payment_requirements.strip()
+
+        # Try direct JSON first
+        try:
+            return json.loads(value)
+        except Exception:
+            pass
+
+        # Then try base64 JSON
+        try:
+            return _decode_b64_json(value)
+        except Exception:
+            pass
+
+    return payment_requirements
+
+
+def _extract_single_payment_requirement(payment_requirements: Any) -> dict[str, Any]:
+    """
+    Facilitator expects one payment requirement object that directly contains
+    keys like scheme/network/resource/method/amount/asset/payTo.
+
+    This helper tolerates several shapes:
+    - {"x402Version":2,"accepts":[{...}]}
+    - {"payment_required":{"x402Version":2,"accepts":[{...}]}, ...}
+    - base64/json string of either of the above
+    - already-single requirement object
+    """
+    obj = _normalize_payment_requirements_input(payment_requirements)
+
+    if not isinstance(obj, dict):
+        return {}
+
+    # Full 402 body case
+    if "payment_required" in obj and isinstance(obj["payment_required"], (dict, str)):
+        obj = _normalize_payment_requirements_input(obj["payment_required"])
+
+    if not isinstance(obj, dict):
+        return {}
+
+    # Wrapper case
+    accepts = obj.get("accepts")
+    if isinstance(accepts, list) and accepts and isinstance(accepts[0], dict):
+        return accepts[0]
+
+    # Already single requirement case
+    if "scheme" in obj:
+        return obj
+
+    return {}
+
+
 # =========================================================
 # HEADER / PAYMENT DETECTION HELPERS
 # =========================================================
 
 def is_x402_payment_method(headers_or_payment_method) -> bool:
-    """
-    Compatibility helper:
-    - accepts a headers dict
-    - or a raw payment method string
-    """
     if headers_or_payment_method is None:
         return False
 
@@ -254,11 +312,6 @@ def build_x402_challenge(
     amount_usd,
     method: str = "GET",
 ) -> tuple[dict[str, Any], str]:
-    """
-    Compatibility wrapper expected by middleware.metering.
-    Returns:
-      (response_body_dict, payment_required_header_string)
-    """
     if not isinstance(amount_usd, Decimal):
         amount_usd = Decimal(str(amount_usd))
 
@@ -388,12 +441,14 @@ def verify_with_facilitator(
     payment_signature: str,
     payment_requirements: dict[str, Any],
 ) -> X402ValidationResult:
+    single_requirement = _extract_single_payment_requirement(payment_requirements)
+
     status, data, raw = _post_json(
         f"{X402_FACILITATOR_URL}/verify",
         {
             "x402Version": 2,
             "paymentHeader": payment_signature,
-            "paymentRequirements": payment_requirements,
+            "paymentRequirements": single_requirement,
         },
     )
 
@@ -438,12 +493,14 @@ def settle_with_facilitator(
     payment_signature: str,
     payment_requirements: dict[str, Any],
 ) -> X402ValidationResult:
+    single_requirement = _extract_single_payment_requirement(payment_requirements)
+
     status, data, raw = _post_json(
         f"{X402_FACILITATOR_URL}/settle",
         {
             "x402Version": 2,
             "paymentHeader": payment_signature,
-            "paymentRequirements": payment_requirements,
+            "paymentRequirements": single_requirement,
         },
     )
 
