@@ -1,11 +1,15 @@
 import base64
 import json
 import os
+import time
+import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 from urllib import request as urllib_request
 from urllib import error as urllib_error
+
+import jwt
 
 
 # =========================================================
@@ -89,12 +93,55 @@ def _decode_b64_json(value: str) -> dict[str, Any]:
     return json.loads(decoded.decode("utf-8"))
 
 
+def _normalize_private_key(secret: str) -> str:
+    secret = secret.strip()
+
+    # Handle escaped newlines from env files
+    if "\\n" in secret:
+        secret = secret.replace("\\n", "\n")
+
+    return secret
+
+
+def _build_cdp_bearer_token() -> str | None:
+    if not X402_FACILITATOR_API_KEY or not X402_FACILITATOR_API_SECRET:
+        return None
+
+    now = int(time.time())
+
+    payload = {
+        "sub": X402_FACILITATOR_API_KEY,
+        "iss": "cdp",
+        "nbf": now,
+        "exp": now + 120,
+    }
+
+    headers = {
+        "kid": X402_FACILITATOR_API_KEY,
+        "nonce": str(uuid.uuid4()),
+    }
+
+    private_key = _normalize_private_key(X402_FACILITATOR_API_SECRET)
+
+    token = jwt.encode(
+        payload,
+        private_key,
+        algorithm="ES256",
+        headers=headers,
+    )
+
+    return token
+
+
 def _facilitator_headers() -> dict[str, str]:
-    headers = {"Content-Type": "application/json"}
-    if X402_FACILITATOR_API_KEY:
-        headers["x-api-key"] = X402_FACILITATOR_API_KEY
-    if X402_FACILITATOR_API_SECRET:
-        headers["x-api-secret"] = X402_FACILITATOR_API_SECRET
+    headers = {
+        "Content-Type": "application/json",
+    }
+
+    bearer = _build_cdp_bearer_token()
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+
     return headers
 
 
