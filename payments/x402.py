@@ -213,6 +213,81 @@ def _extract_single_payment_requirement(payment_requirements: Any) -> dict[str, 
     return {}
 
 
+def _decode_payment_signature_payload(payment_signature: str) -> dict[str, Any]:
+    """
+    Tolerates:
+    - raw JSON string
+    - base64-encoded JSON
+    """
+    value = payment_signature.strip()
+
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    try:
+        parsed = _decode_b64_json(value)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    raise ValueError("Could not parse payment signature payload as JSON or base64 JSON.")
+
+
+def _build_facilitator_payment_payload(
+    payment_signature: str,
+    payment_requirements: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Normalizes what arrives from the buyer into the facilitator's expected shape:
+    {
+      "x402Version": 2,
+      "scheme": "...",
+      "network": "...",
+      "payload": {...}
+    }
+    """
+    requirement = _extract_single_payment_requirement(payment_requirements)
+    raw = _decode_payment_signature_payload(payment_signature)
+
+    # If already in facilitator-compatible shape, return as-is
+    if (
+        isinstance(raw, dict)
+        and "scheme" in raw
+        and "network" in raw
+        and "payload" in raw
+    ):
+        if "x402Version" not in raw:
+            raw["x402Version"] = 2
+        return raw
+
+    # Some clients may wrap it
+    if isinstance(raw, dict) and "paymentPayload" in raw and isinstance(raw["paymentPayload"], dict):
+        payload_obj = raw["paymentPayload"]
+        if "x402Version" not in payload_obj:
+            payload_obj["x402Version"] = 2
+        if "scheme" not in payload_obj and requirement.get("scheme"):
+            payload_obj["scheme"] = requirement["scheme"]
+        if "network" not in payload_obj and requirement.get("network"):
+            payload_obj["network"] = requirement["network"]
+        return payload_obj
+
+    # If the buyer sent only the inner payload, wrap it
+    if isinstance(raw, dict):
+        return {
+            "x402Version": 2,
+            "scheme": requirement.get("scheme", X402_DEFAULT_SCHEME),
+            "network": requirement.get("network", X402_DEFAULT_NETWORK),
+            "payload": raw,
+        }
+
+    raise ValueError("Unsupported payment payload format.")
+
+
 # =========================================================
 # HEADER / PAYMENT DETECTION HELPERS
 # =========================================================
@@ -339,7 +414,7 @@ def validate_x402_payment(
         )
 
     try:
-        payload = _decode_b64_json(signature)
+        payload = _decode_payment_signature_payload(signature)
     except Exception as e:
         return X402ValidationResult(
             valid=False,
@@ -423,12 +498,15 @@ def verify_with_facilitator(
     single_requirement = _extract_single_payment_requirement(payment_requirements)
 
     try:
-        payment_payload = _decode_b64_json(payment_signature)
+        payment_payload = _build_facilitator_payment_payload(
+            payment_signature=payment_signature,
+            payment_requirements=payment_requirements,
+        )
     except Exception as e:
         return X402ValidationResult(
             valid=False,
             error_code="invalid_payment_signature",
-            error_detail=f"Could not decode PAYMENT-SIGNATURE for facilitator verify: {e}",
+            error_detail=f"Could not construct facilitator paymentPayload: {e}",
         )
 
     status, data, raw = _post_json(
@@ -436,7 +514,6 @@ def verify_with_facilitator(
         {
             "x402Version": 2,
             "paymentPayload": payment_payload,
-            "paymentHeader": payment_signature,
             "paymentRequirements": single_requirement,
         },
     )
@@ -485,12 +562,15 @@ def settle_with_facilitator(
     single_requirement = _extract_single_payment_requirement(payment_requirements)
 
     try:
-        payment_payload = _decode_b64_json(payment_signature)
+        payment_payload = _build_facilitator_payment_payload(
+            payment_signature=payment_signature,
+            payment_requirements=payment_requirements,
+        )
     except Exception as e:
         return X402ValidationResult(
             valid=False,
             error_code="invalid_payment_signature",
-            error_detail=f"Could not decode PAYMENT-SIGNATURE for facilitator settle: {e}",
+            error_detail=f"Could not construct facilitator paymentPayload: {e}",
         )
 
     status, data, raw = _post_json(
@@ -498,7 +578,6 @@ def settle_with_facilitator(
         {
             "x402Version": 2,
             "paymentPayload": payment_payload,
-            "paymentHeader": payment_signature,
             "paymentRequirements": single_requirement,
         },
     )
