@@ -75,10 +75,6 @@ def _parse_decimal(value: str | None) -> Decimal | None:
 
 
 def _to_atomic_units(amount: Decimal, decimals: int) -> str:
-    """
-    Convert a human decimal amount into atomic units.
-    Example: 0.002500 USDC -> 2500 when decimals=6
-    """
     quantized = (amount * (Decimal(10) ** decimals)).quantize(Decimal("1"))
     return str(int(quantized))
 
@@ -170,7 +166,7 @@ def build_x402_requirements(
                 "network": X402_DEFAULT_NETWORK,
                 "resource": path,
                 "method": method.upper(),
-                "maxAmountRequired": _to_atomic_units(amount_usd, X402_DEFAULT_TOKEN_DECIMALS),
+                "amount": _to_atomic_units(amount_usd, X402_DEFAULT_TOKEN_DECIMALS),
                 "asset": X402_DEFAULT_TOKEN,
                 "payTo": X402_SELLER_ADDRESS,
                 "maxTimeoutSeconds": 300,
@@ -273,7 +269,7 @@ def validate_x402_payment(
             or payload.get("maxAmountRequired")
             or payload.get("value")
             or payload.get("paymentAmount")
-    )
+        )
         amount_native = _parse_decimal(str(raw_amount)) if raw_amount is not None else None
 
     required_amount_atomic = Decimal(
