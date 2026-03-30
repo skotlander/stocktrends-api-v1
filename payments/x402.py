@@ -8,8 +8,10 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
 from urllib import request as urllib_request
 from urllib import error as urllib_error
+from urllib.parse import urlparse
 
 import jwt
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 
 # =========================================================
@@ -95,33 +97,37 @@ def _decode_b64_json(value: str) -> dict[str, Any]:
 
 def _normalize_private_key(secret: str) -> str:
     secret = secret.strip()
-
-    # Handle escaped newlines from env files
     if "\\n" in secret:
         secret = secret.replace("\\n", "\n")
-
     return secret
 
 
-def _build_cdp_bearer_token() -> str | None:
+def _build_cdp_bearer_token(method: str, url: str) -> str | None:
     if not X402_FACILITATOR_API_KEY or not X402_FACILITATOR_API_SECRET:
         return None
 
     now = int(time.time())
+    parsed = urlparse(url)
+    request_host = parsed.netloc
+    request_path = parsed.path
+
+    uri = f"{method.upper()} {request_host}{request_path}"
+
+    private_key_pem = _normalize_private_key(X402_FACILITATOR_API_SECRET).encode("utf-8")
+    private_key = load_pem_private_key(private_key_pem, password=None)
 
     payload = {
         "sub": X402_FACILITATOR_API_KEY,
         "iss": "cdp",
         "nbf": now,
         "exp": now + 120,
+        "uri": uri,
     }
 
     headers = {
         "kid": X402_FACILITATOR_API_KEY,
-        "nonce": str(uuid.uuid4()),
+        "nonce": uuid.uuid4().hex,
     }
-
-    private_key = _normalize_private_key(X402_FACILITATOR_API_SECRET)
 
     token = jwt.encode(
         payload,
@@ -133,12 +139,12 @@ def _build_cdp_bearer_token() -> str | None:
     return token
 
 
-def _facilitator_headers() -> dict[str, str]:
+def _facilitator_headers(method: str, url: str) -> dict[str, str]:
     headers = {
         "Content-Type": "application/json",
     }
 
-    bearer = _build_cdp_bearer_token()
+    bearer = _build_cdp_bearer_token(method, url)
     if bearer:
         headers["Authorization"] = f"Bearer {bearer}"
 
@@ -150,7 +156,7 @@ def _post_json(url: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any] |
     req = urllib_request.Request(
         url,
         data=data,
-        headers=_facilitator_headers(),
+        headers=_facilitator_headers("POST", url),
         method="POST",
     )
 
