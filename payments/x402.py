@@ -128,7 +128,7 @@ def build_x402_requirements(
 ) -> dict[str, Any]:
 
     return {
-        "x402Version": 1,
+        "x402Version": 2,
         "accepts": [
             {
                 "scheme": X402_DEFAULT_SCHEME,
@@ -243,7 +243,7 @@ def verify_with_facilitator(
     status, data, raw = _post_json(
         f"{X402_FACILITATOR_URL}/verify",
         {
-            "x402Version": 1,
+            "x402Version": 2,
             "paymentHeader": payment_signature,
             "paymentRequirements": payment_requirements,
         },
@@ -268,7 +268,7 @@ def settle_with_facilitator(
     status, data, raw = _post_json(
         f"{X402_FACILITATOR_URL}/settle",
         {
-            "x402Version": 1,
+            "x402Version": 2,
             "paymentHeader": payment_signature,
             "paymentRequirements": payment_requirements,
         },
