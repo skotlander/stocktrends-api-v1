@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import time
@@ -25,7 +26,6 @@ X402_FACILITATOR_URL = os.getenv(
 X402_FACILITATOR_API_KEY = os.getenv("X402_FACILITATOR_API_KEY")
 X402_FACILITATOR_API_SECRET = os.getenv("X402_FACILITATOR_API_SECRET")
 
-# v2 uses CAIP-2 network identifiers, e.g. eip155:8453 for Base mainnet.
 X402_DEFAULT_NETWORK = os.getenv("X402_DEFAULT_NETWORK", "eip155:8453")
 X402_DEFAULT_SCHEME = os.getenv("X402_DEFAULT_SCHEME", "exact")
 X402_DEFAULT_TOKEN = os.getenv(
@@ -89,6 +89,11 @@ def _normalize_private_key(secret: str) -> str:
 
 def _json_dumps_compact(data: dict[str, Any]) -> str:
     return json.dumps(data, separators=(",", ":"), ensure_ascii=False)
+
+
+def _b64_json(data: dict[str, Any]) -> str:
+    raw = _json_dumps_compact(data).encode("utf-8")
+    return base64.b64encode(raw).decode("utf-8")
 
 
 # =========================================================
@@ -244,7 +249,8 @@ def build_x402_challenge(
         "payment_required": requirements,
     }
 
-    payment_required_header = _json_dumps_compact(requirements)
+    # Current x402 buyers expect PAYMENT-REQUIRED to be base64-encoded JSON.
+    payment_required_header = _b64_json(requirements)
     return challenge_body, payment_required_header
 
 
@@ -264,7 +270,6 @@ def is_x402_payment_method(headers_or_payment_method) -> bool:
     if isinstance(payment_method, str) and payment_method.strip().lower() == "x402":
         return True
 
-    # Prefer the current v2 header but accept legacy fallback for compatibility.
     if headers.get("payment-signature"):
         return True
 
