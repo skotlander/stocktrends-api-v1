@@ -3,6 +3,7 @@ import json
 import os
 import time
 import uuid
+import logging
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Optional
@@ -12,6 +13,9 @@ from urllib.parse import urlparse
 
 import jwt
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
+
+
+logger = logging.getLogger("stocktrends_api.x402")
 
 
 # =========================================================
@@ -491,10 +495,15 @@ def verify_with_facilitator(
         "paymentRequirements": normalized_requirements,
     }
 
+    logger.info("x402 verify requirement=%s", _json_dumps_compact(normalized_requirements))
+    logger.info("x402 verify payload=%s", _json_dumps_compact(payment_payload))
+
     status, data, raw = _post_json(
         f"{X402_FACILITATOR_URL}/verify",
         request_body,
     )
+
+    logger.info("x402 verify response status=%s body=%s", status, raw)
 
     if status == 0:
         return X402ValidationResult(
@@ -572,10 +581,15 @@ def settle_with_facilitator(
         "paymentRequirements": normalized_requirements,
     }
 
+    logger.info("x402 settle requirement=%s", _json_dumps_compact(normalized_requirements))
+    logger.info("x402 settle payload=%s", _json_dumps_compact(payment_payload))
+
     status, data, raw = _post_json(
         f"{X402_FACILITATOR_URL}/settle",
         request_body,
     )
+
+    logger.info("x402 settle response status=%s body=%s", status, raw)
 
     if status == 0:
         return X402ValidationResult(
