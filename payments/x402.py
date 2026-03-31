@@ -1,4 +1,3 @@
-import base64
 import json
 import os
 import time
@@ -26,6 +25,7 @@ X402_FACILITATOR_URL = os.getenv(
 X402_FACILITATOR_API_KEY = os.getenv("X402_FACILITATOR_API_KEY")
 X402_FACILITATOR_API_SECRET = os.getenv("X402_FACILITATOR_API_SECRET")
 
+# v2 uses CAIP-2 network identifiers, e.g. eip155:8453 for Base mainnet.
 X402_DEFAULT_NETWORK = os.getenv("X402_DEFAULT_NETWORK", "eip155:8453")
 X402_DEFAULT_SCHEME = os.getenv("X402_DEFAULT_SCHEME", "exact")
 X402_DEFAULT_TOKEN = os.getenv(
@@ -80,21 +80,15 @@ def _to_atomic_units(amount: Decimal, decimals: int) -> str:
     return str(int(quantized))
 
 
-def _b64_json(data: dict[str, Any]) -> str:
-    raw = json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8")
-    return base64.b64encode(raw).decode("utf-8")
-
-
-def _decode_b64_json(value: str) -> dict[str, Any]:
-    decoded = base64.b64decode(value)
-    return json.loads(decoded.decode("utf-8"))
-
-
 def _normalize_private_key(secret: str) -> str:
     secret = secret.strip()
     if "\\n" in secret:
         secret = secret.replace("\\n", "\n")
     return secret
+
+
+def _json_dumps_compact(data: dict[str, Any]) -> str:
+    return json.dumps(data, separators=(",", ":"), ensure_ascii=False)
 
 
 # =========================================================
@@ -220,7 +214,7 @@ def build_x402_challenge(
     token: str = X402_DEFAULT_TOKEN,
     scheme: str = X402_DEFAULT_SCHEME,
     pay_to: str = X402_SELLER_ADDRESS,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], str]:
     if not isinstance(amount_usd, Decimal):
         amount_usd = Decimal(str(amount_usd))
 
@@ -234,7 +228,7 @@ def build_x402_challenge(
         pay_to=pay_to,
     )
 
-    return {
+    challenge_body = {
         "error": "payment_required",
         "detail": "Payment is required to access this endpoint.",
         "protocol": "x402",
@@ -249,6 +243,9 @@ def build_x402_challenge(
         "accepted_payment_methods": ["x402"],
         "payment_required": requirements,
     }
+
+    payment_required_header = _json_dumps_compact(requirements)
+    return challenge_body, payment_required_header
 
 
 # =========================================================
@@ -267,6 +264,7 @@ def is_x402_payment_method(headers_or_payment_method) -> bool:
     if isinstance(payment_method, str) and payment_method.strip().lower() == "x402":
         return True
 
+    # Prefer the current v2 header but accept legacy fallback for compatibility.
     if headers.get("payment-signature"):
         return True
 
@@ -309,133 +307,27 @@ def extract_payment_signature(headers) -> Optional[str]:
 
 
 # =========================================================
-# PAYMENT PAYLOAD DECODING
+# PAYMENT PAYLOAD HANDLING
 # =========================================================
 
-def _normalize_payment_requirements_input(payment_requirements: Any) -> Any:
+def _parse_payment_payload_from_header(raw_value: str) -> dict[str, Any]:
+    value = raw_value.strip()
+    parsed = json.loads(value)
+    if not isinstance(parsed, dict):
+        raise ValueError("PAYMENT-SIGNATURE must decode to a JSON object.")
+    return parsed
+
+
+def _normalize_payment_requirements_input(payment_requirements: Any) -> dict[str, Any]:
     if isinstance(payment_requirements, dict):
         return payment_requirements
 
     if isinstance(payment_requirements, str):
-        value = payment_requirements.strip()
-
-        try:
-            return json.loads(value)
-        except Exception:
-            pass
-
-        try:
-            return _decode_b64_json(value)
-        except Exception:
-            pass
-
-    return payment_requirements
-
-
-def _extract_single_payment_requirement(payment_requirements: Any) -> dict[str, Any]:
-    obj = _normalize_payment_requirements_input(payment_requirements)
-
-    if not isinstance(obj, dict):
-        return {}
-
-    if "payment_required" in obj and isinstance(obj["payment_required"], (dict, str)):
-        obj = _normalize_payment_requirements_input(obj["payment_required"])
-
-    if not isinstance(obj, dict):
-        return {}
-
-    accepts = obj.get("accepts")
-    if isinstance(accepts, list) and accepts and isinstance(accepts[0], dict):
-        return accepts[0]
-
-    if "scheme" in obj:
-        return obj
-
-    return {}
-
-
-def _decode_payment_artifact(raw_value: str) -> dict[str, Any]:
-    value = raw_value.strip()
-
-    try:
-        parsed = json.loads(value)
+        parsed = json.loads(payment_requirements)
         if isinstance(parsed, dict):
             return parsed
-    except Exception:
-        pass
 
-    try:
-        parsed = _decode_b64_json(value)
-        if isinstance(parsed, dict):
-            return parsed
-    except Exception:
-        pass
-
-    raise ValueError("Could not parse payment artifact as JSON or base64 JSON.")
-
-
-def _find_signed_tx_payload(obj: Any) -> Optional[dict[str, Any]]:
-    if isinstance(obj, dict):
-        if "signature" in obj and "transaction" in obj:
-            return obj
-
-        for key in (
-            "payload",
-            "paymentPayload",
-            "payment",
-            "signedPayment",
-            "signed_payload",
-            "transactionPayload",
-            "transaction_payload",
-            "data",
-            "body",
-        ):
-            if key in obj:
-                found = _find_signed_tx_payload(obj[key])
-                if found:
-                    return found
-
-        for value in obj.values():
-            found = _find_signed_tx_payload(value)
-            if found:
-                return found
-
-    elif isinstance(obj, list):
-        for item in obj:
-            found = _find_signed_tx_payload(item)
-            if found:
-                return found
-
-    return None
-
-
-def _build_facilitator_payment_payload(
-    payment_artifact: str,
-    payment_requirements: dict[str, Any],
-) -> dict[str, Any]:
-    requirement = _extract_single_payment_requirement(payment_requirements)
-    raw = _decode_payment_artifact(payment_artifact)
-
-    if (
-        isinstance(raw, dict)
-        and "scheme" in raw
-        and "network" in raw
-        and "payload" in raw
-    ):
-        payload_obj = raw.copy()
-        payload_obj.setdefault("x402Version", 2)
-        return payload_obj
-
-    signed_tx = _find_signed_tx_payload(raw)
-    if signed_tx is None:
-        raise ValueError("Could not locate signed transaction payload with signature + transaction.")
-
-    return {
-        "x402Version": 2,
-        "scheme": requirement.get("scheme", X402_DEFAULT_SCHEME),
-        "network": requirement.get("network", X402_DEFAULT_NETWORK),
-        "payload": signed_tx,
-    }
+    raise ValueError("payment_requirements must be a dict or JSON object string.")
 
 
 # =========================================================
@@ -452,16 +344,16 @@ def validate_x402_payment(
         return X402ValidationResult(
             valid=False,
             error_code="missing_payment_signature",
-            error_detail="PAYMENT-SIGNATURE or X-PAYMENT header is required.",
+            error_detail="PAYMENT-SIGNATURE header is required.",
         )
 
     try:
-        payload = _decode_payment_artifact(artifact)
+        payload = _parse_payment_payload_from_header(artifact)
     except Exception as e:
         return X402ValidationResult(
             valid=False,
             error_code="invalid_payment_signature",
-            error_detail=f"Could not decode payment artifact: {e}",
+            error_detail=f"Could not decode PAYMENT-SIGNATURE JSON: {e}",
         )
 
     amount_native: Optional[Decimal] = None
@@ -535,29 +427,35 @@ def validate_x402_payment(
 def verify_with_facilitator(
     *,
     payment_signature: str,
-    payment_requirements: dict[str, Any],
+    payment_requirements: dict[str, Any] | str,
 ) -> X402ValidationResult:
-    single_requirement = _extract_single_payment_requirement(payment_requirements)
-
     try:
-        payment_payload = _build_facilitator_payment_payload(
-            payment_artifact=payment_signature,
-            payment_requirements=payment_requirements,
-        )
+        payment_payload = _parse_payment_payload_from_header(payment_signature)
     except Exception as e:
         return X402ValidationResult(
             valid=False,
             error_code="invalid_payment_signature",
-            error_detail=f"Could not construct facilitator paymentPayload: {e}",
+            error_detail=f"Invalid PAYMENT-SIGNATURE JSON: {e}",
         )
+
+    try:
+        normalized_requirements = _normalize_payment_requirements_input(payment_requirements)
+    except Exception as e:
+        return X402ValidationResult(
+            valid=False,
+            error_code="invalid_payment_requirements",
+            error_detail=f"Invalid payment requirements payload: {e}",
+        )
+
+    request_body = {
+        "x402Version": int(payment_payload.get("x402Version", 2)),
+        "paymentPayload": payment_payload,
+        "paymentRequirements": normalized_requirements,
+    }
 
     status, data, raw = _post_json(
         f"{X402_FACILITATOR_URL}/verify",
-        {
-            "x402Version": 2,
-            "paymentPayload": payment_payload,
-            "paymentRequirements": single_requirement,
-        },
+        request_body,
     )
 
     if status == 0:
@@ -578,20 +476,31 @@ def verify_with_facilitator(
             valid=False,
             error_code="facilitator_verify_failed",
             error_detail=detail,
+            payment_signature=payment_signature,
+            payment_payload=payment_payload,
             verification_response=data,
         )
 
     verified = bool((data or {}).get("isValid") or (data or {}).get("valid"))
     if not verified:
+        invalid_reason = (data or {}).get("invalidReason")
+        detail = "Facilitator reported invalid payment payload."
+        if invalid_reason:
+            detail = f"{detail} invalidReason={invalid_reason}"
+
         return X402ValidationResult(
             valid=False,
             error_code="payment_verification_failed",
-            error_detail="Facilitator reported invalid payment payload.",
+            error_detail=detail,
+            payment_signature=payment_signature,
+            payment_payload=payment_payload,
             verification_response=data,
         )
 
     return X402ValidationResult(
         valid=True,
+        payment_signature=payment_signature,
+        payment_payload=payment_payload,
         verification_response=data,
     )
 
@@ -599,29 +508,35 @@ def verify_with_facilitator(
 def settle_with_facilitator(
     *,
     payment_signature: str,
-    payment_requirements: dict[str, Any],
+    payment_requirements: dict[str, Any] | str,
 ) -> X402ValidationResult:
-    single_requirement = _extract_single_payment_requirement(payment_requirements)
-
     try:
-        payment_payload = _build_facilitator_payment_payload(
-            payment_artifact=payment_signature,
-            payment_requirements=payment_requirements,
-        )
+        payment_payload = _parse_payment_payload_from_header(payment_signature)
     except Exception as e:
         return X402ValidationResult(
             valid=False,
             error_code="invalid_payment_signature",
-            error_detail=f"Could not construct facilitator paymentPayload: {e}",
+            error_detail=f"Invalid PAYMENT-SIGNATURE JSON: {e}",
         )
+
+    try:
+        normalized_requirements = _normalize_payment_requirements_input(payment_requirements)
+    except Exception as e:
+        return X402ValidationResult(
+            valid=False,
+            error_code="invalid_payment_requirements",
+            error_detail=f"Invalid payment requirements payload: {e}",
+        )
+
+    request_body = {
+        "x402Version": int(payment_payload.get("x402Version", 2)),
+        "paymentPayload": payment_payload,
+        "paymentRequirements": normalized_requirements,
+    }
 
     status, data, raw = _post_json(
         f"{X402_FACILITATOR_URL}/settle",
-        {
-            "x402Version": 2,
-            "paymentPayload": payment_payload,
-            "paymentRequirements": single_requirement,
-        },
+        request_body,
     )
 
     if status == 0:
@@ -642,6 +557,8 @@ def settle_with_facilitator(
             valid=False,
             error_code="facilitator_settle_failed",
             error_detail=detail,
+            payment_signature=payment_signature,
+            payment_payload=payment_payload,
             settlement_response=data,
         )
 
@@ -649,16 +566,21 @@ def settle_with_facilitator(
         (data or {}).get("success")
         or (data or {}).get("settled")
         or (data or {}).get("txHash")
+        or (data or {}).get("transaction")
     )
     if not settled:
         return X402ValidationResult(
             valid=False,
             error_code="payment_settlement_failed",
             error_detail="Facilitator did not confirm settlement.",
+            payment_signature=payment_signature,
+            payment_payload=payment_payload,
             settlement_response=data,
         )
 
     return X402ValidationResult(
         valid=True,
+        payment_signature=payment_signature,
+        payment_payload=payment_payload,
         settlement_response=data,
     )

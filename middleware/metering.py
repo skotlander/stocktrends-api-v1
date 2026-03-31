@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import time
@@ -810,6 +811,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         request.state.agent_registry_id = agent_registry_id
         request.state.agent_registry_status = agent_registry_status
         request.state.agent_auto_registered = agent_auto_registered
+        request.state.x402_payment_response = None
 
         decision = classify_request(
             path=path,
@@ -1041,6 +1043,12 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
         if should_enforce_agent_pay and decision.econ_payment_required == 1:
             if is_x402_payment_method(normalized_payment_method):
+                current_payment_requirements = build_x402_requirements(
+                    path=path,
+                    amount_usd=unit_price_usd,
+                    method=method,
+                )
+
                 if not has_payment_signature(request.headers):
                     challenge_body, payment_required_header = build_x402_challenge(
                         path=path,
@@ -1102,7 +1110,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         econ_payment_fields = {
                             "payment_status": "pending",
                             "payment_method": payment_method_header or decision.econ_payment_method,
-                            "payment_network": payment_network_header or "base",
+                            "payment_network": payment_network_header or "eip155:8453",
                             "payment_token": payment_token_header or "usdc",
                             "payment_amount_native": None,
                             "payment_amount_usd": None,
@@ -1312,16 +1320,11 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
                     return response
 
-                payment_signature = request.headers.get("payment-signature")
-                payment_requirements = build_x402_requirements(
-                    path=path,
-                    amount_usd=unit_price_usd,
-                    method=method,
-                )
+                payment_signature = request.headers.get("payment-signature") or request.headers.get("x-payment")
 
                 verify_result = verify_with_facilitator(
                     payment_signature=payment_signature,
-                    payment_requirements=payment_requirements,
+                    payment_requirements=current_payment_requirements,
                 )
 
                 if not verify_result.valid:
@@ -1415,7 +1418,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
                 settle_result = settle_with_facilitator(
                     payment_signature=payment_signature,
-                    payment_requirements=payment_requirements,
+                    payment_requirements=current_payment_requirements,
                 )
 
                 if not settle_result.valid:
@@ -1506,6 +1509,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             logger.error("Metering economics-log insert failed: %s", e, exc_info=True)
 
                     return response
+
+                request.state.x402_payment_response = settle_result.settlement_response
 
                 payment_reference_header = replay_reference
                 payment_network_header = validated_payment_network or payment_network_header
@@ -1635,6 +1640,12 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     payment_required=payment_required_for_headers,
                     accepted_methods=accepted_methods,
                 )
+
+                if getattr(request.state, "x402_payment_response", None):
+                    response.headers["PAYMENT-RESPONSE"] = json.dumps(
+                        request.state.x402_payment_response,
+                        separators=(",", ":"),
+                    )
 
             event = build_request_event(
                 request_id=request_id,
