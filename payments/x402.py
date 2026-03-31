@@ -96,6 +96,14 @@ def _b64_json(data: dict[str, Any]) -> str:
     return base64.b64encode(raw).decode("utf-8")
 
 
+def _decode_b64_json(value: str) -> dict[str, Any]:
+    decoded = base64.b64decode(value)
+    parsed = json.loads(decoded.decode("utf-8"))
+    if not isinstance(parsed, dict):
+        raise ValueError("Decoded base64 JSON is not an object.")
+    return parsed
+
+
 # =========================================================
 # CDP FACILITATOR AUTH
 # =========================================================
@@ -249,7 +257,6 @@ def build_x402_challenge(
         "payment_required": requirements,
     }
 
-    # Current x402 buyers expect PAYMENT-REQUIRED to be base64-encoded JSON.
     payment_required_header = _b64_json(requirements)
     return challenge_body, payment_required_header
 
@@ -317,10 +324,20 @@ def extract_payment_signature(headers) -> Optional[str]:
 
 def _parse_payment_payload_from_header(raw_value: str) -> dict[str, Any]:
     value = raw_value.strip()
-    parsed = json.loads(value)
-    if not isinstance(parsed, dict):
-        raise ValueError("PAYMENT-SIGNATURE must decode to a JSON object.")
-    return parsed
+
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    try:
+        return _decode_b64_json(value)
+    except Exception:
+        pass
+
+    raise ValueError("PAYMENT-SIGNATURE is neither JSON nor base64-encoded JSON object.")
 
 
 def _normalize_payment_requirements_input(payment_requirements: Any) -> dict[str, Any]:
@@ -328,11 +345,19 @@ def _normalize_payment_requirements_input(payment_requirements: Any) -> dict[str
         return payment_requirements
 
     if isinstance(payment_requirements, str):
-        parsed = json.loads(payment_requirements)
-        if isinstance(parsed, dict):
-            return parsed
+        try:
+            parsed = json.loads(payment_requirements)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
 
-    raise ValueError("payment_requirements must be a dict or JSON object string.")
+        try:
+            return _decode_b64_json(payment_requirements)
+        except Exception:
+            pass
+
+    raise ValueError("payment_requirements must be a dict, JSON string, or base64-encoded JSON object.")
 
 
 # =========================================================
@@ -358,7 +383,7 @@ def validate_x402_payment(
         return X402ValidationResult(
             valid=False,
             error_code="invalid_payment_signature",
-            error_detail=f"Could not decode PAYMENT-SIGNATURE JSON: {e}",
+            error_detail=f"Could not decode PAYMENT-SIGNATURE payload: {e}",
         )
 
     amount_native: Optional[Decimal] = None
@@ -440,7 +465,7 @@ def verify_with_facilitator(
         return X402ValidationResult(
             valid=False,
             error_code="invalid_payment_signature",
-            error_detail=f"Invalid PAYMENT-SIGNATURE JSON: {e}",
+            error_detail=f"Invalid PAYMENT-SIGNATURE payload: {e}",
         )
 
     try:
@@ -521,7 +546,7 @@ def settle_with_facilitator(
         return X402ValidationResult(
             valid=False,
             error_code="invalid_payment_signature",
-            error_detail=f"Invalid PAYMENT-SIGNATURE JSON: {e}",
+            error_detail=f"Invalid PAYMENT-SIGNATURE payload: {e}",
         )
 
     try:
