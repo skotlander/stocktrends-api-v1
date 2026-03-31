@@ -218,6 +218,30 @@ def build_x402_requirements(
     }
 
 
+def _extract_single_requirement(payment_requirements: Any) -> dict[str, Any]:
+    if isinstance(payment_requirements, dict):
+        obj = payment_requirements
+    elif isinstance(payment_requirements, str):
+        try:
+            obj = json.loads(payment_requirements)
+        except Exception:
+            obj = _decode_b64_json(payment_requirements)
+    else:
+        raise ValueError("payment_requirements must be dict or string.")
+
+    if not isinstance(obj, dict):
+        raise ValueError("payment_requirements must resolve to an object.")
+
+    accepts = obj.get("accepts")
+    if isinstance(accepts, list) and accepts and isinstance(accepts[0], dict):
+        return accepts[0]
+
+    if "scheme" in obj:
+        return obj
+
+    raise ValueError("No single payment requirement with 'scheme' was found.")
+
+
 def build_x402_challenge(
     *,
     path: str,
@@ -341,23 +365,7 @@ def _parse_payment_payload_from_header(raw_value: str) -> dict[str, Any]:
 
 
 def _normalize_payment_requirements_input(payment_requirements: Any) -> dict[str, Any]:
-    if isinstance(payment_requirements, dict):
-        return payment_requirements
-
-    if isinstance(payment_requirements, str):
-        try:
-            parsed = json.loads(payment_requirements)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            pass
-
-        try:
-            return _decode_b64_json(payment_requirements)
-        except Exception:
-            pass
-
-    raise ValueError("payment_requirements must be a dict, JSON string, or base64-encoded JSON object.")
+    return _extract_single_requirement(payment_requirements)
 
 
 # =========================================================
