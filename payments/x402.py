@@ -488,11 +488,16 @@ def verify_with_facilitator(
             error_code="invalid_payment_requirements",
             error_detail=f"Invalid payment requirements payload: {e}",
         )
-
+    
     request_body = {
+    "x402Version": int(payment_payload.get("x402Version", 2)),
+    "paymentPayload": {
         "x402Version": int(payment_payload.get("x402Version", 2)),
-        "paymentPayload": payment_payload,
-        "paymentRequirements": normalized_requirements,
+        "scheme": normalized_requirements.get("scheme"),
+        "network": normalized_requirements.get("network"),
+        "payload": payment_payload.get("payload"),
+    },
+    "paymentRequirements": normalized_requirements,
     }
 
     logger.info("x402 verify request_body=%s", _json_dumps_compact(request_body))
