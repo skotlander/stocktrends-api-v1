@@ -495,6 +495,7 @@ def verify_with_facilitator(
         "paymentRequirements": normalized_requirements,
     }
 
+    logger.info("x402 verify request_body=%s", _json_dumps_compact(request_body))
     logger.info("x402 verify requirement=%s", _json_dumps_compact(normalized_requirements))
     logger.info("x402 verify payload=%s", _json_dumps_compact(payment_payload))
 
