@@ -108,21 +108,6 @@ def _decode_b64_json(value: str) -> dict[str, Any]:
     return parsed
 
 
-def _coerce_requirements_object(payment_requirements: dict[str, Any] | str) -> dict[str, Any]:
-    if isinstance(payment_requirements, dict):
-        return payment_requirements
-
-    try:
-        parsed = json.loads(payment_requirements)
-    except Exception:
-        parsed = _decode_b64_json(payment_requirements)
-
-    if not isinstance(parsed, dict):
-        raise ValueError("payment_requirements must resolve to an object.")
-
-    return parsed
-
-
 # =========================================================
 # CDP FACILITATOR AUTH
 # =========================================================
@@ -500,7 +485,6 @@ def verify_with_facilitator(
 
     try:
         normalized_requirements = _normalize_payment_requirements_input(payment_requirements)
-        full_requirements = _coerce_requirements_object(payment_requirements)
     except Exception as e:
         return X402ValidationResult(
             valid=False,
@@ -511,12 +495,11 @@ def verify_with_facilitator(
     request_body = {
         "x402Version": int(payment_payload.get("x402Version", 2)),
         "paymentPayload": payment_payload,
-        "paymentRequirements": full_requirements,
+        "paymentRequirements": normalized_requirements,
     }
 
     logger.info("x402 verify request_body=%s", _json_dumps_compact(request_body))
     logger.info("x402 verify requirement=%s", _json_dumps_compact(normalized_requirements))
-    logger.info("x402 verify full_requirements=%s", _json_dumps_compact(full_requirements))
     logger.info("x402 verify payload=%s", _json_dumps_compact(payment_payload))
 
     status, data, raw = _post_json(
@@ -589,7 +572,6 @@ def settle_with_facilitator(
 
     try:
         normalized_requirements = _normalize_payment_requirements_input(payment_requirements)
-        full_requirements = _coerce_requirements_object(payment_requirements)
     except Exception as e:
         return X402ValidationResult(
             valid=False,
@@ -600,12 +582,11 @@ def settle_with_facilitator(
     request_body = {
         "x402Version": int(payment_payload.get("x402Version", 2)),
         "paymentPayload": payment_payload,
-        "paymentRequirements": full_requirements,
+        "paymentRequirements": normalized_requirements,
     }
 
     logger.info("x402 settle request_body=%s", _json_dumps_compact(request_body))
     logger.info("x402 settle requirement=%s", _json_dumps_compact(normalized_requirements))
-    logger.info("x402 settle full_requirements=%s", _json_dumps_compact(full_requirements))
     logger.info("x402 settle payload=%s", _json_dumps_compact(payment_payload))
 
     status, data, raw = _post_json(
