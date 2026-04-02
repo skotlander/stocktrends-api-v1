@@ -120,30 +120,37 @@ def _load_cdp_signing_key(secret: str) -> tuple[Any, str]:
     1. ECDSA / ES256 PEM private key
     2. Ed25519 / EdDSA base64-encoded secret
 
+    CDP Ed25519 secrets may decode to:
+    - 32 bytes: raw private key seed
+    - 64 bytes: 32-byte seed + 32-byte public key
+
     Returns:
         (private_key_object, jwt_algorithm)
     """
     normalized = _normalize_private_key(secret)
 
-    # ECDSA PEM path (legacy / compatibility)
+    # ECDSA PEM path
     if "BEGIN" in normalized:
         private_key = load_pem_private_key(normalized.encode("utf-8"), password=None)
         return private_key, "ES256"
 
-    # Ed25519 path (recommended by CDP for new secret API keys)
+    # Ed25519 path
     try:
         raw = base64.b64decode(normalized)
     except Exception as e:
         raise ValueError(f"Unable to base64-decode CDP API secret as Ed25519 key: {e}") from e
 
-    # CDP docs show Ed25519 secrets as raw base64-like strings.
-    # cryptography expects 32-byte private key material for Ed25519.
     if len(raw) == 32:
-        return Ed25519PrivateKey.from_private_bytes(raw), "EdDSA"
+        seed = raw
+        return Ed25519PrivateKey.from_private_bytes(seed), "EdDSA"
+
+    if len(raw) == 64:
+        seed = raw[:32]
+        return Ed25519PrivateKey.from_private_bytes(seed), "EdDSA"
 
     raise ValueError(
         f"Unsupported Ed25519 secret length: {len(raw)} bytes. "
-        "Expected 32 bytes for an Ed25519 private key seed, or PEM for ES256."
+        "Expected 32 bytes (seed), 64 bytes (seed + public key), or PEM for ES256."
     )
 
 
