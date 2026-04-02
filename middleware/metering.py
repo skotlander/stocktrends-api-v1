@@ -133,6 +133,31 @@ def get_accepted_payment_methods(
     return "none"
 
 
+def resolve_payment_rail(
+    decision,
+    *,
+    payment_method_header: str | None = None,
+) -> str:
+    normalized_method = (payment_method_header or decision.econ_payment_method or decision.log_payment_method or "").strip().lower()
+
+    if normalized_method == "subscription":
+        return "subscription"
+
+    if normalized_method == "x402":
+        return "x402"
+
+    if normalized_method == "mpp":
+        return "mpp"
+
+    if decision.econ_payment_required:
+        return "none"
+
+    if decision.log_pricing_rule_id == "default_subscription":
+        return "subscription"
+
+    return "none"
+
+
 def apply_pricing_headers(response, pricing_rule_id: str | None, payment_required: bool, accepted_methods: str):
     if pricing_rule_id:
         response.headers["X-StockTrends-Pricing-Rule"] = pricing_rule_id
@@ -680,6 +705,7 @@ def build_request_event(
     latency_ms: int,
     response,
     decision,
+    payment_rail: str,
     payment_method: str | None,
     error_code: str | None,
     notes: str | None,
@@ -713,6 +739,7 @@ def build_request_event(
         "referer": request.headers.get("referer"),
         "is_metered": decision.is_metered,
         "is_billable": is_billable_request(decision),
+        "payment_rail": payment_rail,
         "payment_method": payment_method,
         "pricing_rule_id": decision.log_pricing_rule_id,
         "error_code": error_code,
@@ -729,6 +756,7 @@ def build_request_econ(
     unit_price_usd: Decimal,
     billed_amount_usd: Decimal,
     payment_required: int,
+    payment_rail: str,
     econ_payment_fields: dict,
     session_id_header: str | None,
     agent_registry_id: str | None,
@@ -745,6 +773,7 @@ def build_request_econ(
         "unit_price_usd": unit_price_usd,
         "billed_amount_usd": billed_amount_usd,
         "payment_required": payment_required,
+        "payment_rail": payment_rail,
         **econ_payment_fields,
         "session_id": session_id_header,
         "payment_channel_id": None,
@@ -832,9 +861,14 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         unit_price_usd, billed_amount_usd = resolve_economic_amounts(economic_rule_name)
         workflow_type = normalize_workflow_type(auth_mode, agent_identifier)
         resolved_payment_method = payment_method_header or decision.log_payment_method
+        payment_rail = resolve_payment_rail(
+            decision,
+            payment_method_header=payment_method_header,
+        )
 
         request.state.unit_price_usd = unit_price_usd
         request.state.billed_amount_usd = billed_amount_usd
+        request.state.payment_rail = payment_rail
 
         if agent_identifier and agent_registered and agent_registry_status == "disabled":
             response = JSONResponse(
@@ -875,6 +909,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 latency_ms=latency_ms,
                 response=response,
                 decision=decision,
+                payment_rail=payment_rail,
                 payment_method=resolved_payment_method,
                 error_code="agent_disabled",
                 notes="This agent is disabled for this customer",
@@ -905,6 +940,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     unit_price_usd=unit_price_usd,
                     billed_amount_usd=billed_amount_usd,
                     payment_required=decision.econ_payment_required,
+                    payment_rail=payment_rail,
                     econ_payment_fields=econ_payment_fields,
                     session_id_header=session_id_header,
                     agent_registry_id=agent_registry_id,
@@ -960,6 +996,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 latency_ms=latency_ms,
                 response=response,
                 decision=decision,
+                payment_rail=payment_rail,
                 payment_method=resolved_payment_method,
                 error_code=decision.deny_reason or "access_denied",
                 notes="STIM access not permitted for this account",
@@ -990,6 +1027,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     unit_price_usd=unit_price_usd,
                     billed_amount_usd=billed_amount_usd,
                     payment_required=decision.econ_payment_required,
+                    payment_rail=payment_rail,
                     econ_payment_fields=econ_payment_fields,
                     session_id_header=session_id_header,
                     agent_registry_id=agent_registry_id,
@@ -1096,6 +1134,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         latency_ms=latency_ms,
                         response=response,
                         decision=decision,
+                        payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
                         error_code="payment_required",
                         notes="x402 payment required",
@@ -1125,6 +1164,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             unit_price_usd=unit_price_usd,
                             billed_amount_usd=billed_amount_usd,
                             payment_required=1,
+                            payment_rail=payment_rail,
                             econ_payment_fields=econ_payment_fields,
                             session_id_header=session_id_header,
                             agent_registry_id=agent_registry_id,
@@ -1185,6 +1225,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         latency_ms=latency_ms,
                         response=response,
                         decision=decision,
+                        payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
                         error_code=validation_error,
                         notes=validation_detail,
@@ -1214,6 +1255,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             unit_price_usd=unit_price_usd,
                             billed_amount_usd=billed_amount_usd,
                             payment_required=1,
+                            payment_rail=payment_rail,
                             econ_payment_fields=econ_payment_fields,
                             session_id_header=session_id_header,
                             agent_registry_id=agent_registry_id,
@@ -1275,6 +1317,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         latency_ms=latency_ms,
                         response=response,
                         decision=decision,
+                        payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
                         error_code="replay_detected",
                         notes="Payment reference has already been used.",
@@ -1304,6 +1347,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             unit_price_usd=unit_price_usd,
                             billed_amount_usd=billed_amount_usd,
                             payment_required=1,
+                            payment_rail=payment_rail,
                             econ_payment_fields=econ_payment_fields,
                             session_id_header=session_id_header,
                             agent_registry_id=agent_registry_id,
@@ -1371,6 +1415,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         latency_ms=latency_ms,
                         response=response,
                         decision=decision,
+                        payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
                         error_code="payment_verification_failed",
                         notes=verify_result.error_detail,
@@ -1400,6 +1445,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             unit_price_usd=unit_price_usd,
                             billed_amount_usd=billed_amount_usd,
                             payment_required=1,
+                            payment_rail=payment_rail,
                             econ_payment_fields=econ_payment_fields,
                             session_id_header=session_id_header,
                             agent_registry_id=agent_registry_id,
@@ -1465,6 +1511,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         latency_ms=latency_ms,
                         response=response,
                         decision=decision,
+                        payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
                         error_code="payment_settlement_failed",
                         notes=settle_result.error_detail,
@@ -1494,6 +1541,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             unit_price_usd=unit_price_usd,
                             billed_amount_usd=billed_amount_usd,
                             payment_required=1,
+                            payment_rail=payment_rail,
                             econ_payment_fields=econ_payment_fields,
                             session_id_header=session_id_header,
                             agent_registry_id=agent_registry_id,
@@ -1562,6 +1610,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     latency_ms=latency_ms,
                     response=response,
                     decision=decision,
+                    payment_rail=payment_rail,
                     payment_method=resolved_payment_method,
                     error_code=validation_error,
                     notes=validation_detail,
@@ -1592,6 +1641,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         unit_price_usd=unit_price_usd,
                         billed_amount_usd=billed_amount_usd,
                         payment_required=1,
+                        payment_rail=payment_rail,
                         econ_payment_fields=econ_payment_fields,
                         session_id_header=session_id_header,
                         agent_registry_id=agent_registry_id,
@@ -1667,6 +1717,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 latency_ms=latency_ms,
                 response=response,
                 decision=decision,
+                payment_rail=payment_rail,
                 payment_method=resolved_payment_method,
                 error_code=caught_exception.__class__.__name__ if caught_exception else None,
                 notes=str(caught_exception) if caught_exception else None,
@@ -1713,6 +1764,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     unit_price_usd=unit_price_usd,
                     billed_amount_usd=billed_amount_usd,
                     payment_required=decision.econ_payment_required,
+                    payment_rail=payment_rail,
                     econ_payment_fields=econ_payment_fields,
                     session_id_header=session_id_header,
                     agent_registry_id=agent_registry_id,
