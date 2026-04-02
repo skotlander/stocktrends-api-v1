@@ -30,3 +30,9 @@ v1
 /stwr
 /breadth
 /leadership
+
+## AI Agent Instructions
+
+This repository includes an `AGENTS.md` file.
+
+All AI coding agents (e.g., Codex) must read and follow AGENTS.md before making changes.
