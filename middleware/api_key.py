@@ -1,5 +1,4 @@
 import hashlib
-import os
 from types import SimpleNamespace
 from typing import Optional
 
@@ -13,9 +12,7 @@ from db import get_auth_engine
 
 ALLOWED_SUBSCRIPTION_STATUSES = {"active", "trialing"}
 
-ENABLE_AGENT_PAY = os.getenv("ENABLE_AGENT_PAY", "false").lower() == "true"
-
-_AGENT_PAY_METHODS = {"mpp", "x402", "crypto"}
+_AGENT_PAY_AUTH_BYPASS_METHODS = {"mpp", "x402"}
 
 
 def hash_api_key(raw_key: str) -> str:
@@ -76,9 +73,6 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         ]
 
     def _is_agent_pay_candidate(self, request: Request) -> bool:
-        if not ENABLE_AGENT_PAY:
-            return False
-
         path = request.url.path
         if not any(path.startswith(prefix) for prefix in self.agent_pay_prefixes):
             return False
@@ -88,7 +82,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             return False
 
         payment_method = (_normalize_header(request.headers.get("x-stocktrends-payment-method")) or "").lower()
-        if payment_method not in _AGENT_PAY_METHODS:
+        if payment_method not in _AGENT_PAY_AUTH_BYPASS_METHODS:
             return False
 
         return True
