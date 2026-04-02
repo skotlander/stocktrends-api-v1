@@ -12,6 +12,7 @@ from urllib import request as urllib_request
 from urllib.parse import urlparse
 
 import jwt
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 
@@ -112,6 +113,40 @@ def _decode_b64_json(value: str) -> dict[str, Any]:
 # CDP FACILITATOR AUTH
 # =========================================================
 
+def _load_cdp_signing_key(secret: str) -> tuple[Any, str]:
+    """
+    Supports both CDP Secret API Key formats:
+
+    1. ECDSA / ES256 PEM private key
+    2. Ed25519 / EdDSA base64-encoded secret
+
+    Returns:
+        (private_key_object, jwt_algorithm)
+    """
+    normalized = _normalize_private_key(secret)
+
+    # ECDSA PEM path (legacy / compatibility)
+    if "BEGIN" in normalized:
+        private_key = load_pem_private_key(normalized.encode("utf-8"), password=None)
+        return private_key, "ES256"
+
+    # Ed25519 path (recommended by CDP for new secret API keys)
+    try:
+        raw = base64.b64decode(normalized)
+    except Exception as e:
+        raise ValueError(f"Unable to base64-decode CDP API secret as Ed25519 key: {e}") from e
+
+    # CDP docs show Ed25519 secrets as raw base64-like strings.
+    # cryptography expects 32-byte private key material for Ed25519.
+    if len(raw) == 32:
+        return Ed25519PrivateKey.from_private_bytes(raw), "EdDSA"
+
+    raise ValueError(
+        f"Unsupported Ed25519 secret length: {len(raw)} bytes. "
+        "Expected 32 bytes for an Ed25519 private key seed, or PEM for ES256."
+    )
+
+
 def _build_cdp_bearer_token(method: str, url: str) -> str | None:
     if not X402_FACILITATOR_API_KEY or not X402_FACILITATOR_API_SECRET:
         return None
@@ -122,8 +157,7 @@ def _build_cdp_bearer_token(method: str, url: str) -> str | None:
     request_path = parsed.path
     uri = f"{method.upper()} {request_host}{request_path}"
 
-    private_key_pem = _normalize_private_key(X402_FACILITATOR_API_SECRET).encode("utf-8")
-    private_key = load_pem_private_key(private_key_pem, password=None)
+    private_key, algorithm = _load_cdp_signing_key(X402_FACILITATOR_API_SECRET)
 
     payload = {
         "sub": X402_FACILITATOR_API_KEY,
@@ -141,7 +175,7 @@ def _build_cdp_bearer_token(method: str, url: str) -> str | None:
     return jwt.encode(
         payload,
         private_key,
-        algorithm="ES256",
+        algorithm=algorithm,
         headers=headers,
     )
 
@@ -502,7 +536,7 @@ def verify_with_facilitator(
     logger.info("x402 verify requirement=%s", _json_dumps_compact(normalized_requirements))
     logger.info("x402 verify payload=%s", _json_dumps_compact(payment_payload))
     logger.info("x402 facilitator key id=%s", X402_FACILITATOR_API_KEY)
-    
+
     status, data, raw = _post_json(
         f"{X402_FACILITATOR_URL}/verify",
         request_body,
@@ -589,6 +623,7 @@ def settle_with_facilitator(
     logger.info("x402 settle request_body=%s", _json_dumps_compact(request_body))
     logger.info("x402 settle requirement=%s", _json_dumps_compact(normalized_requirements))
     logger.info("x402 settle payload=%s", _json_dumps_compact(payment_payload))
+    logger.info("x402 facilitator key id=%s", X402_FACILITATOR_API_KEY)
 
     status, data, raw = _post_json(
         f"{X402_FACILITATOR_URL}/settle",
