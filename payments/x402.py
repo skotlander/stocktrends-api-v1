@@ -501,7 +501,8 @@ def verify_with_facilitator(
     logger.info("x402 verify request_body=%s", _json_dumps_compact(request_body))
     logger.info("x402 verify requirement=%s", _json_dumps_compact(normalized_requirements))
     logger.info("x402 verify payload=%s", _json_dumps_compact(payment_payload))
-
+    logger.info("x402 facilitator key id=%s", X402_FACILITATOR_API_KEY)
+    
     status, data, raw = _post_json(
         f"{X402_FACILITATOR_URL}/verify",
         request_body,
