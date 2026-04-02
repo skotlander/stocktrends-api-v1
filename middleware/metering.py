@@ -17,15 +17,11 @@ from metering.logger import (
     log_api_request_economics,
     get_metering_engine,
 )
+from payments.enforcement import enforce_payment_rail
 from pricing.classifier import classify_request
 from payments.x402 import (
     is_x402_payment_method,
-    build_x402_challenge,
     validate_x402_payment,
-    verify_with_facilitator,
-    settle_with_facilitator,
-    has_payment_signature,
-    build_x402_requirements,
 )
 
 logger = logging.getLogger("stocktrends_api.metering")
@@ -1080,19 +1076,28 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 validation_valid, validation_error, validation_detail = validate_payment_headers(request)
 
         if should_enforce_agent_pay and decision.econ_payment_required == 1:
-            if is_x402_payment_method(normalized_payment_method):
-                current_payment_requirements = build_x402_requirements(
+            enforcement_result = None
+            if payment_rail in {"x402", "mpp"}:
+                enforcement_result = enforce_payment_rail(
+                    payment_rail=payment_rail,
+                    headers=request.headers,
                     path=path,
-                    amount_usd=unit_price_usd,
                     method=method,
+                    amount_usd=unit_price_usd,
+                    validation_valid=validation_valid,
+                    validation_error=validation_error,
+                    validation_detail=validation_detail,
+                    validated_payment_reference=validated_payment_reference,
+                    validated_payment_network=validated_payment_network,
+                    validated_payment_token=validated_payment_token,
+                    validated_payment_amount_native=validated_payment_amount_native,
+                    replay_checker=is_payment_reference_used,
                 )
 
-                if not has_payment_signature(request.headers):
-                    challenge_body, payment_required_header = build_x402_challenge(
-                        path=path,
-                        amount_usd=unit_price_usd,
-                        method=method,
-                    )
+            if payment_rail == "x402":
+                if enforcement_result.outcome == "challenge":
+                    challenge_body = enforcement_result.challenge_body
+                    payment_required_header = enforcement_result.payment_required_header
 
                     response = JSONResponse(
                         status_code=402,
@@ -1181,12 +1186,12 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
                     return response
 
-                if not validation_valid:
+                if enforcement_result.outcome == "validation_failed":
                     response = JSONResponse(
                         status_code=402,
                         content={
-                            "error": validation_error,
-                            "detail": validation_detail,
+                            "error": enforcement_result.error_code,
+                            "detail": enforcement_result.error_detail,
                             "request_id": request_id,
                         },
                     )
@@ -1227,8 +1232,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         decision=decision,
                         payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
-                        error_code=validation_error,
-                        notes=validation_detail,
+                        error_code=enforcement_result.error_code,
+                        notes=enforcement_result.error_detail,
                     )
 
                     try:
@@ -1240,11 +1245,11 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         econ_payment_fields = {
                             "payment_status": "failed_validation",
                             "payment_method": payment_method_header or decision.econ_payment_method,
-                            "payment_network": validated_payment_network or payment_network_header,
-                            "payment_token": validated_payment_token or payment_token_header,
-                            "payment_amount_native": float(validated_payment_amount_native) if validated_payment_amount_native is not None else None,
+                            "payment_network": enforcement_result.payment_network or payment_network_header,
+                            "payment_token": enforcement_result.payment_token or payment_token_header,
+                            "payment_amount_native": float(enforcement_result.payment_amount_native) if enforcement_result.payment_amount_native is not None else None,
                             "payment_amount_usd": None,
-                            "payment_reference": validated_payment_reference,
+                            "payment_reference": enforcement_result.payment_reference,
                         }
 
                         econ = build_request_econ(
@@ -1272,8 +1277,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
                     return response
 
-                replay_reference = validated_payment_reference
-                if replay_reference and is_payment_reference_used(replay_reference):
+                replay_reference = enforcement_result.payment_reference
+                if enforcement_result.outcome == "replay_detected":
                     response = JSONResponse(
                         status_code=402,
                         content={
@@ -1319,8 +1324,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         decision=decision,
                         payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
-                        error_code="replay_detected",
-                        notes="Payment reference has already been used.",
+                        error_code=enforcement_result.error_code,
+                        notes=enforcement_result.error_detail,
                     )
 
                     try:
@@ -1332,9 +1337,9 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         econ_payment_fields = {
                             "payment_status": "failed_validation",
                             "payment_method": payment_method_header or decision.econ_payment_method,
-                            "payment_network": validated_payment_network or payment_network_header,
-                            "payment_token": validated_payment_token or payment_token_header,
-                            "payment_amount_native": float(validated_payment_amount_native) if validated_payment_amount_native is not None else None,
+                            "payment_network": enforcement_result.payment_network or payment_network_header,
+                            "payment_token": enforcement_result.payment_token or payment_token_header,
+                            "payment_amount_native": float(enforcement_result.payment_amount_native) if enforcement_result.payment_amount_native is not None else None,
                             "payment_amount_usd": None,
                             "payment_reference": replay_reference,
                         }
@@ -1364,19 +1369,12 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
                     return response
 
-                payment_signature = request.headers.get("payment-signature") or request.headers.get("x-payment")
-
-                verify_result = verify_with_facilitator(
-                    payment_signature=payment_signature,
-                    payment_requirements=current_payment_requirements,
-                )
-
-                if not verify_result.valid:
+                if enforcement_result.outcome == "verification_failed":
                     response = JSONResponse(
                         status_code=402,
                         content={
                             "error": "payment_verification_failed",
-                            "detail": verify_result.error_detail,
+                            "detail": enforcement_result.error_detail,
                             "request_id": request_id,
                         },
                     )
@@ -1418,7 +1416,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
                         error_code="payment_verification_failed",
-                        notes=verify_result.error_detail,
+                        notes=enforcement_result.error_detail,
                     )
 
                     try:
@@ -1430,9 +1428,9 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         econ_payment_fields = {
                             "payment_status": "failed_validation",
                             "payment_method": payment_method_header or decision.econ_payment_method,
-                            "payment_network": validated_payment_network or payment_network_header,
-                            "payment_token": validated_payment_token or payment_token_header,
-                            "payment_amount_native": float(validated_payment_amount_native) if validated_payment_amount_native is not None else None,
+                            "payment_network": enforcement_result.payment_network or payment_network_header,
+                            "payment_token": enforcement_result.payment_token or payment_token_header,
+                            "payment_amount_native": float(enforcement_result.payment_amount_native) if enforcement_result.payment_amount_native is not None else None,
                             "payment_amount_usd": None,
                             "payment_reference": replay_reference,
                         }
@@ -1462,17 +1460,12 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
                     return response
 
-                settle_result = settle_with_facilitator(
-                    payment_signature=payment_signature,
-                    payment_requirements=current_payment_requirements,
-                )
-
-                if not settle_result.valid:
+                if enforcement_result.outcome == "settlement_failed":
                     response = JSONResponse(
                         status_code=402,
                         content={
                             "error": "payment_settlement_failed",
-                            "detail": settle_result.error_detail,
+                            "detail": enforcement_result.error_detail,
                             "request_id": request_id,
                         },
                     )
@@ -1514,7 +1507,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
                         error_code="payment_settlement_failed",
-                        notes=settle_result.error_detail,
+                        notes=enforcement_result.error_detail,
                     )
 
                     try:
@@ -1526,9 +1519,9 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         econ_payment_fields = {
                             "payment_status": "failed",
                             "payment_method": payment_method_header or decision.econ_payment_method,
-                            "payment_network": validated_payment_network or payment_network_header,
-                            "payment_token": validated_payment_token or payment_token_header,
-                            "payment_amount_native": float(validated_payment_amount_native) if validated_payment_amount_native is not None else None,
+                            "payment_network": enforcement_result.payment_network or payment_network_header,
+                            "payment_token": enforcement_result.payment_token or payment_token_header,
+                            "payment_amount_native": float(enforcement_result.payment_amount_native) if enforcement_result.payment_amount_native is not None else None,
                             "payment_amount_usd": None,
                             "payment_reference": replay_reference,
                         }
@@ -1558,13 +1551,13 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
                     return response
 
-                request.state.x402_payment_response = settle_result.settlement_response
+                request.state.x402_payment_response = enforcement_result.payment_response
 
                 payment_reference_header = replay_reference
-                payment_network_header = validated_payment_network or payment_network_header
-                payment_token_header = validated_payment_token or payment_token_header
-                if validated_payment_amount_native is not None:
-                    payment_amount_header = str(validated_payment_amount_native)
+                payment_network_header = enforcement_result.payment_network or payment_network_header
+                payment_token_header = enforcement_result.payment_token or payment_token_header
+                if enforcement_result.payment_amount_native is not None:
+                    payment_amount_header = str(enforcement_result.payment_amount_native)
 
             elif not validation_valid:
                 response = JSONResponse(
