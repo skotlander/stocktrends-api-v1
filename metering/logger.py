@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
@@ -339,3 +340,64 @@ def log_api_request_economics(econ: dict) -> None:
 
         with engine.begin() as conn:
             conn.execute(INSERT_REQUEST_ECONOMICS_SQL_LEGACY, legacy_econ)
+
+
+def log_auth_failure_event(
+    *,
+    request,
+    status_code: int,
+    error_code: str,
+    notes: str | None,
+) -> None:
+    query_string = str(request.url.query)
+    client_ip = None
+
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        client_ip = forwarded_for.split(",")[0].strip()
+    else:
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            client_ip = real_ip.strip()
+        elif request.client:
+            client_ip = request.client.host
+
+    event = {
+        "event_time_utc": datetime.now(timezone.utc),
+        "request_id": getattr(request.state, "request_id", None),
+        "environment": "production",
+        "api_key_id": None,
+        "customer_id": None,
+        "subscription_id": None,
+        "plan_code": None,
+        "actor_type": "unknown",
+        "workflow_type": "auth_failure",
+        "agent_identifier": None,
+        "agent_id": None,
+        "endpoint_path": request.url.path,
+        "route_template": None,
+        "endpoint_family": None,
+        "http_method": request.method,
+        "query_string": query_string,
+        "symbol": request.query_params.get("symbol"),
+        "exchange": request.query_params.get("exchange"),
+        "symbol_exchange": request.query_params.get("symbol_exchange"),
+        "status_code": status_code,
+        "success": 0,
+        "latency_ms": None,
+        "response_size_bytes": None,
+        "client_ip": client_ip,
+        "user_agent": request.headers.get("user-agent"),
+        "referer": request.headers.get("referer"),
+        "is_metered": 0,
+        "is_billable": 0,
+        "payment_rail": "none",
+        "payment_method": "none",
+        "payment_network": None,
+        "payment_token": None,
+        "pricing_rule_id": "auth_failure",
+        "error_code": error_code,
+        "notes": notes,
+    }
+
+    log_api_request_event(event)

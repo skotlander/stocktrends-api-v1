@@ -1,4 +1,5 @@
 import hashlib
+import logging
 from types import SimpleNamespace
 from typing import Optional
 
@@ -8,11 +9,13 @@ from starlette.responses import JSONResponse
 from sqlalchemy import text
 
 from db import get_auth_engine
+from metering.logger import log_auth_failure_event
 
 
 ALLOWED_SUBSCRIPTION_STATUSES = {"active", "trialing"}
 
 _AGENT_PAY_AUTH_BYPASS_METHODS = {"mpp", "x402"}
+logger = logging.getLogger("stocktrends_api.auth")
 
 
 def hash_api_key(raw_key: str) -> str:
@@ -201,6 +204,17 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             actor_type=auth["actor_type"],
         )
 
+    def _log_auth_failure(self, request: Request, *, status_code: int, error_code: str, notes: str | None) -> None:
+        try:
+            log_auth_failure_event(
+                request=request,
+                status_code=status_code,
+                error_code=error_code,
+                notes=notes,
+            )
+        except Exception as exc:
+            logger.error("Auth failure log insert failed: %s", exc, exc_info=True)
+
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
@@ -224,6 +238,13 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             if raw_key:
                 ok, auth = self._authenticate_api_key(path, raw_key)
                 if not ok:
+                    error_code = "auth_invalid_api_key" if auth["status_code"] == 401 else "auth_forbidden"
+                    self._log_auth_failure(
+                        request,
+                        status_code=auth["status_code"],
+                        error_code=error_code,
+                        notes=auth["detail"],
+                    )
                     return JSONResponse(
                         {"detail": auth["detail"]},
                         status_code=auth["status_code"],
@@ -243,6 +264,12 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         # Protected API routes
         if path.startswith("/v1/"):
             if not raw_key:
+                self._log_auth_failure(
+                    request,
+                    status_code=401,
+                    error_code="auth_missing_api_key",
+                    notes="Missing API key",
+                )
                 return JSONResponse(
                     {"detail": "Missing API key"},
                     status_code=401,
@@ -250,6 +277,13 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
             ok, auth = self._authenticate_api_key(path, raw_key)
             if not ok:
+                error_code = "auth_invalid_api_key" if auth["status_code"] == 401 else "auth_forbidden"
+                self._log_auth_failure(
+                    request,
+                    status_code=auth["status_code"],
+                    error_code=error_code,
+                    notes=auth["detail"],
+                )
                 return JSONResponse(
                     {"detail": auth["detail"]},
                     status_code=auth["status_code"],
