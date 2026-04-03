@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 import os
 
+from payments.policy_provider import get_agent_pay_auth_bypass_methods, is_agent_pay_route, is_free_metered_path
+
 
 ENABLE_AGENT_PAY = os.getenv("ENABLE_AGENT_PAY", "false").lower() == "true"
 ENFORCE_AGENT_PAY = os.getenv("ENFORCE_AGENT_PAY", "false").lower() == "true"
@@ -41,15 +43,6 @@ NON_METERED_PATHS = {
     "/health",
     "/favicon.ico",
     "/v1/pricing",
-}
-
-FREE_METERED_PATHS = {
-    "/v1/ai/context",
-    "/v1/breadth/sector/latest",
-}
-
-AGENT_PAY_PATH_PREFIXES = {
-    "/v1/stim",
 }
 
 # Non-API probe/scanner traffic that should never be treated as billable API usage.
@@ -171,6 +164,7 @@ def _normalize_payment_method(payment_method_header: str | None) -> str:
 def _has_agent_payment_intent(
     payment_method_header: str | None,
     agent_identifier: str | None,
+    allowed_methods: tuple[str, ...],
 ) -> bool:
     normalized_payment_method = _normalize_payment_method(payment_method_header)
     if not normalized_payment_method:
@@ -179,7 +173,7 @@ def _has_agent_payment_intent(
     if not _is_identified_agent(agent_identifier):
         return False
 
-    return normalized_payment_method in {"mpp", "x402", "crypto"}
+    return normalized_payment_method in set(allowed_methods)
 
 
 def classify_request(
@@ -209,13 +203,17 @@ def classify_request(
     if _is_noise_path(path):
         return _free_decision()
 
-    if path in FREE_METERED_PATHS:
+    if is_free_metered_path(path):
         return _free_metered_decision()
 
-    is_stim = any(path.startswith(prefix) for prefix in AGENT_PAY_PATH_PREFIXES)
+    is_stim = is_agent_pay_route(path)
     has_paid_plan = _is_paid_plan(plan_code)
     identified_agent = _is_identified_agent(agent_identifier)
-    has_agent_payment_intent = _has_agent_payment_intent(payment_method_header, agent_identifier)
+    has_agent_payment_intent = _has_agent_payment_intent(
+        payment_method_header,
+        agent_identifier,
+        get_agent_pay_auth_bypass_methods(path),
+    )
     normalized_payment_method = _normalize_payment_method(payment_method_header)
 
     if is_stim:

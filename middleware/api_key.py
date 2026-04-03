@@ -10,11 +10,10 @@ from sqlalchemy import text
 
 from db import get_auth_engine
 from metering.logger import log_auth_failure_event
+from payments.policy_provider import is_agent_pay_auth_candidate, is_free_metered_path
 
 
 ALLOWED_SUBSCRIPTION_STATUSES = {"active", "trialing"}
-
-_AGENT_PAY_AUTH_BYPASS_METHODS = {"mpp", "x402"}
 logger = logging.getLogger("stocktrends_api.auth")
 
 
@@ -66,29 +65,12 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/.well-known/",
         ]
 
-        self.free_metered_paths = {
-            "/v1/ai/context",
-            "/v1/breadth/sector/latest",
-        }
-
-        self.agent_pay_prefixes = [
-            "/v1/stim",
-        ]
-
     def _is_agent_pay_candidate(self, request: Request) -> bool:
         path = request.url.path
-        if not any(path.startswith(prefix) for prefix in self.agent_pay_prefixes):
-            return False
-
         agent_id = _normalize_header(request.headers.get("x-stocktrends-agent-id"))
-        if not agent_id:
-            return False
 
         payment_method = (_normalize_header(request.headers.get("x-stocktrends-payment-method")) or "").lower()
-        if payment_method not in _AGENT_PAY_AUTH_BYPASS_METHODS:
-            return False
-
-        return True
+        return is_agent_pay_auth_candidate(path, payment_method, agent_id)
 
     def _apply_agent_pay_context(self, request: Request) -> None:
         request.state.api_key_id = None
@@ -234,7 +216,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
 
         # Free-metered routes:
         # allow anonymous access, but if an API key is supplied, resolve and attach customer context
-        if path in self.free_metered_paths:
+        if is_free_metered_path(path):
             if raw_key:
                 ok, auth = self._authenticate_api_key(path, raw_key)
                 if not ok:

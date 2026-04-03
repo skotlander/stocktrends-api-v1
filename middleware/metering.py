@@ -18,6 +18,10 @@ from metering.logger import (
     get_metering_engine,
 )
 from payments.enforcement import enforce_payment_rail
+from payments.policy_provider import (
+    get_accepted_payment_methods_for_path,
+    is_agent_pay_enforcement_path,
+)
 from pricing.classifier import classify_request
 from payments.x402 import (
     is_x402_payment_method,
@@ -45,11 +49,6 @@ def _parse_csv_env(env_name: str, default: str = "") -> set[str]:
         return set()
     return {item.strip() for item in raw.split(",") if item.strip()}
 
-
-AGENT_PAY_ENFORCE_PATH_PREFIXES = _parse_csv_env(
-    "AGENT_PAY_ENFORCE_PATH_PREFIXES",
-    "/v1/stim",
-)
 
 AGENT_PAY_TEST_CUSTOMER_IDS = _parse_csv_env("AGENT_PAY_TEST_CUSTOMER_IDS")
 AGENT_PAY_TEST_API_KEY_IDS = _parse_csv_env("AGENT_PAY_TEST_API_KEY_IDS")
@@ -107,26 +106,15 @@ def get_accepted_payment_methods(
     path: str,
     pricing_rule_id: str | None,
     *,
+    method: str | None = None,
     enforced_payment_method: str | None = None,
 ) -> str:
-    normalized_method = (enforced_payment_method or "").strip().lower()
-
-    if pricing_rule_id == "agent_pay_required":
-        if normalized_method == "x402":
-            return "x402"
-        if normalized_method == "mpp":
-            return "mpp"
-        if normalized_method == "crypto":
-            return "crypto"
-        return "mpp,x402,crypto"
-
-    if path.startswith("/v1/stim"):
-        return "subscription,mpp,x402,crypto"
-
-    if path.startswith("/v1/"):
-        return "subscription"
-
-    return "none"
+    return get_accepted_payment_methods_for_path(
+        path,
+        pricing_rule_id,
+        method=method,
+        enforced_payment_method=enforced_payment_method,
+    )
 
 
 def resolve_payment_rail(
@@ -640,9 +628,7 @@ def is_payment_reference_used(payment_reference: str) -> bool:
 
 
 def _path_matches_enforcement_scope(path: str) -> bool:
-    if not AGENT_PAY_ENFORCE_PATH_PREFIXES:
-        return False
-    return any(path.startswith(prefix) for prefix in AGENT_PAY_ENFORCE_PATH_PREFIXES)
+    return is_agent_pay_enforcement_path(path)
 
 
 def _caller_matches_test_allowlist(request: Request) -> bool:
@@ -886,7 +872,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 response,
                 pricing_rule_id=decision.log_pricing_rule_id,
                 payment_required=bool(decision.econ_payment_required),
-                accepted_methods=get_accepted_payment_methods(path, decision.log_pricing_rule_id),
+                accepted_methods=get_accepted_payment_methods(path, decision.log_pricing_rule_id, method=method),
             )
 
             latency_ms = int((time.time() - start_time) * 1000)
@@ -974,7 +960,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 response,
                 pricing_rule_id=decision.log_pricing_rule_id,
                 payment_required=bool(decision.econ_payment_required),
-                accepted_methods=get_accepted_payment_methods(path, decision.log_pricing_rule_id),
+                accepted_methods=get_accepted_payment_methods(path, decision.log_pricing_rule_id, method=method),
             )
 
             latency_ms = int((time.time() - start_time) * 1000)
@@ -1122,6 +1108,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         accepted_methods=get_accepted_payment_methods(
                             path,
                             pricing_rule_for_headers,
+                            method=method,
                             enforced_payment_method="x402",
                         ),
                     )
@@ -1216,6 +1203,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         accepted_methods=get_accepted_payment_methods(
                             path,
                             pricing_rule_for_headers,
+                            method=method,
                             enforced_payment_method="x402",
                         ),
                     )
@@ -1311,6 +1299,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         accepted_methods=get_accepted_payment_methods(
                             path,
                             pricing_rule_for_headers,
+                            method=method,
                             enforced_payment_method="x402",
                         ),
                     )
@@ -1405,6 +1394,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         accepted_methods=get_accepted_payment_methods(
                             path,
                             pricing_rule_for_headers,
+                            method=method,
                             enforced_payment_method="x402",
                         ),
                     )
@@ -1499,6 +1489,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         accepted_methods=get_accepted_payment_methods(
                             path,
                             pricing_rule_for_headers,
+                            method=method,
                             enforced_payment_method="x402",
                         ),
                     )
@@ -1616,6 +1607,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     accepted_methods=get_accepted_payment_methods(
                         path,
                         pricing_rule_for_headers,
+                        method=method,
                         enforced_payment_method=None,
                     ),
                 )
@@ -1707,13 +1699,14 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
             pricing_rule_for_headers = decision.econ_pricing_rule_id or decision.log_pricing_rule_id
             payment_required_for_headers = bool(decision.econ_payment_required)
-            accepted_methods = get_accepted_payment_methods(path, pricing_rule_for_headers)
+            accepted_methods = get_accepted_payment_methods(path, pricing_rule_for_headers, method=method)
 
             if response is not None:
                 if decision.econ_payment_required and is_x402_payment_method(normalized_payment_method):
                     accepted_methods = get_accepted_payment_methods(
                         path,
                         pricing_rule_for_headers,
+                        method=method,
                         enforced_payment_method="x402",
                     )
 
