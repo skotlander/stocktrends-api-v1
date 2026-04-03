@@ -36,6 +36,7 @@ class PaymentEnforcementResult:
     payment_network: Optional[str] = None
     payment_token: Optional[str] = None
     payment_amount_native: Optional[Decimal] = None
+    payment_channel_id: Optional[str] = None
     payment_response: Optional[dict] = None
 
 
