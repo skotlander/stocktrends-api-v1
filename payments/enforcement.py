@@ -20,12 +20,7 @@ def _extract_x402_requirement_context(payment_requirements: dict) -> tuple[str |
 
     requirement = accepts[0]
     network = requirement.get("network")
-
-    extra = requirement.get("extra") if isinstance(requirement.get("extra"), dict) else {}
-    token = (
-        extra.get("name")
-        or requirement.get("asset")
-    )
+    token = requirement.get("asset")
 
     return network, token
 

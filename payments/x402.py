@@ -463,8 +463,9 @@ def validate_x402_payment(
 
         payment_token = (
             payload.get("asset")
-            or payload.get("token")
-            or payload.get("paymentToken")
+            or payload.get("tokenAddress")
+            or payload.get("contractAddress")
+            or payload.get("paymentTokenAddress")
         )
 
         raw_amount = (
