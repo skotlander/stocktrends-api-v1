@@ -13,6 +13,23 @@ from payments.x402 import (
 )
 
 
+def _extract_x402_requirement_context(payment_requirements: dict) -> tuple[str | None, str | None]:
+    accepts = payment_requirements.get("accepts")
+    if not isinstance(accepts, list) or not accepts or not isinstance(accepts[0], dict):
+        return None, None
+
+    requirement = accepts[0]
+    network = requirement.get("network")
+
+    extra = requirement.get("extra") if isinstance(requirement.get("extra"), dict) else {}
+    token = (
+        extra.get("name")
+        or requirement.get("asset")
+    )
+
+    return network, token
+
+
 @dataclass
 class PaymentEnforcementResult:
     outcome: str
@@ -47,6 +64,7 @@ def enforce_x402_payment(
         amount_usd=amount_usd,
         method=method,
     )
+    required_network, required_token = _extract_x402_requirement_context(current_payment_requirements)
 
     if not has_payment_signature(headers):
         challenge_body, payment_required_header = build_x402_challenge(
@@ -60,6 +78,8 @@ def enforce_x402_payment(
             error_detail="x402 payment required",
             challenge_body=challenge_body,
             payment_required_header=payment_required_header,
+            payment_network=required_network,
+            payment_token=required_token,
         )
 
     if not validation_valid:
@@ -68,8 +88,8 @@ def enforce_x402_payment(
             error_code=validation_error,
             error_detail=validation_detail,
             payment_reference=validated_payment_reference,
-            payment_network=validated_payment_network,
-            payment_token=validated_payment_token,
+            payment_network=validated_payment_network or required_network,
+            payment_token=validated_payment_token or required_token,
             payment_amount_native=validated_payment_amount_native,
         )
 
@@ -80,8 +100,8 @@ def enforce_x402_payment(
             error_code="replay_detected",
             error_detail="Payment reference has already been used.",
             payment_reference=replay_reference,
-            payment_network=validated_payment_network,
-            payment_token=validated_payment_token,
+            payment_network=validated_payment_network or required_network,
+            payment_token=validated_payment_token or required_token,
             payment_amount_native=validated_payment_amount_native,
         )
 
@@ -97,8 +117,8 @@ def enforce_x402_payment(
             error_code="payment_verification_failed",
             error_detail=verify_result.error_detail,
             payment_reference=replay_reference,
-            payment_network=validated_payment_network,
-            payment_token=validated_payment_token,
+            payment_network=validated_payment_network or required_network,
+            payment_token=validated_payment_token or required_token,
             payment_amount_native=validated_payment_amount_native,
         )
 
@@ -112,16 +132,16 @@ def enforce_x402_payment(
             error_code="payment_settlement_failed",
             error_detail=settle_result.error_detail,
             payment_reference=replay_reference,
-            payment_network=validated_payment_network,
-            payment_token=validated_payment_token,
+            payment_network=validated_payment_network or required_network,
+            payment_token=validated_payment_token or required_token,
             payment_amount_native=validated_payment_amount_native,
         )
 
     return PaymentEnforcementResult(
         outcome="proceed",
         payment_reference=replay_reference,
-        payment_network=validated_payment_network,
-        payment_token=validated_payment_token,
+        payment_network=validated_payment_network or required_network,
+        payment_token=validated_payment_token or required_token,
         payment_amount_native=validated_payment_amount_native,
         payment_response=settle_result.settlement_response,
     )

@@ -703,6 +703,8 @@ def build_request_event(
     decision,
     payment_rail: str,
     payment_method: str | None,
+    payment_network: str | None = None,
+    payment_token: str | None = None,
     error_code: str | None,
     notes: str | None,
 ) -> dict:
@@ -737,6 +739,8 @@ def build_request_event(
         "is_billable": is_billable_request(decision),
         "payment_rail": payment_rail,
         "payment_method": payment_method,
+        "payment_network": payment_network,
+        "payment_token": payment_token,
         "pricing_rule_id": decision.log_pricing_rule_id,
         "error_code": error_code,
         "notes": notes[:255] if notes else None,
@@ -1141,6 +1145,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         decision=decision,
                         payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
+                        payment_network=enforcement_result.payment_network or payment_network_header,
+                        payment_token=enforcement_result.payment_token or payment_token_header,
                         error_code="payment_required",
                         notes="x402 payment required",
                     )
@@ -1154,8 +1160,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         econ_payment_fields = {
                             "payment_status": "pending",
                             "payment_method": payment_method_header or decision.econ_payment_method,
-                            "payment_network": payment_network_header or "eip155:8453",
-                            "payment_token": payment_token_header or "usdc",
+                            "payment_network": enforcement_result.payment_network or payment_network_header,
+                            "payment_token": enforcement_result.payment_token or payment_token_header,
                             "payment_amount_native": None,
                             "payment_amount_usd": None,
                             "payment_reference": None,
@@ -1232,6 +1238,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         decision=decision,
                         payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
+                        payment_network=enforcement_result.payment_network or payment_network_header,
+                        payment_token=enforcement_result.payment_token or payment_token_header,
                         error_code=enforcement_result.error_code,
                         notes=enforcement_result.error_detail,
                     )
@@ -1324,6 +1332,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         decision=decision,
                         payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
+                        payment_network=enforcement_result.payment_network or payment_network_header,
+                        payment_token=enforcement_result.payment_token or payment_token_header,
                         error_code=enforcement_result.error_code,
                         notes=enforcement_result.error_detail,
                     )
@@ -1415,6 +1425,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         decision=decision,
                         payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
+                        payment_network=enforcement_result.payment_network or payment_network_header,
+                        payment_token=enforcement_result.payment_token or payment_token_header,
                         error_code="payment_verification_failed",
                         notes=enforcement_result.error_detail,
                     )
@@ -1506,6 +1518,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         decision=decision,
                         payment_rail=payment_rail,
                         payment_method=resolved_payment_method,
+                        payment_network=enforcement_result.payment_network or payment_network_header,
+                        payment_token=enforcement_result.payment_token or payment_token_header,
                         error_code="payment_settlement_failed",
                         notes=enforcement_result.error_detail,
                     )
@@ -1712,6 +1726,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 decision=decision,
                 payment_rail=payment_rail,
                 payment_method=resolved_payment_method,
+                payment_network=payment_network_header,
+                payment_token=payment_token_header,
                 error_code=caught_exception.__class__.__name__ if caught_exception else None,
                 notes=str(caught_exception) if caught_exception else None,
             )

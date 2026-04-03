@@ -40,6 +40,8 @@ INSERT INTO api_request_logs (
     is_billable,
     payment_rail,
     payment_method,
+    payment_network,
+    payment_token,
     pricing_rule_id,
     error_code,
     notes
@@ -74,6 +76,8 @@ INSERT INTO api_request_logs (
     :is_billable,
     :payment_rail,
     :payment_method,
+    :payment_network,
+    :payment_token,
     :pricing_rule_id,
     :error_code,
     :notes
@@ -112,6 +116,8 @@ INSERT INTO api_request_logs (
     is_metered,
     is_billable,
     payment_method,
+    payment_network,
+    payment_token,
     pricing_rule_id,
     error_code,
     notes
@@ -145,6 +151,8 @@ INSERT INTO api_request_logs (
     :is_metered,
     :is_billable,
     :payment_method,
+    :payment_network,
+    :payment_token,
     :pricing_rule_id,
     :error_code,
     :notes
@@ -256,7 +264,7 @@ _request_log_legacy_warned = False
 _request_econ_legacy_warned = False
 
 
-def _is_missing_payment_rail_column_error(exc: Exception) -> bool:
+def _is_missing_metering_columns_error(exc: Exception) -> bool:
     if not isinstance(exc, DBAPIError):
         return False
 
@@ -266,7 +274,11 @@ def _is_missing_payment_rail_column_error(exc: Exception) -> bool:
         message_parts.append(str(exc.orig))
 
     message = " ".join(message_parts).lower()
-    return "payment_rail" in message and (
+    mentions_metering_column = any(
+        column in message
+        for column in ("payment_rail", "payment_network", "payment_token")
+    )
+    return mentions_metering_column and (
         "unknown column" in message
         or "invalid column" in message
         or "no column named" in message
@@ -286,8 +298,9 @@ def _warn_legacy_fallback(table_name: str) -> None:
         _request_econ_legacy_warned = True
 
     logger.warning(
-        "Metering schema mismatch detected for %s: missing payment_rail column. "
-        "Falling back to legacy insert without payment_rail until the schema migration is applied.",
+        "Metering schema mismatch detected for %s: one or more payment columns are missing "
+        "(payment_rail, payment_network, payment_token). Falling back to the legacy insert "
+        "shape until the schema migration is applied.",
         table_name,
     )
 
@@ -298,12 +311,14 @@ def log_api_request_event(event: dict) -> None:
         with engine.begin() as conn:
             conn.execute(INSERT_REQUEST_LOG_SQL, event)
     except DBAPIError as exc:
-        if not _is_missing_payment_rail_column_error(exc):
+        if not _is_missing_metering_columns_error(exc):
             raise
 
         _warn_legacy_fallback("api_request_logs")
         legacy_event = dict(event)
         legacy_event.pop("payment_rail", None)
+        legacy_event.pop("payment_network", None)
+        legacy_event.pop("payment_token", None)
 
         with engine.begin() as conn:
             conn.execute(INSERT_REQUEST_LOG_SQL_LEGACY, legacy_event)
@@ -315,7 +330,7 @@ def log_api_request_economics(econ: dict) -> None:
         with engine.begin() as conn:
             conn.execute(INSERT_REQUEST_ECONOMICS_SQL, econ)
     except DBAPIError as exc:
-        if not _is_missing_payment_rail_column_error(exc):
+        if not _is_missing_metering_columns_error(exc):
             raise
 
         _warn_legacy_fallback("api_request_economics")
