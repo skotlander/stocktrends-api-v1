@@ -1,3 +1,8 @@
+# NOTE:
+# This is a minimal placeholder implementation of the MPP rail.
+# It performs header normalization only and does NOT verify or settle payments.
+# Do not treat this as production-ready payment logic.
+
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
