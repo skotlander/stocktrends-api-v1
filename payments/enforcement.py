@@ -11,6 +11,7 @@ from payments.x402 import (
     settle_with_facilitator,
     verify_with_facilitator,
 )
+from payments.mpp import enforce_mpp_payment
 
 
 def _extract_x402_requirement_context(payment_requirements: dict) -> tuple[str | None, str | None]:
@@ -142,11 +143,6 @@ def enforce_x402_payment(
         payment_response=settle_result.settlement_response,
     )
 
-
-def enforce_mpp_payment_stub(**_kwargs) -> PaymentEnforcementResult:
-    return PaymentEnforcementResult(outcome="not_implemented")
-
-
 def enforce_payment_rail(
     *,
     payment_rail: str,
@@ -156,6 +152,6 @@ def enforce_payment_rail(
         return enforce_x402_payment(**kwargs)
 
     if payment_rail == "mpp":
-        return enforce_mpp_payment_stub(**kwargs)
+        return enforce_mpp_payment(**kwargs)
 
     return PaymentEnforcementResult(outcome="not_applicable")

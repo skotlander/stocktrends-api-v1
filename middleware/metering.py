@@ -870,6 +870,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         request.state.unit_price_usd = unit_price_usd
         request.state.billed_amount_usd = billed_amount_usd
         request.state.payment_rail = payment_rail
+        request.state.payment_channel_id = None
 
         if agent_identifier and agent_registered and agent_registry_status == "disabled":
             response = JSONResponse(
@@ -1065,6 +1066,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         validated_payment_network = None
         validated_payment_token = None
         validated_payment_amount_native = None
+        payment_channel_id = None
 
         if should_validate_agent_pay:
             if is_x402_payment_method(normalized_payment_method):
@@ -1580,8 +1582,23 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 payment_token_header = enforcement_result.payment_token or payment_token_header
                 if enforcement_result.payment_amount_native is not None:
                     payment_amount_header = str(enforcement_result.payment_amount_native)
+                payment_channel_id = enforcement_result.payment_channel_id
+                request.state.payment_channel_id = payment_channel_id
 
-            elif not validation_valid:
+            if payment_rail == "mpp":
+                payment_reference_header = enforcement_result.payment_reference or payment_reference_header
+                payment_network_header = enforcement_result.payment_network or payment_network_header
+                payment_token_header = enforcement_result.payment_token or payment_token_header
+                if enforcement_result.payment_amount_native is not None:
+                    payment_amount_header = str(enforcement_result.payment_amount_native)
+                payment_channel_id = enforcement_result.payment_channel_id
+                request.state.payment_channel_id = payment_channel_id
+                if enforcement_result.outcome == "validation_failed":
+                    validation_valid = False
+                    validation_error = enforcement_result.error_code
+                    validation_detail = enforcement_result.error_detail
+
+            if payment_rail != "x402" and not validation_valid:
                 response = JSONResponse(
                     status_code=402,
                     content={
@@ -1657,7 +1674,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         billed_amount_usd=billed_amount_usd,
                         payment_required=1,
                         payment_rail=payment_rail,
-                        payment_channel_id=None,
+                        payment_channel_id=payment_channel_id,
                         econ_payment_fields=econ_payment_fields,
                         session_id_header=session_id_header,
                         agent_registry_id=agent_registry_id,
@@ -1783,7 +1800,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     billed_amount_usd=billed_amount_usd,
                     payment_required=decision.econ_payment_required,
                     payment_rail=payment_rail,
-                    payment_channel_id=None,
+                    payment_channel_id=payment_channel_id,
                     econ_payment_fields=econ_payment_fields,
                     session_id_header=session_id_header,
                     agent_registry_id=agent_registry_id,
