@@ -116,8 +116,6 @@ INSERT INTO api_request_logs (
     is_metered,
     is_billable,
     payment_method,
-    payment_network,
-    payment_token,
     pricing_rule_id,
     error_code,
     notes
@@ -151,8 +149,6 @@ INSERT INTO api_request_logs (
     :is_metered,
     :is_billable,
     :payment_method,
-    :payment_network,
-    :payment_token,
     :pricing_rule_id,
     :error_code,
     :notes
@@ -306,6 +302,10 @@ def _warn_legacy_fallback(table_name: str) -> None:
 
 
 def log_api_request_event(event: dict) -> None:
+    event = dict(event)
+    event.setdefault("payment_network", None)
+    event.setdefault("payment_token", None)
+
     engine = get_metering_engine()
     try:
         with engine.begin() as conn:
