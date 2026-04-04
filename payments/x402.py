@@ -416,6 +416,28 @@ def _normalize_payment_requirements_input(payment_requirements: Any) -> dict[str
     return _extract_single_requirement(payment_requirements)
 
 
+def _extract_x402_amount_native(payload: dict[str, Any]) -> Decimal | None:
+    raw_amount = (
+        payload.get("amount")
+        or payload.get("maxAmountRequired")
+        or payload.get("value")
+        or payload.get("paymentAmount")
+    )
+    if raw_amount is None:
+        payment_payload = payload.get("paymentPayload")
+        if isinstance(payment_payload, dict):
+            nested_payload = payment_payload.get("payload")
+            if isinstance(nested_payload, dict):
+                authorization = nested_payload.get("authorization")
+                if isinstance(authorization, dict):
+                    raw_amount = authorization.get("value")
+    if raw_amount is None:
+        accepted = payload.get("accepted")
+        if isinstance(accepted, dict):
+            raw_amount = accepted.get("amount")
+    return _parse_decimal(str(raw_amount)) if raw_amount is not None else None
+
+
 # =========================================================
 # VALIDATION
 # =========================================================
@@ -468,13 +490,7 @@ def validate_x402_payment(
             or payload.get("paymentTokenAddress")
         )
 
-        raw_amount = (
-            payload.get("amount")
-            or payload.get("maxAmountRequired")
-            or payload.get("value")
-            or payload.get("paymentAmount")
-        )
-        amount_native = _parse_decimal(str(raw_amount)) if raw_amount is not None else None
+        amount_native = _extract_x402_amount_native(payload)
 
     required_amount_atomic = Decimal(
         _to_atomic_units(required_amount_usd, X402_DEFAULT_TOKEN_DECIMALS)
@@ -551,13 +567,7 @@ def extract_x402_payment_context(headers) -> X402ValidationResult:
             or payload.get("paymentTokenAddress")
         )
 
-        raw_amount = (
-            payload.get("amount")
-            or payload.get("maxAmountRequired")
-            or payload.get("value")
-            or payload.get("paymentAmount")
-        )
-        amount_native = _parse_decimal(str(raw_amount)) if raw_amount is not None else None
+        amount_native = _extract_x402_amount_native(payload)
 
     return X402ValidationResult(
         valid=True,
