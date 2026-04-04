@@ -7,6 +7,7 @@ from typing import Callable, Optional
 from payments.x402 import (
     build_x402_challenge,
     build_x402_requirements,
+    extract_x402_payment_context,
     has_payment_signature,
     settle_with_facilitator,
     verify_with_facilitator,
@@ -79,27 +80,44 @@ def enforce_x402_payment(
             payment_token=required_token,
         )
 
+    extracted_context = extract_x402_payment_context(headers)
+    normalized_payment_reference = validated_payment_reference
+    if normalized_payment_reference is None and extracted_context.valid:
+        normalized_payment_reference = extracted_context.payment_reference
+
+    normalized_payment_network = validated_payment_network
+    if normalized_payment_network is None and extracted_context.valid:
+        normalized_payment_network = extracted_context.payment_network
+
+    normalized_payment_token = validated_payment_token
+    if normalized_payment_token is None and extracted_context.valid:
+        normalized_payment_token = extracted_context.payment_token
+
+    normalized_payment_amount_native = validated_payment_amount_native
+    if normalized_payment_amount_native is None and extracted_context.valid:
+        normalized_payment_amount_native = extracted_context.payment_amount_native
+
     if not validation_valid:
         return PaymentEnforcementResult(
             outcome="validation_failed",
             error_code=validation_error,
             error_detail=validation_detail,
-            payment_reference=validated_payment_reference,
-            payment_network=validated_payment_network or required_network,
-            payment_token=validated_payment_token or required_token,
-            payment_amount_native=validated_payment_amount_native,
+            payment_reference=normalized_payment_reference,
+            payment_network=normalized_payment_network or required_network,
+            payment_token=normalized_payment_token or required_token,
+            payment_amount_native=normalized_payment_amount_native,
         )
 
-    replay_reference = validated_payment_reference
+    replay_reference = normalized_payment_reference
     if replay_reference and replay_checker(replay_reference):
         return PaymentEnforcementResult(
             outcome="replay_detected",
             error_code="replay_detected",
             error_detail="Payment reference has already been used.",
             payment_reference=replay_reference,
-            payment_network=validated_payment_network or required_network,
-            payment_token=validated_payment_token or required_token,
-            payment_amount_native=validated_payment_amount_native,
+            payment_network=normalized_payment_network or required_network,
+            payment_token=normalized_payment_token or required_token,
+            payment_amount_native=normalized_payment_amount_native,
         )
 
     payment_signature = headers.get("payment-signature") or headers.get("x-payment")
@@ -114,9 +132,9 @@ def enforce_x402_payment(
             error_code="payment_verification_failed",
             error_detail=verify_result.error_detail,
             payment_reference=replay_reference,
-            payment_network=validated_payment_network or required_network,
-            payment_token=validated_payment_token or required_token,
-            payment_amount_native=validated_payment_amount_native,
+            payment_network=normalized_payment_network or required_network,
+            payment_token=normalized_payment_token or required_token,
+            payment_amount_native=normalized_payment_amount_native,
         )
 
     settle_result = settle_with_facilitator(
@@ -129,17 +147,17 @@ def enforce_x402_payment(
             error_code="payment_settlement_failed",
             error_detail=settle_result.error_detail,
             payment_reference=replay_reference,
-            payment_network=validated_payment_network or required_network,
-            payment_token=validated_payment_token or required_token,
-            payment_amount_native=validated_payment_amount_native,
+            payment_network=normalized_payment_network or required_network,
+            payment_token=normalized_payment_token or required_token,
+            payment_amount_native=normalized_payment_amount_native,
         )
 
     return PaymentEnforcementResult(
         outcome="proceed",
         payment_reference=replay_reference,
-        payment_network=validated_payment_network or required_network,
-        payment_token=validated_payment_token or required_token,
-        payment_amount_native=validated_payment_amount_native,
+        payment_network=normalized_payment_network or required_network,
+        payment_token=normalized_payment_token or required_token,
+        payment_amount_native=normalized_payment_amount_native,
         payment_response=settle_result.settlement_response,
     )
 

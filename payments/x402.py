@@ -507,6 +507,69 @@ def validate_x402_payment(
     )
 
 
+def extract_x402_payment_context(headers) -> X402ValidationResult:
+    artifact = extract_payment_signature(headers)
+    if not artifact:
+        return X402ValidationResult(
+            valid=False,
+            error_code="missing_payment_signature",
+            error_detail="PAYMENT-SIGNATURE header is required.",
+        )
+
+    try:
+        payload = _parse_payment_payload_from_header(artifact)
+    except Exception as e:
+        return X402ValidationResult(
+            valid=False,
+            error_code="invalid_payment_signature",
+            error_detail=f"Could not decode PAYMENT-SIGNATURE payload: {e}",
+        )
+
+    amount_native: Optional[Decimal] = None
+    payment_reference: Optional[str] = None
+    payment_network: Optional[str] = None
+    payment_token: Optional[str] = None
+
+    if isinstance(payload, dict):
+        payment_reference = str(
+            payload.get("paymentIdentifier")
+            or payload.get("payment_id")
+            or payload.get("id")
+            or artifact
+        )
+
+        payment_network = (
+            payload.get("network")
+            or payload.get("chain")
+            or payload.get("paymentNetwork")
+        )
+
+        payment_token = (
+            payload.get("asset")
+            or payload.get("tokenAddress")
+            or payload.get("contractAddress")
+            or payload.get("paymentTokenAddress")
+        )
+
+        raw_amount = (
+            payload.get("amount")
+            or payload.get("maxAmountRequired")
+            or payload.get("value")
+            or payload.get("paymentAmount")
+        )
+        amount_native = _parse_decimal(str(raw_amount)) if raw_amount is not None else None
+
+    return X402ValidationResult(
+        valid=True,
+        payment_signature=artifact,
+        payment_payload=payload,
+        payment_reference=payment_reference or artifact,
+        payment_network=payment_network,
+        payment_token=payment_token,
+        payment_amount_native=amount_native,
+    )
+
+
 # =========================================================
 # FACILITATOR
 # =========================================================
