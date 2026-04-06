@@ -70,7 +70,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         agent_id = _normalize_header(request.headers.get("x-stocktrends-agent-id"))
 
         payment_method = (_normalize_header(request.headers.get("x-stocktrends-payment-method")) or "").lower()
-        return is_agent_pay_auth_candidate(path, payment_method, agent_id)
+        return is_agent_pay_auth_candidate(path, payment_method, agent_id, method=request.method)
 
     def _apply_agent_pay_context(self, request: Request) -> None:
         request.state.api_key_id = None

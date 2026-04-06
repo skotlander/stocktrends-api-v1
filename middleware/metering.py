@@ -26,6 +26,7 @@ from pricing.classifier import classify_request
 from payments.x402 import (
     is_x402_payment_method,
     validate_x402_payment,
+    encode_payment_response_header,
 )
 
 logger = logging.getLogger("stocktrends_api.metering")
@@ -627,8 +628,8 @@ def is_payment_reference_used(payment_reference: str) -> bool:
         return False
 
 
-def _path_matches_enforcement_scope(path: str) -> bool:
-    return is_agent_pay_enforcement_path(path)
+def _path_matches_enforcement_scope(path: str, method: str | None) -> bool:
+    return is_agent_pay_enforcement_path(path, method)
 
 
 def _caller_matches_test_allowlist(request: Request) -> bool:
@@ -650,14 +651,14 @@ def _caller_matches_test_allowlist(request: Request) -> bool:
     return False
 
 
-def should_enforce_agent_pay_for_request(request: Request, path: str, decision) -> bool:
+def should_enforce_agent_pay_for_request(request: Request, path: str, method: str | None, decision) -> bool:
     if not ENABLE_AGENT_PAY or not ENFORCE_AGENT_PAY:
         return False
 
     if decision.econ_payment_required != 1:
         return False
 
-    if not _path_matches_enforcement_scope(path):
+    if not _path_matches_enforcement_scope(path, method):
         return False
 
     if not _caller_matches_test_allowlist(request):
@@ -835,6 +836,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             payment_method_header=payment_method_header,
             plan_code=plan_code,
             agent_identifier=agent_identifier,
+            method=method,
         )
 
         request.state.pricing_rule_id = decision.log_pricing_rule_id
@@ -1043,7 +1045,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             and normalized_payment_method in {"mpp", "x402"}
         )
 
-        should_enforce_agent_pay = should_enforce_agent_pay_for_request(request, path, decision)
+        should_enforce_agent_pay = should_enforce_agent_pay_for_request(request, path, method, decision)
 
         validation_valid = True
         validation_error = None
@@ -1718,9 +1720,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                 )
 
                 if getattr(request.state, "x402_payment_response", None):
-                    response.headers["PAYMENT-RESPONSE"] = json.dumps(
+                    response.headers["PAYMENT-RESPONSE"] = encode_payment_response_header(
                         request.state.x402_payment_response,
-                        separators=(",", ":"),
                     )
 
             event = build_request_event(

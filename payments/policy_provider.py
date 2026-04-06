@@ -38,6 +38,14 @@ class EndpointPaymentPolicy:
 
 
 @dataclass
+class EffectiveEndpointPaymentPolicy:
+    source: str
+    allowed_rails: tuple[str, ...]
+    machine_payment_rails: tuple[str, ...]
+    allows_subscription: bool
+
+
+@dataclass
 class RuntimePaymentPolicyConfig:
     source: str
     version: str | None
@@ -259,6 +267,26 @@ def _derive_allowed_rails_for_endpoint(
     return tuple(rail for rail in endpoint_policy.allowed_rails if rail in enabled)
 
 
+def _build_effective_endpoint_policy(
+    path: str,
+    method: str | None,
+) -> EffectiveEndpointPaymentPolicy | None:
+    config = get_runtime_payment_policy_config()
+    allowed_rails = _derive_allowed_rails_for_endpoint(config, path, method)
+    if allowed_rails is None:
+        return None
+
+    machine_payment_rails = tuple(
+        rail for rail in allowed_rails if rail in {"x402", "mpp", "crypto"}
+    )
+    return EffectiveEndpointPaymentPolicy(
+        source="control_plane_exact",
+        allowed_rails=allowed_rails,
+        machine_payment_rails=machine_payment_rails,
+        allows_subscription="subscription" in allowed_rails,
+    )
+
+
 def _parse_config_payload(payload: dict) -> RuntimePaymentPolicyConfig:
     if not isinstance(payload, dict):
         raise ValueError("Payment policy config payload must be an object.")
@@ -392,20 +420,51 @@ def is_free_metered_path(path: str) -> bool:
     return path in config.free_metered_paths
 
 
-def is_agent_pay_route(path: str) -> bool:
+def get_effective_endpoint_payment_policy(
+    path: str,
+    method: str | None = None,
+) -> EffectiveEndpointPaymentPolicy | None:
+    return _build_effective_endpoint_policy(path, method)
+
+
+def get_allowed_payment_rails_for_path(
+    path: str,
+    method: str | None = None,
+) -> tuple[str, ...] | None:
+    effective_policy = get_effective_endpoint_payment_policy(path, method)
+    if effective_policy is None:
+        return None
+    return effective_policy.allowed_rails
+
+
+def is_agent_pay_route(path: str, method: str | None = None) -> bool:
+    effective_policy = get_effective_endpoint_payment_policy(path, method)
+    if effective_policy is not None:
+        return bool(effective_policy.machine_payment_rails)
+
     config = get_runtime_payment_policy_config()
     return any(path.startswith(prefix) for prefix in config.agent_pay_path_prefixes)
 
 
-def get_agent_pay_auth_bypass_methods(path: str) -> tuple[str, ...]:
-    if not is_agent_pay_route(path):
+def get_agent_pay_auth_bypass_methods(path: str, method: str | None = None) -> tuple[str, ...]:
+    effective_policy = get_effective_endpoint_payment_policy(path, method)
+    if effective_policy is not None:
+        return effective_policy.machine_payment_rails
+
+    if not is_agent_pay_route(path, method):
         return ()
 
     config = get_runtime_payment_policy_config()
     return tuple(method.lower() for method in config.agent_pay_auth_bypass_methods)
 
 
-def is_agent_pay_auth_candidate(path: str, payment_method: str | None, agent_id: str | None) -> bool:
+def is_agent_pay_auth_candidate(
+    path: str,
+    payment_method: str | None,
+    agent_id: str | None,
+    *,
+    method: str | None = None,
+) -> bool:
     if not agent_id:
         return False
 
@@ -413,10 +472,14 @@ def is_agent_pay_auth_candidate(path: str, payment_method: str | None, agent_id:
     if not normalized_method:
         return False
 
-    return normalized_method in set(get_agent_pay_auth_bypass_methods(path))
+    return normalized_method in set(get_agent_pay_auth_bypass_methods(path, method))
 
 
-def is_agent_pay_enforcement_path(path: str) -> bool:
+def is_agent_pay_enforcement_path(path: str, method: str | None = None) -> bool:
+    effective_policy = get_effective_endpoint_payment_policy(path, method)
+    if effective_policy is not None:
+        return bool(effective_policy.machine_payment_rails)
+
     config = get_runtime_payment_policy_config()
     return any(path.startswith(prefix) for prefix in config.enforcement_path_prefixes)
 
@@ -430,7 +493,7 @@ def get_accepted_payment_methods_for_path(
 ) -> str:
     config = get_runtime_payment_policy_config()
     normalized_method = (enforced_payment_method or "").strip().lower()
-    endpoint_allowed_rails = _derive_allowed_rails_for_endpoint(config, path, method)
+    endpoint_allowed_rails = get_allowed_payment_rails_for_path(path, method)
 
     if endpoint_allowed_rails is not None:
         return ",".join(endpoint_allowed_rails) if endpoint_allowed_rails else config.accepted_payment_methods_default

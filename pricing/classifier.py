@@ -1,7 +1,12 @@
 from dataclasses import dataclass
 import os
 
-from payments.policy_provider import get_agent_pay_auth_bypass_methods, is_agent_pay_route, is_free_metered_path
+from payments.policy_provider import (
+    get_agent_pay_auth_bypass_methods,
+    get_effective_endpoint_payment_policy,
+    is_agent_pay_route,
+    is_free_metered_path,
+)
 
 
 ENABLE_AGENT_PAY = os.getenv("ENABLE_AGENT_PAY", "false").lower() == "true"
@@ -182,6 +187,7 @@ def classify_request(
     payment_method_header: str | None = None,
     plan_code: str | None = None,
     agent_identifier: str | None = None,
+    method: str | None = None,
 ) -> PricingDecision:
     """
     Classify request into pricing / metering tiers.
@@ -206,15 +212,35 @@ def classify_request(
     if is_free_metered_path(path):
         return _free_metered_decision()
 
-    is_stim = is_agent_pay_route(path)
+    endpoint_policy = get_effective_endpoint_payment_policy(path, method)
+    is_stim = is_agent_pay_route(path, method)
     has_paid_plan = _is_paid_plan(plan_code)
     identified_agent = _is_identified_agent(agent_identifier)
     has_agent_payment_intent = _has_agent_payment_intent(
         payment_method_header,
         agent_identifier,
-        get_agent_pay_auth_bypass_methods(path),
+        get_agent_pay_auth_bypass_methods(path, method),
     )
     normalized_payment_method = _normalize_payment_method(payment_method_header)
+
+    if endpoint_policy is not None and path.startswith("/v1/"):
+        if endpoint_policy.allows_subscription and has_paid_auth:
+            return _subscription_decision()
+
+        if ENABLE_AGENT_PAY and identified_agent and has_agent_payment_intent:
+            return _agent_pay_decision(normalized_payment_method)
+
+        if endpoint_policy.allows_subscription:
+            if identified_agent and endpoint_policy.machine_payment_rails:
+                return _deny_decision("agent_payment_required")
+            return _deny_decision("authentication_required")
+
+        if endpoint_policy.machine_payment_rails:
+            if identified_agent:
+                return _deny_decision("agent_payment_required")
+            return _deny_decision("authentication_required")
+
+        return _deny_decision("access_denied")
 
     if is_stim:
         # Explicit Lane B path: identified agent presents a machine-payment intent.

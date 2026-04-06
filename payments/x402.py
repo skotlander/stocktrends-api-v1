@@ -412,6 +412,10 @@ def _parse_payment_payload_from_header(raw_value: str) -> dict[str, Any]:
     raise ValueError("PAYMENT-SIGNATURE is neither JSON nor base64-encoded JSON object.")
 
 
+def encode_payment_response_header(payload: dict[str, Any]) -> str:
+    return _b64_json(payload)
+
+
 def _normalize_payment_requirements_input(payment_requirements: Any) -> dict[str, Any]:
     return _extract_single_requirement(payment_requirements)
 
