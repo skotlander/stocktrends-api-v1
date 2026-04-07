@@ -117,16 +117,17 @@ def _subscription_decision() -> PricingDecision:
     )
 
 
-def _agent_pay_decision(method: str) -> PricingDecision:
+def _agent_pay_decision(method: str, pricing_rule_id: str | None = None) -> PricingDecision:
     normalized_method = (method or "").strip().lower() or "mpp"
+    rule_id = pricing_rule_id or "agent_pay_required"
 
     return PricingDecision(
         is_metered=1,
         access_granted=True,
         deny_reason=None,
-        log_pricing_rule_id="agent_pay_required",
+        log_pricing_rule_id=rule_id,
         log_payment_method=normalized_method,
-        econ_pricing_rule_id="agent_pay_required",
+        econ_pricing_rule_id=rule_id,
         econ_payment_required=1,
         econ_payment_status="pending",
         econ_payment_method=normalized_method,
@@ -228,7 +229,7 @@ def classify_request(
             return _subscription_decision()
 
         if ENABLE_AGENT_PAY and identified_agent and has_agent_payment_intent:
-            return _agent_pay_decision(normalized_payment_method)
+            return _agent_pay_decision(normalized_payment_method, pricing_rule_id=endpoint_policy.pricing_rule_id)
 
         if endpoint_policy.allows_subscription:
             if identified_agent and endpoint_policy.machine_payment_rails:
