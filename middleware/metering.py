@@ -221,10 +221,10 @@ def get_active_pricing_rule(rule_name: str | None) -> dict | None:
         return None
 
 
-def resolve_economic_amounts(rule_name: str | None) -> tuple[Decimal, Decimal]:
+def resolve_economic_amounts(rule_name: str | None) -> tuple[Decimal, Decimal, Decimal]:
     rule = get_active_pricing_rule(rule_name)
     if not rule:
-        return Decimal("0"), Decimal("0")
+        return Decimal("0"), Decimal("0"), Decimal("0")
 
     unit_price_usd = safe_decimal(rule.get("cost_per_request"), "0")
     access_type = rule.get("access_type")
@@ -234,7 +234,9 @@ def resolve_economic_amounts(rule_name: str | None) -> tuple[Decimal, Decimal]:
     else:
         billed_amount_usd = Decimal("0")
 
-    return unit_price_usd, billed_amount_usd
+    stc_cost = unit_price_usd
+
+    return unit_price_usd, billed_amount_usd, stc_cost
 
 
 def build_econ_payment_fields(
@@ -747,6 +749,7 @@ def build_request_econ(
     pricing_rule_id: str | None,
     unit_price_usd: Decimal,
     billed_amount_usd: Decimal,
+    stc_cost: Decimal,
     payment_required: int,
     payment_rail: str,
     payment_channel_id: str | None,
@@ -765,6 +768,7 @@ def build_request_econ(
         "pricing_rule_id": pricing_rule_id,
         "unit_price_usd": unit_price_usd,
         "billed_amount_usd": billed_amount_usd,
+        "stc_cost": stc_cost,
         "payment_required": payment_required,
         "payment_rail": payment_rail,
         **econ_payment_fields,
@@ -852,7 +856,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         request.state.econ_payment_status = decision.econ_payment_status
 
         economic_rule_name = decision.econ_pricing_rule_id or decision.log_pricing_rule_id
-        unit_price_usd, billed_amount_usd = resolve_economic_amounts(economic_rule_name)
+        unit_price_usd, billed_amount_usd, stc_cost = resolve_economic_amounts(economic_rule_name)
         workflow_type = normalize_workflow_type(auth_mode, agent_identifier)
         resolved_payment_method = payment_method_header or decision.log_payment_method
         payment_rail = resolve_payment_rail(
@@ -934,6 +938,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     pricing_rule_id=decision.econ_pricing_rule_id or decision.log_pricing_rule_id,
                     unit_price_usd=unit_price_usd,
                     billed_amount_usd=billed_amount_usd,
+                    stc_cost=stc_cost,
                     payment_required=decision.econ_payment_required,
                     payment_rail=payment_rail,
                     payment_channel_id=None,
@@ -1022,6 +1027,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     pricing_rule_id=decision.econ_pricing_rule_id or decision.log_pricing_rule_id,
                     unit_price_usd=unit_price_usd,
                     billed_amount_usd=billed_amount_usd,
+                    stc_cost=stc_cost,
                     payment_required=decision.econ_payment_required,
                     payment_rail=payment_rail,
                     payment_channel_id=None,
@@ -1173,6 +1179,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             pricing_rule_id=economic_rule_name,
                             unit_price_usd=unit_price_usd,
                             billed_amount_usd=billed_amount_usd,
+                            stc_cost=stc_cost,
                             payment_required=1,
                             payment_rail=payment_rail,
                             payment_channel_id=enforcement_result.payment_channel_id,
@@ -1268,6 +1275,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             pricing_rule_id=economic_rule_name,
                             unit_price_usd=unit_price_usd,
                             billed_amount_usd=billed_amount_usd,
+                            stc_cost=stc_cost,
                             payment_required=1,
                             payment_rail=payment_rail,
                             payment_channel_id=enforcement_result.payment_channel_id,
@@ -1364,6 +1372,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             pricing_rule_id=economic_rule_name,
                             unit_price_usd=unit_price_usd,
                             billed_amount_usd=billed_amount_usd,
+                            stc_cost=stc_cost,
                             payment_required=1,
                             payment_rail=payment_rail,
                             payment_channel_id=enforcement_result.payment_channel_id,
@@ -1459,6 +1468,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             pricing_rule_id=economic_rule_name,
                             unit_price_usd=unit_price_usd,
                             billed_amount_usd=billed_amount_usd,
+                            stc_cost=stc_cost,
                             payment_required=1,
                             payment_rail=payment_rail,
                             payment_channel_id=enforcement_result.payment_channel_id,
@@ -1554,6 +1564,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             pricing_rule_id=economic_rule_name,
                             unit_price_usd=unit_price_usd,
                             billed_amount_usd=billed_amount_usd,
+                            stc_cost=stc_cost,
                             payment_required=1,
                             payment_rail=payment_rail,
                             payment_channel_id=enforcement_result.payment_channel_id,
@@ -1671,6 +1682,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                         pricing_rule_id=economic_rule_name,
                         unit_price_usd=unit_price_usd,
                         billed_amount_usd=billed_amount_usd,
+                        stc_cost=stc_cost,
                         payment_required=1,
                         payment_rail=payment_rail,
                         payment_channel_id=payment_channel_id,
@@ -1797,6 +1809,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     pricing_rule_id=economic_rule_name,
                     unit_price_usd=unit_price_usd,
                     billed_amount_usd=billed_amount_usd,
+                    stc_cost=stc_cost,
                     payment_required=decision.econ_payment_required,
                     payment_rail=payment_rail,
                     payment_channel_id=payment_channel_id,
