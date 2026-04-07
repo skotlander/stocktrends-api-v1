@@ -12,6 +12,7 @@ Primary goals:
 * enable agent-native monetization (per-request and session payments)
 * preserve backward compatibility for developers
 * support future token-based incentives (STOK)
+* align implementation with /docs strategy and architecture
 
 ---
 
