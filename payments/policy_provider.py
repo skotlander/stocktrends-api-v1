@@ -43,6 +43,7 @@ class EffectiveEndpointPaymentPolicy:
     allowed_rails: tuple[str, ...]
     machine_payment_rails: tuple[str, ...]
     allows_subscription: bool
+    pricing_rule_id: str | None = None
 
 
 @dataclass
@@ -118,7 +119,15 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
         environment=None,
         enabled_environment_rails=(),
         pricing_rule_ids=(),
-        endpoint_payment_policies=(),
+        endpoint_payment_policies=(
+            EndpointPaymentPolicy(
+                endpoint_id="agent_screener_top",
+                path_pattern="/v1/agent/screener/top",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="agent_screener_top",
+            ),
+        ),
         free_metered_paths=(
             "/v1/ai/context",
             "/v1/breadth/sector/latest",
@@ -277,6 +286,8 @@ def _build_effective_endpoint_policy(
     if allowed_rails is None:
         return None
 
+    raw_policy = _lookup_exact_endpoint_policy(config, path, method)
+    pricing_rule_id = raw_policy.pricing_rule_id if raw_policy else None
     machine_payment_rails = tuple(
         rail for rail in allowed_rails if rail in {"x402", "mpp", "crypto"}
     )
@@ -285,6 +296,7 @@ def _build_effective_endpoint_policy(
         allowed_rails=allowed_rails,
         machine_payment_rails=machine_payment_rails,
         allows_subscription="subscription" in allowed_rails,
+        pricing_rule_id=pricing_rule_id,
     )
 
 
