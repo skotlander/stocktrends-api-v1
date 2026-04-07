@@ -115,12 +115,14 @@ pip install -r requirements.txt
 
 ---
 
-### Run API
+## Local Development
+
+### 1. Install dependencies
 
 ```bash
-run_api.bat
-```
-
+pip install -r requirements.txt
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+http://127.0.0.1:8000/v1/docs
 ---
 
 ### Open API Docs
