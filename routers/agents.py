@@ -307,8 +307,11 @@ def get_agent_usage(
                 """
                 SELECT
                     COUNT(*) AS economics_rows,
-                    SUM(COALESCE(billed_amount_usd, 0)) AS total_billed_amount_usd,
-                    SUM(COALESCE(payment_amount_usd, 0)) AS total_payment_amount_usd
+                    SUM(COALESCE(billed_amount_usd, 0))  AS total_billed_amount_usd,
+                    SUM(COALESCE(payment_amount_usd, 0)) AS total_payment_amount_usd,
+                    SUM(COALESCE(stc_cost, 0))           AS total_stc_cost,
+                    SUM(CASE WHEN stc_cost IS NOT NULL THEN 1 ELSE 0 END) AS priced_request_count,
+                    SUM(CASE WHEN stc_cost IS NULL     THEN 1 ELSE 0 END) AS unpriced_request_count
                 FROM api_request_economics
                 WHERE customer_id = :customer_id
                   AND agent_id = :agent_id
@@ -365,6 +368,9 @@ def get_agent_usage(
             "economics_rows": int(econ.get("economics_rows") or 0),
             "total_billed_amount_usd": float(econ.get("total_billed_amount_usd") or 0),
             "total_payment_amount_usd": float(econ.get("total_payment_amount_usd") or 0),
+            "total_stc_cost": float(econ.get("total_stc_cost") or 0),
+            "priced_request_count": int(econ.get("priced_request_count") or 0),
+            "unpriced_request_count": int(econ.get("unpriced_request_count") or 0),
         },
         "top_endpoints": [
             {
@@ -387,6 +393,110 @@ def get_agent_usage(
                 "request_count": int(row.get("request_count") or 0),
             }
             for row in payment_rows
+        ],
+    }
+
+
+@router.get(
+    "/{agent_id}/ledger",
+    summary="Get agent economics ledger",
+    description=(
+        "Returns a paginated, chronological log of every economics row for a single agent. "
+        "Each entry reflects the declared STC cost, billing outcome, payment rail, and payment "
+        "status for one request. Rows where stc_cost is NULL were written before the stc_cost "
+        "schema migration and carry no declared price record."
+    ),
+)
+def get_agent_ledger(
+    agent_id: str,
+    request: Request,
+    days: int = Query(default=30, ge=1, le=365),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+):
+    customer_id = _require_customer_id(request)
+    _get_agent_for_customer(customer_id, agent_id)
+    since_dt = _parse_since_days(days)
+
+    engine = get_metering_engine()
+    with engine.begin() as conn:
+        ledger_rows = conn.execute(
+            text(
+                """
+                SELECT
+                    request_id,
+                    pricing_rule_id,
+                    stc_cost,
+                    unit_price_usd,
+                    billed_amount_usd,
+                    payment_rail,
+                    payment_status,
+                    payment_method,
+                    payment_amount_usd,
+                    session_id,
+                    request_purpose,
+                    created_at
+                FROM api_request_economics
+                WHERE customer_id = :customer_id
+                  AND agent_id = :agent_id
+                  AND created_at >= :since_dt
+                ORDER BY created_at DESC
+                LIMIT :limit OFFSET :offset
+                """
+            ),
+            {
+                "customer_id": customer_id,
+                "agent_id": agent_id,
+                "since_dt": since_dt,
+                "limit": limit,
+                "offset": offset,
+            },
+        ).mappings().all()
+
+        total = conn.execute(
+            text(
+                """
+                SELECT COUNT(*) AS total
+                FROM api_request_economics
+                WHERE customer_id = :customer_id
+                  AND agent_id = :agent_id
+                  AND created_at >= :since_dt
+                """
+            ),
+            {
+                "customer_id": customer_id,
+                "agent_id": agent_id,
+                "since_dt": since_dt,
+            },
+        ).scalar() or 0
+
+    return {
+        "request_id": getattr(request.state, "request_id", None),
+        "agent_id": agent_id,
+        "window": {
+            "days": days,
+            "since_utc": since_dt.isoformat(),
+        },
+        "count": len(ledger_rows),
+        "total": int(total),
+        "limit": limit,
+        "offset": offset,
+        "ledger": [
+            {
+                "request_id": row.get("request_id"),
+                "pricing_rule_id": row.get("pricing_rule_id"),
+                "stc_cost": float(row["stc_cost"]) if row.get("stc_cost") is not None else None,
+                "unit_price_usd": float(row["unit_price_usd"]) if row.get("unit_price_usd") is not None else None,
+                "billed_amount_usd": float(row["billed_amount_usd"]) if row.get("billed_amount_usd") is not None else None,
+                "payment_rail": row.get("payment_rail"),
+                "payment_status": row.get("payment_status"),
+                "payment_method": row.get("payment_method"),
+                "payment_amount_usd": float(row["payment_amount_usd"]) if row.get("payment_amount_usd") is not None else None,
+                "session_id": row.get("session_id"),
+                "request_purpose": row.get("request_purpose"),
+                "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
+            }
+            for row in ledger_rows
         ],
     }
 
