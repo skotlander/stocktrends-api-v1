@@ -165,6 +165,7 @@ INSERT INTO api_request_economics (
     pricing_rule_id,
     unit_price_usd,
     billed_amount_usd,
+    stc_cost,
     payment_required,
     payment_rail,
     payment_status,
@@ -188,6 +189,7 @@ INSERT INTO api_request_economics (
     :pricing_rule_id,
     :unit_price_usd,
     :billed_amount_usd,
+    :stc_cost,
     :payment_required,
     :payment_rail,
     :payment_status,
@@ -273,7 +275,7 @@ def _is_missing_metering_columns_error(exc: Exception) -> bool:
     message = " ".join(message_parts).lower()
     mentions_metering_column = any(
         column in message
-        for column in ("payment_rail", "payment_network", "payment_token")
+        for column in ("payment_rail", "payment_network", "payment_token", "stc_cost")
     )
     return mentions_metering_column and (
         "unknown column" in message
@@ -295,8 +297,8 @@ def _warn_legacy_fallback(table_name: str) -> None:
         _request_econ_legacy_warned = True
 
     logger.warning(
-        "Metering schema mismatch detected for %s: one or more payment columns are missing "
-        "(payment_rail, payment_network, payment_token). Falling back to the legacy insert "
+        "Metering schema mismatch detected for %s: one or more columns are missing "
+        "(payment_rail, payment_network, payment_token, stc_cost). Falling back to the legacy insert "
         "shape until the schema migration is applied.",
         table_name,
     )
