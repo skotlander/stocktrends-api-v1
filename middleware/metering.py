@@ -27,6 +27,7 @@ from payments.x402 import (
     is_x402_payment_method,
     validate_x402_payment,
     encode_payment_response_header,
+    X402_DEFAULT_TOKEN_DECIMALS,
 )
 
 logger = logging.getLogger("stocktrends_api.metering")
@@ -264,13 +265,17 @@ def build_econ_payment_fields(
         except (TypeError, ValueError):
             amount_native = None
 
+    payment_amount_usd = None
+    if amount_native is not None and is_x402_payment_method(payment_method_header):
+        payment_amount_usd = Decimal(str(amount_native)) / Decimal(10 ** X402_DEFAULT_TOKEN_DECIMALS)
+
     return {
         "payment_status": payment_status,
         "payment_method": payment_method_header or decision.econ_payment_method,
         "payment_network": payment_network_header,
         "payment_token": payment_token_header,
         "payment_amount_native": amount_native,
-        "payment_amount_usd": None,
+        "payment_amount_usd": payment_amount_usd,
         "payment_reference": payment_reference_header,
     }
 
