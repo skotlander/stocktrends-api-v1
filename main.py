@@ -190,7 +190,7 @@ def apply_api_key_security_to_openapi(v1_app: FastAPI) -> dict:
                 {"BearerAuth": []},
             ]
 
-            if path.startswith("/stim") or path.startswith("/agents") or path == "/pricing":
+            if path.startswith("/stim") or path.startswith("/agents") or path in ("/pricing", "/pricing/catalog"):
                 _ensure_parameter_refs(operation, agent_refs + payment_refs)
 
     v1_app.openapi_schema = openapi_schema

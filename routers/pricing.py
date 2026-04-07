@@ -1,6 +1,17 @@
-from fastapi import APIRouter
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+
+from db import get_metering_engine
 
 router = APIRouter(prefix="/pricing", tags=["pricing"])
+
+# Catalog schema version — increment when the shape of /catalog changes.
+_PRICING_CATALOG_VERSION = "1"
 
 
 @router.get(
@@ -206,3 +217,69 @@ def get_pricing():
             },
         },
     }
+
+
+@router.get(
+    "/catalog",
+    summary="Live pricing rule catalog",
+    description=(
+        "Returns all active pricing rules from the STC pricing engine. "
+        "Each rule carries the declared endpoint price in STC units (cost_per_request), "
+        "the access type, and the endpoint pattern it matches. "
+        "Agents should call this endpoint once at startup to build a local cost map "
+        "before making data requests. "
+        "Response headers include x-st-pricing-version (catalog schema version) and "
+        "x-st-pricing-updated-at (UTC timestamp when this catalog was served)."
+    ),
+)
+def get_pricing_catalog(request: Request) -> JSONResponse:
+    engine = get_metering_engine()
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT
+                    rule_name,
+                    endpoint_pattern,
+                    endpoint_family,
+                    api_version,
+                    access_type,
+                    cost_per_request,
+                    cost_unit,
+                    requires_subscription,
+                    requires_payment
+                FROM api_pricing_rules
+                WHERE is_active = 1
+                ORDER BY endpoint_family, rule_name
+                """
+            )
+        ).mappings().all()
+
+    catalog = [
+        {
+            "pricing_rule_id": row["rule_name"],
+            "endpoint_pattern": row["endpoint_pattern"],
+            "endpoint_family": row["endpoint_family"],
+            "api_version": row["api_version"],
+            "access_type": row["access_type"],
+            "cost_per_request": float(row["cost_per_request"]) if row["cost_per_request"] is not None else 0.0,
+            "cost_unit": row["cost_unit"],
+            "requires_subscription": bool(row["requires_subscription"]),
+            "requires_payment": bool(row["requires_payment"]),
+        }
+        for row in rows
+    ]
+
+    served_at = datetime.now(timezone.utc).isoformat()
+
+    return JSONResponse(
+        content={
+            "request_id": getattr(request.state, "request_id", None),
+            "count": len(catalog),
+            "rules": catalog,
+        },
+        headers={
+            "x-st-pricing-version": _PRICING_CATALOG_VERSION,
+            "x-st-pricing-updated-at": served_at,
+        },
+    )
