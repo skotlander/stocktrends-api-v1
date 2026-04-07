@@ -125,6 +125,7 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
         ),
         agent_pay_path_prefixes=(
             "/v1/stim",
+            "/v1/agent/screener",
         ),
         agent_pay_auth_bypass_methods=(
             "mpp",
