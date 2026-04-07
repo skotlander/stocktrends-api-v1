@@ -5,11 +5,13 @@
 This repository powers the Stock Trends API and agent monetization system.
 
 Primary goals:
-- maintain a stable FastAPI production service
-- support multiple payment rails for API access
-- ensure accurate request logging and metering
-- enable agent-native monetization (per-request payments)
-- preserve backward compatibility for developers
+
+* maintain a stable FastAPI production service
+* support multiple payment rails for API access
+* ensure accurate request logging and metering
+* enable agent-native monetization (per-request and session payments)
+* preserve backward compatibility for developers
+* support future token-based incentives (STOK)
 
 ---
 
@@ -20,40 +22,89 @@ Primary goals:
 3. **Logging and metering are first-class**
 4. **Support multiple payment rails (not just one)**
 5. **Make minimal, targeted changes only**
+6. **Pricing must be unified across all payment rails**
+7. **All payment rails must resolve to a common pricing unit (STC)**
+8. **Token integration must not break pricing consistency**
+
+---
+
+## Unified Pricing Layer (STC) — CRITICAL
+
+The API uses a unified pricing system based on:
+
+**Stock Trends Credits (STC)**
+
+* 1 STC ≈ $1 USD (reference value, not a fixed peg)
+* All endpoints must map to a fixed STC cost
+* Pricing must NOT be duplicated across payment rails
+
+### Rules
+
+* Same endpoint → same STC cost across all payment methods
+* Payment rails affect **how payment is made**, not **what is charged**
+* Pricing must be centrally defined (e.g., pricing_rules or registry)
+
+### DO
+
+* resolve pricing before payment enforcement
+* store STC cost in request context
+* use STC as the only pricing source
+
+### DO NOT
+
+* hardcode prices in endpoints
+* create rail-specific pricing logic
+* compute pricing inside payment verification logic
 
 ---
 
 ## Payment Architecture (CRITICAL)
 
-This API is designed to support **multiple payment rails** for agent and developer traffic.
+This API supports **multiple payment rails**.
 
 ### Active / Implemented
-- **Subscription (Stripe)** → account-based access
-- **x402** → per-request agent payments (primary current rail)
+
+* **Subscription (Stripe)** → account-based access (monthly STC allocation)
+* **x402** → per-request agent payments
 
 ### Planned / Supported by Design
-- **MPP (Machine Payments Protocol)** → machine-to-machine payments
+
+* **MPP (Machine Payments Protocol)** → session-based payments
+* **STOK** → token-based discount and incentive layer
 
 ---
 
 ## Payment Model (IMPORTANT CONCEPT)
 
-Payment handling is intentionally **decomposed into layers**:
+Payment handling is decomposed into layers:
 
-1. **Access Policy**
-   - Is this route free, subscription-gated, or pay-per-request?
+1. **Pricing Resolution**
 
-2. **Payment Requirement**
-   - Does this request require payment?
+   * Determine STC cost for the request
 
-3. **Payment Rail**
-   - subscription | x402 | mpp | none
+2. **Access Policy**
 
-4. **Verification**
-   - Was payment successfully verified?
+   * Free, subscription, or paid endpoint
 
-5. **Metering / Billing**
-   - What should be recorded and billed?
+3. **Payment Requirement**
+
+   * Is payment required?
+
+4. **Payment Rail**
+
+   * subscription | x402 | mpp | stok | none
+
+5. **Payment Translation**
+
+   * Convert STC → rail-specific amount
+
+6. **Verification**
+
+   * Validate payment based on selected rail
+
+7. **Metering / Billing**
+
+   * Record actual usage and cost
 
 ---
 
@@ -61,98 +112,159 @@ Payment handling is intentionally **decomposed into layers**:
 
 ⚠️ **Do NOT couple the system to a single payment rail (e.g., x402).**
 
-All payment-related logic should remain:
-- rail-aware
-- extensible
-- clearly separated
+All payment-related logic must remain:
+
+* rail-aware
+* modular
+* extensible
+* decoupled from pricing
+
+---
+
+## Payment Adapter Pattern
+
+All payment rails must implement a translation layer:
+
+```text
+STC → Payment Rail
+```
+
+### Examples
+
+* subscription → decrement STC balance
+* x402 → convert STC to USD and verify payment
+* MPP → deduct STC from session balance
+* STOK → apply discount to STC before payment
+
+### Rules
+
+* Payment adapters must NOT define pricing
+* Payment adapters must consume STC
+* Payment adapters must be interchangeable
+
+⚠️ Never embed payment conversion logic directly in route handlers.
 
 ---
 
 ## Payment Rails Guidance
 
-### x402 (Current Focus)
-- Used for per-request agent payments
-- Requires challenge/verify flow
-- Must remain fully functional and verifiable
+### Subscription
 
-### MPP (Future Integration)
-- Will support machine-native payments
-- May use different request/verification semantics
-- Must be integratable without rewriting core API logic
+* Uses monthly STC allocation
+* Must decrement STC per request
+* Must enforce balance limits
 
 ---
 
-## Implementation Rules for Payment Code
+### x402 (Current Focus)
 
-When modifying payment logic:
+* Per-request payment model
+* Uses HTTP 402 challenge/verify flow
+* Must derive payment amount from STC
 
-### DO:
-- identify where the following are handled:
-  - pricing rule selection
-  - payment requirement decision
-  - payment rail classification
-  - verification logic
-  - metering/logging
-- keep these concerns **separate**
-- ensure logging captures the payment rail explicitly
+Ensure:
 
-### DO NOT:
-- hardcode logic assuming only x402 exists
-- mix payment verification with routing logic
-- collapse payment classification into boolean flags only
-- remove fallback behavior (e.g., subscription vs pay-per-request)
+* correct network (e.g., Base)
+* correct token (e.g., USDC)
+* explicit error handling and logging
+
+---
+
+### MPP (Future Integration)
+
+* Session-based payments
+* Deduct STC from session balance
+* May not follow x402 challenge flow
+
+System must support:
+
+* alternate verification models
+* session tracking
+* batched payments
+
+---
+
+### STOK (Token Integration — Future)
+
+STOK is an **incentive and discount layer**, not a pricing unit.
+
+### Rules
+
+* STOK does NOT replace STC
+* STOK provides discount (recommended max: 10–20%)
+* All STOK usage must resolve to STC consumption
+
+### Requirements
+
+* prevent arbitrage vs USD pricing
+* log token usage explicitly
+* support token sinks (burn or reuse)
+
+### DO NOT
+
+* allow STOK to bypass pricing
+* allow free access via token misuse
+* tie pricing directly to token value
 
 ---
 
 ## Logging and Metering (FIRST-CLASS)
 
 All API requests must be logged with sufficient detail to support:
-- billing
-- analytics
-- debugging
-- multi-rail support
 
-### Required Concepts
+* billing
+* analytics
+* debugging
+* multi-rail support
 
-Each request should clearly capture:
+### Required Fields
 
-- pricing_rule_id
-- payment_required (true/false)
-- payment_rail (subscription | x402 | mpp | none)
-- payment_status (not_required | presented | verified | failed)
-- agent_id or customer_id
-- request_count
-- billed_amount
+* pricing_rule_id
+* stc_cost
+* effective_price_usd
+* payment_required
+* payment_rail (subscription | x402 | mpp | stok | none)
+* payment_status (not_required | presented | verified | failed)
+* payment_method
+* payment_token
+* payment_amount_native
+* payment_amount_usd
+* discount_applied
+* token_used
+* session_id (MPP)
+* agent_id or customer_id
+* request_id
+* billed_amount
 
 ---
 
 ## Logging Rules
 
-- Logging must occur on:
-  - success paths
-  - failure paths
-  - verification failures
-- Logging must reflect **actual enforcement behavior**, not assumptions
-- Avoid duplicate or missing records
-- Do not remove logging to reduce noise without preserving signal
+* Log ALL requests (success and failure)
+* Reflect actual enforcement behavior
+* Avoid duplicate or missing records
+* Do not remove logging without preserving signal
 
 ---
 
 ## API Architecture
 
 Expected stack:
-- FastAPI backend
-- routes under `/v1/`
-- middleware for:
-  - auth
-  - pricing
-  - payment enforcement
-  - logging/metering
+
+* FastAPI backend
+* routes under `/v1/`
+* middleware for:
+
+  * pricing (STC resolution)
+  * auth
+  * payment enforcement
+  * logging/metering
 
 Deployment:
-- AWS EC2 (Ubuntu)
-- nginx reverse proxy
-- systemd service
+
+* AWS EC2 (Ubuntu)
+* nginx reverse proxy
+* systemd service
 
 ---
 
@@ -160,61 +272,68 @@ Deployment:
 
 When modifying endpoints:
 
-- preserve response schema unless required
-- preserve OpenAPI/docs functionality
-- ensure headers reflect actual behavior
+* preserve response schema unless required
+* preserve OpenAPI/docs functionality
+* ensure headers reflect actual behavior
 
 Critical endpoints:
-- `/v1/`
-- `/v1/docs`
-- `/v1/openapi.json`
+
+* `/v1/`
+* `/v1/docs`
+* `/v1/openapi.json`
 
 ---
 
 ## Payment Headers
 
-Headers must accurately reflect enforcement:
+Headers must reflect actual enforcement and pricing:
 
 Examples:
-- x-stocktrends-pricing-rule
-- x-stocktrends-payment-required
-- x-stocktrends-accepted-payment-methods
 
-Rules:
-- headers must match actual behavior
-- do not mark endpoints payable if they are not enforced
-- do not omit payment requirement if enforced
+* x-stocktrends-pricing-rule
+* x-stocktrends-payment-required
+* x-stocktrends-stc-cost
+* x-stocktrends-effective-price-usd
+* x-stocktrends-accepted-payment-methods
+* x-stocktrends-selected-payment-rail
 
----
+### Rules
 
-## x402-Specific Guidance
-
-If modifying x402:
-
-- trace:
-  - challenge generation
-  - verify payload construction
-  - request headers
-  - external verifier interaction
-- ensure:
-  - Base mainnet assumptions are correct
-  - token assumptions (e.g., USDC) are correct
-  - error handling is explicit and logged
+* headers must match real behavior
+* do not misrepresent payment requirements
+* do not omit pricing information
 
 ---
 
-## MPP-Readiness Guidance
+## Implementation Rules for Payment Code
 
-Even if MPP is not yet active:
+### DO
 
-- ensure system can support:
-  - alternate verification flows
-  - different payment payload formats
-  - different settlement models
+* separate pricing, payment, and verification logic
+* use centralized STC pricing
+* ensure adapters consume STC
+* ensure logging captures full context
 
-- do not assume:
-  - challenge/verify structure is universal
-  - same headers will apply
+### DO NOT
+
+* hardcode pricing in routes
+* assume only x402 exists
+* mix verification with pricing logic
+* collapse payment logic into simple flags
+
+---
+
+## MPP Readiness Guidance
+
+System must support:
+
+* session-based balances
+* alternate verification flows
+* multiple request settlement models
+
+Do not assume:
+
+* x402-style challenge/verify applies universally
 
 ---
 
@@ -225,10 +344,11 @@ Always identify failure layer first:
 1. nginx
 2. service startup
 3. FastAPI app startup
-4. route logic
+4. pricing resolution
 5. middleware
-6. payment verification
-7. logging/metering
+6. payment translation
+7. payment verification
+8. logging/metering
 
 Fix the **lowest responsible layer only**
 
@@ -238,41 +358,50 @@ Fix the **lowest responsible layer only**
 
 Be careful when modifying:
 
-- main.py (startup)
-- middleware
-- payment enforcement logic
-- logging/metering writes
-- config/env loading
-- static file handling
-- OpenAPI/docs generation
+* main.py (startup)
+* pricing middleware
+* payment enforcement logic
+* logging/metering writes
+* config/env loading
+* static file handling
+* OpenAPI/docs generation
 
 ---
 
 ## Validation Checklist
 
-Before completing any task:
-
 ### API
-- app starts cleanly
-- `/v1/` responds
-- `/v1/docs` loads
-- `/v1/openapi.json` loads
+
+* app starts cleanly
+* `/v1/` responds
+* `/v1/docs` loads
+* `/v1/openapi.json` loads
+
+### Pricing
+
+* correct STC cost applied per endpoint
+* pricing is consistent across rails
 
 ### Payment
-- free routes behave correctly
-- subscription routes behave correctly
-- x402 routes challenge/verify correctly
+
+* free routes behave correctly
+* subscription decrements STC correctly
+* x402 derives correct payment amount
+* MPP (if present) deducts session balance correctly
 
 ### Logging
-- request is logged
-- payment_rail is correct
-- payment_status is correct
-- pricing_rule_id is correct
+
+* request is logged
+* pricing_rule_id is correct
+* stc_cost is correct
+* payment_rail is correct
+* payment_status is correct
 
 ### Safety
-- no secrets exposed
-- no debug bypasses
-- no regressions
+
+* no secrets exposed
+* no debug bypasses
+* no regressions
 
 ---
 
@@ -290,11 +419,12 @@ For every task:
 
 ## DO NOT
 
-- break payment enforcement
-- remove logging
-- hardcode single payment rail assumptions
-- introduce breaking API changes
-- refactor unrelated code
+* break payment enforcement
+* remove logging
+* hardcode pricing into endpoints
+* assume a single payment rail
+* introduce breaking API changes
+* refactor unrelated code
 
 ---
 
@@ -302,8 +432,10 @@ For every task:
 
 A task is complete only when:
 
-- issue is resolved at correct layer
-- payment logic remains correct
-- logging/metering remains accurate
-- system remains multi-rail compatible
-- validation steps are documented
+* issue is resolved at correct layer
+* STC pricing is correctly applied
+* payment logic remains accurate
+* logging/metering remains complete
+* system remains multi-rail compatible
+* future rails (MPP, STOK) remain supported
+* validation steps are documented
