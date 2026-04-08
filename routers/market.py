@@ -14,6 +14,31 @@ router = APIRouter(prefix="/market", tags=["market"])
 
 _BULLISH_TRENDS = {"^+", "^-", "v^"}
 _BEARISH_TRENDS = {"v-", "v+", "^v"}
+_DIRECTION_THRESHOLD = 0.02
+
+
+def _recent_direction(avg_delta: float) -> str:
+    if avg_delta >= _DIRECTION_THRESHOLD:
+        return "improving"
+    if avg_delta <= -_DIRECTION_THRESHOLD:
+        return "deteriorating"
+    return "stable"
+
+
+def _forecast_confidence(
+    consistency_pct: float,
+    current_score: float,
+    avg_delta: float,
+) -> str:
+    if (
+        consistency_pct >= 0.80
+        and abs(current_score) >= 0.20
+        and abs(avg_delta) >= _DIRECTION_THRESHOLD
+    ):
+        return "high"
+    if consistency_pct >= 0.60:
+        return "moderate"
+    return "low"
 
 
 def _classify_regime(regime_score: float) -> str:
@@ -282,4 +307,144 @@ def market_regime_history(
         "count": len(history),
         "limit": limit,
         "start_date": str(start_date) if start_date else None,
+    }
+
+
+@router.get(
+    "/regime/forecast",
+    summary="Forward-looking market regime forecast",
+    description=(
+        "Returns a synthesized forward-looking regime outlook derived from the direction "
+        "and consistency of recent weekly regime scores. "
+        "Fully deterministic — no ML. Reuses the same trend classification as /regime/latest. "
+        "Pricing rule: market_regime_forecast (0.35 STC per call)."
+    ),
+)
+def market_regime_forecast(
+    request: Request,
+    lookback: int = Query(
+        default=5,
+        ge=2,
+        le=13,
+        description="Number of recent weeks to analyze. Default 5, min 2, max 13.",
+    ),
+):
+    engine = get_engine()
+
+    with engine.connect() as conn:
+        # Step 1: resolve the N most recent weekdates
+        weekdate_rows = conn.execute(
+            text(
+                """
+                SELECT DISTINCT weekdate
+                FROM st_data
+                WHERE type = 'CS'
+                ORDER BY weekdate DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": lookback},
+        ).mappings().all()
+
+        weekdates = [r["weekdate"] for r in weekdate_rows if r["weekdate"]]
+
+        if not weekdates:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "request_id": getattr(request.state, "request_id", None),
+                    "error": "no_signal_data",
+                    "message": "No weekdates available in st_data.",
+                },
+            )
+
+        # Step 2: aggregate trend distribution for all resolved weekdates
+        # Placeholders built from DB-returned date objects — no user input in SQL
+        week_binds = {f"w{i}": wd for i, wd in enumerate(weekdates)}
+        placeholders = ", ".join(f":w{i}" for i in range(len(weekdates)))
+        agg_rows = conn.execute(
+            text(
+                f"""
+                SELECT
+                    weekdate,
+                    trend,
+                    COUNT(*) AS cnt
+                FROM st_data
+                WHERE weekdate IN ({placeholders})
+                  AND type = 'CS'
+                GROUP BY weekdate, trend
+                ORDER BY weekdate DESC, trend
+                """
+            ),
+            week_binds,
+        ).mappings().all()
+
+    # Group by weekdate and compute regime_score per week
+    week_groups: dict[date, list] = defaultdict(list)
+    for row in agg_rows:
+        week_groups[row["weekdate"]].append(row)
+
+    scores_by_week: list[tuple[date, float]] = []
+    for wd in weekdates:
+        group = week_groups.get(wd, [])
+        if not group:
+            continue
+
+        bullish_cnt = 0
+        bearish_cnt = 0
+        total_cnt = 0
+        for row in group:
+            cnt = int(row["cnt"] or 0)
+            trend = row["trend"] or ""
+            total_cnt += cnt
+            if trend in _BULLISH_TRENDS:
+                bullish_cnt += cnt
+            elif trend in _BEARISH_TRENDS:
+                bearish_cnt += cnt
+
+        if total_cnt == 0:
+            continue
+
+        regime_score = (bullish_cnt - bearish_cnt) / total_cnt
+        scores_by_week.append((wd, regime_score))
+
+    if not scores_by_week:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "request_id": getattr(request.state, "request_id", None),
+                "error": "no_signal_data",
+                "message": "Signal count is zero for the resolved weekdates.",
+            },
+        )
+
+    # Derive forecast signals — scores_by_week is most recent first
+    scores = [s for _, s in scores_by_week]
+    current_wd, current_score = scores_by_week[0]
+    current_label = _classify_regime(current_score)
+
+    # Average weekly delta: positive = score improving week-over-week
+    deltas = [scores[i] - scores[i + 1] for i in range(len(scores) - 1)]
+    avg_delta = sum(deltas) / len(deltas)
+
+    # Projected score one period forward, clamped to [-1, 1]
+    projected_score = max(-1.0, min(1.0, current_score + avg_delta))
+
+    # Consistency: fraction of lookback weeks carrying the same regime label
+    consistency_count = sum(1 for s in scores if _classify_regime(s) == current_label)
+    consistency_pct = consistency_count / len(scores)
+
+    return {
+        "forecast_regime": _classify_regime(projected_score),
+        "forecast_confidence": _forecast_confidence(consistency_pct, current_score, avg_delta),
+        "current_regime": current_label,
+        "current_regime_score": round(current_score, 4),
+        "recent_direction": _recent_direction(avg_delta),
+        "regime_consistency": round(consistency_pct, 4),
+        "projected_regime_score": round(projected_score, 4),
+        "avg_weekly_score_delta": round(avg_delta, 4),
+        "recent_scores": [round(s, 4) for s in scores],
+        "weeks_analyzed": len(scores_by_week),
+        "lookback": lookback,
+        "weekdate": str(current_wd),
     }

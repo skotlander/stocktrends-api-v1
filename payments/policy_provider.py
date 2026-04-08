@@ -141,6 +141,13 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
                 allowed_rails=("subscription", "x402", "mpp"),
                 pricing_rule_id="market_regime_history",
             ),
+            EndpointPaymentPolicy(
+                endpoint_id="market_regime_forecast",
+                path_pattern="/v1/market/regime/forecast",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="market_regime_forecast",
+            ),
         ),
         free_metered_paths=(
             "/v1/ai/context",
