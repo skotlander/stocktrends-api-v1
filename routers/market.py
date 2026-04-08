@@ -47,7 +47,7 @@ def market_regime_latest(request: Request):
     with engine.connect() as conn:
         # Step 1: resolve latest weekdate
         row = conn.execute(
-            text("SELECT MAX(weekdate) AS weekdate FROM st_signals_latest")
+            text("SELECT MAX(weekdate) AS weekdate FROM st_data")
         ).mappings().first()
         weekdate = str(row["weekdate"]) if row and row["weekdate"] else None
 
@@ -70,8 +70,9 @@ def market_regime_latest(request: Request):
                     COUNT(*)    AS cnt,
                     AVG(rsi)    AS avg_rsi,
                     AVG(mt_cnt) AS avg_mt_cnt
-                FROM st_signals_latest
+                FROM st_data
                 WHERE weekdate = :weekdate
+                  AND type = 'CS'
                 GROUP BY trend
                 """
             ),
