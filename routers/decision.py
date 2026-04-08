@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from db import get_engine
 from routers.signals import VALID_EXCHANGES, parse_symbol_exchange
-from services import regime_service
+from services import decision_service, regime_service
 
 router = APIRouter(prefix="/decision", tags=["decision"])
 
@@ -28,142 +28,6 @@ class EvaluateSymbolRequest(BaseModel):
     symbol_exchange: str | None = None
     symbol: str | None = None
     exchange: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# Decision helpers
-# ---------------------------------------------------------------------------
-
-def _symbol_bias(trend: str) -> str:
-    if trend in regime_service.BULLISH_TRENDS:
-        return "bullish"
-    if trend in regime_service.BEARISH_TRENDS:
-        return "bearish"
-    return "neutral"
-
-
-def _alignment(symbol_bias: str, current_regime: str) -> str:
-    """
-    Returns 'aligned', 'divergent', or 'neutral'.
-    Neutral symbol always produces 'neutral'.
-    Both bullish or both bearish → aligned.
-    Opposite directions → divergent.
-    """
-    if symbol_bias == "neutral":
-        return "neutral"
-    if symbol_bias == current_regime:
-        return "aligned"
-    if current_regime == "mixed":
-        return "neutral"
-    return "divergent"
-
-
-def _bias(symbol_bias: str, alignment: str) -> str:
-    """
-    Synthesize an overall bias label:
-      aligned bullish → strong_bullish
-      aligned bearish → strong_bearish
-      neutral alignment, bullish symbol → bullish
-      neutral alignment, bearish symbol → bearish
-      divergent → cautious_<symbol_bias>
-      neutral symbol → neutral
-    """
-    if symbol_bias == "neutral":
-        return "neutral"
-    if alignment == "aligned":
-        return f"strong_{symbol_bias}"
-    if alignment == "neutral":
-        return symbol_bias
-    # divergent
-    return f"cautious_{symbol_bias}"
-
-
-def _decision_confidence(
-    alignment: str,
-    symbol_bias: str,
-    trend_cnt: int,
-    rsi: int,
-    regime_score: float,
-) -> str:
-    """
-    Three-tier confidence:
-      high   — aligned + mature trend (>=4w) + strong regime (|score|>=0.30) + RSI confirms
-      low    — neutral symbol OR divergent + weak regime
-      moderate — everything else
-    """
-    if symbol_bias == "neutral":
-        return "low"
-
-    abs_regime = abs(regime_score)
-
-    if (
-        alignment == "aligned"
-        and trend_cnt >= 4
-        and abs_regime >= 0.30
-    ):
-        bullish_rsi_ok = symbol_bias == "bullish" and rsi >= 100
-        bearish_rsi_ok = symbol_bias == "bearish" and rsi < 100
-        if bullish_rsi_ok or bearish_rsi_ok:
-            return "high"
-
-    if alignment == "divergent" and abs_regime < 0.10:
-        return "low"
-
-    return "moderate"
-
-
-def _decision_score(
-    alignment: str,
-    symbol_bias: str,
-    trend_cnt: int,
-    rsi: int,
-    regime_score: float,
-) -> float:
-    """
-    Composite 0–1 score.
-    Returns 0.0 for neutral symbols.
-
-    Components:
-      alignment        → 0.40 / 0.20 / 0.00
-      regime strength  → up to 0.30 (abs(regime_score) * 0.5, capped)
-      trend maturity   → 0.15 / 0.10 / 0.05 / 0.00
-      RSI confirmation → 0.15 / 0.08 / 0.00
-    """
-    if symbol_bias == "neutral":
-        return 0.0
-
-    # Alignment component
-    if alignment == "aligned":
-        score = 0.40
-    elif alignment == "neutral":
-        score = 0.20
-    else:  # divergent
-        score = 0.0
-
-    # Regime strength
-    score += min(0.30, abs(regime_score) * 0.5)
-
-    # Trend maturity
-    if trend_cnt >= 8:
-        score += 0.15
-    elif trend_cnt >= 4:
-        score += 0.10
-    elif trend_cnt >= 2:
-        score += 0.05
-
-    # RSI confirmation
-    if symbol_bias == "bullish":
-        if rsi >= 110:
-            score += 0.15
-        elif rsi >= 100:
-            score += 0.08
-    else:  # bearish
-        if rsi < 90:
-            score += 0.15
-        elif rsi < 100:
-            score += 0.08
-
-    return round(min(1.0, score), 4)
 
 
 def _signal_notes(
@@ -368,11 +232,11 @@ def evaluate_symbol(body: EvaluateSymbolRequest, request: Request):
     rsi_updn = sym_row["rsi_updn"]
     vol_tag = sym_row["vol_tag"]
 
-    sym_bias = _symbol_bias(trend)
-    alignment = _alignment(sym_bias, current_regime)
-    bias = _bias(sym_bias, alignment)
-    confidence = _decision_confidence(alignment, sym_bias, trend_cnt, rsi, current_regime_score)
-    d_score = _decision_score(alignment, sym_bias, trend_cnt, rsi, current_regime_score)
+    sym_bias = decision_service.symbol_bias(trend)
+    sym_alignment = decision_service.alignment(sym_bias, current_regime)
+    bias = decision_service.compute_bias(sym_bias, sym_alignment)
+    confidence = decision_service.decision_confidence(sym_alignment, sym_bias, trend_cnt, rsi, current_regime_score)
+    d_score = decision_service.decision_score(sym_alignment, sym_bias, trend_cnt, rsi, current_regime_score)
     notes = _signal_notes(rsi_updn, vol_tag, trend_cnt, mt_cnt)
 
     return {
@@ -383,7 +247,7 @@ def evaluate_symbol(body: EvaluateSymbolRequest, request: Request):
         "bias": bias,
         "confidence": confidence,
         "decision_score": d_score,
-        "alignment": alignment,
+        "alignment": sym_alignment,
         "symbol_context": {
             "trend": trend,
             "trend_cnt": trend_cnt,

@@ -155,6 +155,13 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
                 allowed_rails=("subscription", "x402", "mpp"),
                 pricing_rule_id="evaluate_symbol",
             ),
+            EndpointPaymentPolicy(
+                endpoint_id="portfolio_construct",
+                path_pattern="/v1/portfolio/construct",
+                method="POST",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="portfolio_construct",
+            ),
         ),
         free_metered_paths=(
             "/v1/ai/context",
@@ -165,6 +172,7 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
             "/v1/agent/screener",
             "/v1/market",
             "/v1/decision",
+            "/v1/portfolio",
         ),
         agent_pay_auth_bypass_methods=(
             "mpp",
