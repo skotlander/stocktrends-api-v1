@@ -127,6 +127,13 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
                 allowed_rails=("subscription", "x402", "mpp"),
                 pricing_rule_id="agent_screener_top",
             ),
+            EndpointPaymentPolicy(
+                endpoint_id="market_regime_latest",
+                path_pattern="/v1/market/regime/latest",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="market_regime_latest",
+            ),
         ),
         free_metered_paths=(
             "/v1/ai/context",
