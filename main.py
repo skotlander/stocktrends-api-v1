@@ -24,6 +24,7 @@ from routers.ai import router as ai_router
 from routers.pricing import router as pricing_router
 from routers.agents import router as agents_router  # ✅ NEW
 from routers.screener import router as screener_router
+from routers.market import router as market_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -191,7 +192,7 @@ def apply_api_key_security_to_openapi(v1_app: FastAPI) -> dict:
                 {"BearerAuth": []},
             ]
 
-            if path.startswith("/stim") or path.startswith("/agents") or path.startswith("/agent/screener") or path in ("/pricing", "/pricing/catalog"):
+            if path.startswith("/stim") or path.startswith("/agents") or path.startswith("/agent/screener") or path.startswith("/market") or path in ("/pricing", "/pricing/catalog"):
                 _ensure_parameter_refs(operation, agent_refs + payment_refs)
 
     v1_app.openapi_schema = openapi_schema
@@ -264,6 +265,7 @@ v1.include_router(ai_router)
 v1.include_router(pricing_router)
 v1.include_router(agents_router)  # ✅ NEW
 v1.include_router(screener_router)
+v1.include_router(market_router)
 
 v1.openapi = lambda: apply_api_key_security_to_openapi(v1)
 
