@@ -148,6 +148,13 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
                 allowed_rails=("subscription", "x402", "mpp"),
                 pricing_rule_id="market_regime_forecast",
             ),
+            EndpointPaymentPolicy(
+                endpoint_id="evaluate_symbol",
+                path_pattern="/v1/decision/evaluate-symbol",
+                method="POST",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="evaluate_symbol",
+            ),
         ),
         free_metered_paths=(
             "/v1/ai/context",
@@ -156,6 +163,8 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
         agent_pay_path_prefixes=(
             "/v1/stim",
             "/v1/agent/screener",
+            "/v1/market",
+            "/v1/decision",
         ),
         agent_pay_auth_bypass_methods=(
             "mpp",

@@ -9,53 +9,9 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from sqlalchemy import text
 
 from db import get_engine
+from services import regime_service
 
 router = APIRouter(prefix="/market", tags=["market"])
-
-_BULLISH_TRENDS = {"^+", "^-", "v^"}
-_BEARISH_TRENDS = {"v-", "v+", "^v"}
-_DIRECTION_THRESHOLD = 0.02
-
-
-def _recent_direction(avg_delta: float) -> str:
-    if avg_delta >= _DIRECTION_THRESHOLD:
-        return "improving"
-    if avg_delta <= -_DIRECTION_THRESHOLD:
-        return "deteriorating"
-    return "stable"
-
-
-def _forecast_confidence(
-    consistency_pct: float,
-    current_score: float,
-    avg_delta: float,
-) -> str:
-    if (
-        consistency_pct >= 0.80
-        and abs(current_score) >= 0.20
-        and abs(avg_delta) >= _DIRECTION_THRESHOLD
-    ):
-        return "high"
-    if consistency_pct >= 0.60:
-        return "moderate"
-    return "low"
-
-
-def _classify_regime(regime_score: float) -> str:
-    if regime_score >= 0.10:
-        return "bullish"
-    if regime_score <= -0.10:
-        return "bearish"
-    return "mixed"
-
-
-def _classify_confidence(regime_score: float) -> str:
-    abs_score = abs(regime_score)
-    if abs_score >= 0.30:
-        return "high"
-    if abs_score >= 0.10:
-        return "moderate"
-    return "low"
 
 
 @router.get(
@@ -127,9 +83,9 @@ def market_regime_latest(request: Request):
         cnt = int(row["cnt"] or 0)
         trend = row["trend"] or ""
         total_cnt += cnt
-        if trend in _BULLISH_TRENDS:
+        if trend in regime_service.BULLISH_TRENDS:
             bullish_cnt += cnt
-        elif trend in _BEARISH_TRENDS:
+        elif trend in regime_service.BEARISH_TRENDS:
             bearish_cnt += cnt
         weighted_rsi += float(row["avg_rsi"] or 0) * cnt
         weighted_mt_cnt += float(row["avg_mt_cnt"] or 0) * cnt
@@ -151,8 +107,8 @@ def market_regime_latest(request: Request):
     avg_mt_cnt = round(weighted_mt_cnt / total_cnt, 2)
 
     return {
-        "regime": _classify_regime(regime_score),
-        "confidence": _classify_confidence(regime_score),
+        "regime": regime_service.classify_regime(regime_score),
+        "confidence": regime_service.classify_confidence(regime_score),
         "regime_score": regime_score,
         "bullish_pct": bullish_pct,
         "bearish_pct": bearish_pct,
@@ -276,9 +232,9 @@ def market_regime_history(
             cnt = int(row["cnt"] or 0)
             trend = row["trend"] or ""
             total_cnt += cnt
-            if trend in _BULLISH_TRENDS:
+            if trend in regime_service.BULLISH_TRENDS:
                 bullish_cnt += cnt
-            elif trend in _BEARISH_TRENDS:
+            elif trend in regime_service.BEARISH_TRENDS:
                 bearish_cnt += cnt
             weighted_rsi += float(row["avg_rsi"] or 0) * cnt
             weighted_mt_cnt += float(row["avg_mt_cnt"] or 0) * cnt
@@ -292,8 +248,8 @@ def market_regime_history(
 
         history.append({
             "weekdate": str(wd),
-            "regime": _classify_regime(regime_score),
-            "confidence": _classify_confidence(regime_score),
+            "regime": regime_service.classify_regime(regime_score),
+            "confidence": regime_service.classify_confidence(regime_score),
             "regime_score": regime_score,
             "bullish_pct": bullish_pct,
             "bearish_pct": bearish_pct,
@@ -379,34 +335,8 @@ def market_regime_forecast(
             week_binds,
         ).mappings().all()
 
-    # Group by weekdate and compute regime_score per week
-    week_groups: dict[date, list] = defaultdict(list)
-    for row in agg_rows:
-        week_groups[row["weekdate"]].append(row)
-
-    scores_by_week: list[tuple[date, float]] = []
-    for wd in weekdates:
-        group = week_groups.get(wd, [])
-        if not group:
-            continue
-
-        bullish_cnt = 0
-        bearish_cnt = 0
-        total_cnt = 0
-        for row in group:
-            cnt = int(row["cnt"] or 0)
-            trend = row["trend"] or ""
-            total_cnt += cnt
-            if trend in _BULLISH_TRENDS:
-                bullish_cnt += cnt
-            elif trend in _BEARISH_TRENDS:
-                bearish_cnt += cnt
-
-        if total_cnt == 0:
-            continue
-
-        regime_score = (bullish_cnt - bearish_cnt) / total_cnt
-        scores_by_week.append((wd, regime_score))
+    # Group by weekdate and compute regime_score per week (via service)
+    scores_by_week = regime_service.compute_scores_by_week(weekdates, agg_rows)
 
     if not scores_by_week:
         raise HTTPException(
@@ -419,30 +349,29 @@ def market_regime_forecast(
         )
 
     # Derive forecast signals — scores_by_week is most recent first
+    forecast = regime_service.compute_forecast_signals(scores_by_week)
+
     scores = [s for _, s in scores_by_week]
     current_wd, current_score = scores_by_week[0]
-    current_label = _classify_regime(current_score)
-
-    # Average weekly delta: positive = score improving week-over-week
-    deltas = [scores[i] - scores[i + 1] for i in range(len(scores) - 1)]
-    avg_delta = sum(deltas) / len(deltas)
-
-    # Projected score one period forward, clamped to [-1, 1]
-    projected_score = max(-1.0, min(1.0, current_score + avg_delta))
+    current_label = regime_service.classify_regime(current_score)
 
     # Consistency: fraction of lookback weeks carrying the same regime label
-    consistency_count = sum(1 for s in scores if _classify_regime(s) == current_label)
+    consistency_count = sum(
+        1 for s in scores if regime_service.classify_regime(s) == current_label
+    )
     consistency_pct = consistency_count / len(scores)
 
     return {
-        "forecast_regime": _classify_regime(projected_score),
-        "forecast_confidence": _forecast_confidence(consistency_pct, current_score, avg_delta),
+        "forecast_regime": forecast["forecast_regime"],
+        "forecast_confidence": regime_service.forecast_confidence(
+            consistency_pct, current_score, forecast["avg_delta"]
+        ),
         "current_regime": current_label,
         "current_regime_score": round(current_score, 4),
-        "recent_direction": _recent_direction(avg_delta),
+        "recent_direction": forecast["recent_direction"],
         "regime_consistency": round(consistency_pct, 4),
-        "projected_regime_score": round(projected_score, 4),
-        "avg_weekly_score_delta": round(avg_delta, 4),
+        "projected_regime_score": round(forecast["projected_score"], 4),
+        "avg_weekly_score_delta": round(forecast["avg_delta"], 4),
         "recent_scores": [round(s, 4) for s in scores],
         "weeks_analyzed": len(scores_by_week),
         "lookback": lookback,
