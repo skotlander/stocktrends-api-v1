@@ -133,7 +133,7 @@ def screener_top(
         resolved_weekdate = weekdate
         if not resolved_weekdate:
             row = conn.execute(
-                text("SELECT MAX(weekdate) AS weekdate FROM st_signals_latest")
+                text("SELECT MAX(weekdate) AS weekdate FROM st_data")
             ).mappings().first()
             resolved_weekdate = str(row["weekdate"]) if row and row["weekdate"] else None
 
@@ -197,7 +197,7 @@ def screener_top(
                 rsi_updn,
                 vol_tag,
                 weekdate
-            FROM st_signals_latest
+            FROM st_data
             WHERE {where_sql}
             ORDER BY {order_sql}
             LIMIT :limit
@@ -208,7 +208,7 @@ def screener_top(
         count_sql = text(
             f"""
             SELECT COUNT(*) AS total
-            FROM st_signals_latest
+            FROM st_data
             WHERE {where_sql}
             """
         )
