@@ -103,14 +103,20 @@ def _free_metered_decision() -> PricingDecision:
     )
 
 
-def _subscription_decision() -> PricingDecision:
+def _subscription_decision(pricing_rule_id: str | None = None) -> PricingDecision:
+    # pricing_rule_id: the endpoint-specific rule (e.g. "portfolio_compare").
+    # When provided, it is recorded in both the event log and economics log so
+    # per-endpoint STC equivalents are available for analytics and future
+    # control-plane use.  Access remains quota-based: econ_payment_required=0
+    # means the caller is never charged per-request regardless of the rule value.
+    rule = pricing_rule_id or "default_subscription"
     return PricingDecision(
         is_metered=1,
         access_granted=True,
         deny_reason=None,
-        log_pricing_rule_id="default_subscription",
+        log_pricing_rule_id=rule,
         log_payment_method="subscription",
-        econ_pricing_rule_id="default_subscription",
+        econ_pricing_rule_id=rule,
         econ_payment_required=0,
         econ_payment_status="not_required",
         econ_payment_method="subscription",
@@ -226,7 +232,7 @@ def classify_request(
 
     if endpoint_policy is not None and path.startswith("/v1/"):
         if endpoint_policy.allows_subscription and has_paid_auth:
-            return _subscription_decision()
+            return _subscription_decision(pricing_rule_id=endpoint_policy.pricing_rule_id)
 
         if ENABLE_AGENT_PAY and identified_agent and has_agent_payment_intent:
             return _agent_pay_decision(normalized_payment_method, pricing_rule_id=endpoint_policy.pricing_rule_id)
