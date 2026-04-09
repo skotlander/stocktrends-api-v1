@@ -469,8 +469,12 @@ def get_cost_estimate(
         resolved_rail = "mixed"
 
     # --- quota_sufficient ---
+    # Answers: "is there enough quota to cover the full workflow on subscription?"
+    # Compares against total step_count, not subscription_step_count.
+    # Using subscription_step_count would collapse to 0 when quota_remaining=0
+    # (all steps routed to x402), producing the wrong result 0 >= 0 = True.
     if quota_remaining is not None:
-        quota_sufficient: Optional[bool] = quota_remaining >= subscription_step_count
+        quota_sufficient: Optional[bool] = quota_remaining >= step_count
     else:
         quota_sufficient = None
 
