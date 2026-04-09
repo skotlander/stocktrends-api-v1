@@ -779,3 +779,559 @@ def evaluate_portfolio(body: EvaluatePortfolioRequest, request: Request):
         },
         "evaluation_notes": notes,
     }
+
+
+# ---------------------------------------------------------------------------
+# Compare endpoint — constants
+# ---------------------------------------------------------------------------
+
+_TIE_THRESHOLD = 0.001
+_ALIGN_RANK = {"aligned": 2, "mixed": 1, "divergent": 0}
+_CONF_RANK  = {"high": 2, "moderate": 1, "low": 0}
+
+
+# ---------------------------------------------------------------------------
+# Compare endpoint — request schema
+# ---------------------------------------------------------------------------
+
+class ComparePortfolioRequest(BaseModel):
+    left:  list[EvaluatePortfolioPosition] = Field(min_length=1, max_length=_MAX_POSITIONS)
+    right: list[EvaluatePortfolioPosition] = Field(min_length=1, max_length=_MAX_POSITIONS)
+
+
+# ---------------------------------------------------------------------------
+# Compare endpoint — private helpers
+# ---------------------------------------------------------------------------
+
+def _parse_and_validate_positions(
+    positions: list[EvaluatePortfolioPosition],
+    side: str,
+    request_id: object,
+) -> list[tuple[str, str, float]]:
+    """
+    Parse and validate one side of a compare request.
+    Raises HTTPException with "side" in detail on any failure.
+    Returns list of (symbol, exchange, weight) tuples.
+    """
+    parsed: list[tuple[str, str, float]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for pos in positions:
+        try:
+            s, ex = parse_symbol_exchange(pos.symbol_exchange)
+        except ValueError as ve:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "request_id": request_id,
+                    "error": "invalid_input",
+                    "side": side,
+                    "message": str(ve),
+                },
+            )
+
+        key = (s, ex)
+        if key in seen:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "request_id": request_id,
+                    "error": "duplicate_positions",
+                    "side": side,
+                    "message": f"Duplicate position in {side}: {s}-{ex}",
+                },
+            )
+        seen.add(key)
+
+        if pos.weight <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "request_id": request_id,
+                    "error": "invalid_weights",
+                    "side": side,
+                    "message": f"Weight for {s}-{ex} must be > 0, got {pos.weight}",
+                },
+            )
+
+        parsed.append((s, ex, pos.weight))
+
+    weight_sum = sum(w for _, _, w in parsed)
+    if not (1.0 - _WEIGHT_SUM_TOLERANCE <= weight_sum <= 1.0 + _WEIGHT_SUM_TOLERANCE):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "request_id": request_id,
+                "error": "invalid_weights",
+                "side": side,
+                "message": (
+                    f"Weights for {side} must sum to 1.0 (±{_WEIGHT_SUM_TOLERANCE}), "
+                    f"got {round(weight_sum, 6)}"
+                ),
+            },
+        )
+
+    return parsed
+
+
+def _evaluate_positions_helper(
+    parsed: list[tuple[str, str, float]],
+    sym_lookup: dict,
+    current_regime: str,
+    current_regime_score: float,
+) -> tuple[list[dict], list[dict]]:
+    """
+    Evaluate a parsed position list against a pre-fetched sym_lookup.
+    Returns (evaluated, internal):
+      evaluated — response-ready dicts, all positions including not-found
+      internal  — found positions only, with decision fields, for aggregation
+    """
+    evaluated: list[dict] = []
+    internal: list[dict] = []
+
+    for s, ex, weight in parsed:
+        row = sym_lookup.get((s, ex))
+        if row is None:
+            evaluated.append({
+                "symbol": s,
+                "exchange": ex,
+                "symbol_exchange": f"{s}-{ex}",
+                "weight": weight,
+                "trend": None,
+                "trend_cnt": None,
+                "mt_cnt": None,
+                "rsi": None,
+                "bias": None,
+                "confidence": None,
+                "decision_score": None,
+                "alignment": None,
+                "found": False,
+            })
+        else:
+            trend = row["trend"] or ""
+            trend_cnt = int(row["trend_cnt"] or 0)
+            mt_cnt = int(row["mt_cnt"] or 0)
+            rsi = int(row["rsi"] or 0)
+
+            sym_bias = decision_service.symbol_bias(trend)
+            sym_alignment = decision_service.alignment(sym_bias, current_regime)
+            bias_label = decision_service.compute_bias(sym_bias, sym_alignment)
+            confidence = decision_service.decision_confidence(
+                sym_alignment, sym_bias, trend_cnt, rsi, current_regime_score
+            )
+            d_score = decision_service.decision_score(
+                sym_alignment, sym_bias, trend_cnt, rsi, current_regime_score
+            )
+
+            evaluated.append({
+                "symbol": s,
+                "exchange": ex,
+                "symbol_exchange": f"{s}-{ex}",
+                "weight": weight,
+                "trend": trend,
+                "trend_cnt": trend_cnt,
+                "mt_cnt": mt_cnt,
+                "rsi": rsi,
+                "bias": bias_label,
+                "confidence": confidence,
+                "decision_score": d_score,
+                "alignment": sym_alignment,
+                "found": True,
+            })
+            internal.append({
+                "weight": weight,
+                "decision_score": d_score,
+                "sym_bias": sym_bias,
+                "alignment": sym_alignment,
+                "confidence": confidence,
+            })
+
+    return evaluated, internal
+
+
+def _build_portfolio_summary(
+    evaluated: list[dict],
+    internal: list[dict],
+    latest_wd: str,
+    current_regime: str,
+) -> dict:
+    """
+    Compute per-portfolio aggregates from an evaluated + internal pair.
+    Caller must ensure internal is non-empty before calling.
+    """
+    positions_missing = len(evaluated) - len(internal)
+    found_weight_sum = sum(item["weight"] for item in internal)
+
+    for item in internal:
+        item["norm_weight"] = item["weight"] / found_weight_sum
+
+    portfolio_score     = round(sum(item["norm_weight"] * item["decision_score"] for item in internal), 4)
+    portfolio_bias      = _agg_portfolio_bias(internal)
+    portfolio_confidence= _agg_portfolio_confidence(internal)
+    portfolio_alignment = _agg_portfolio_alignment(internal)
+
+    notes = _evaluation_notes(
+        positions_missing=positions_missing,
+        positions_total=len(evaluated),
+        found_weight_sum=found_weight_sum,
+        latest_wd=latest_wd,
+        portfolio_alignment=portfolio_alignment,
+        current_regime=current_regime,
+    )
+
+    return {
+        "positions":         evaluated,
+        "positions_found":   len(internal),
+        "positions_missing": positions_missing,
+        "effective_weight":  round(found_weight_sum, 4),
+        "portfolio_score":   portfolio_score,
+        "portfolio_bias":    portfolio_bias,
+        "portfolio_confidence": portfolio_confidence,
+        "portfolio_alignment":  portfolio_alignment,
+        "evaluation_notes":  notes,
+    }
+
+
+def _compare_summary(
+    left: dict,
+    right: dict,
+    left_parsed: list[tuple[str, str, float]],
+    right_parsed: list[tuple[str, str, float]],
+) -> dict:
+    """Build the comparison block from two portfolio summaries."""
+    left_score  = left["portfolio_score"]
+    right_score = right["portfolio_score"]
+    score_delta = round(left_score - right_score, 4)
+
+    # score_advantage — raw direction only
+    score_advantage = (
+        "left"  if left_score > right_score else
+        "right" if right_score > left_score else
+        "tie"
+    )
+
+    # alignment_advantage
+    la = _ALIGN_RANK[left["portfolio_alignment"]]
+    ra = _ALIGN_RANK[right["portfolio_alignment"]]
+    alignment_advantage = "left" if la > ra else "right" if ra > la else "tie"
+
+    # confidence_advantage
+    lc = _CONF_RANK[left["portfolio_confidence"]]
+    rc = _CONF_RANK[right["portfolio_confidence"]]
+    confidence_advantage = "left" if lc > rc else "right" if rc > lc else "tie"
+
+    # winner — score first, alignment tiebreak
+    if abs(score_delta) >= _TIE_THRESHOLD:
+        winner = "left" if score_delta > 0 else "right"
+    elif alignment_advantage != "tie":
+        winner = alignment_advantage
+    else:
+        winner = "tie"
+
+    effective_weight_delta = round(left["effective_weight"] - right["effective_weight"], 4)
+
+    # overlap — submitted positions (all, not only found)
+    left_keys  = {(s, ex) for s, ex, _ in left_parsed}
+    right_keys = {(s, ex) for s, ex, _ in right_parsed}
+    overlap_symbols = sorted(f"{s}-{ex}" for s, ex in left_keys & right_keys)
+
+    return {
+        "winner":                winner,
+        "score_delta":           score_delta,
+        "score_advantage":       score_advantage,
+        "alignment_advantage":   alignment_advantage,
+        "confidence_advantage":  confidence_advantage,
+        "effective_weight_delta": effective_weight_delta,
+        "overlap_count":         len(overlap_symbols),
+        "overlap_symbols":       overlap_symbols,
+    }
+
+
+def _build_comparison_notes(
+    winner: str,
+    score_delta: float,
+    left: dict,
+    right: dict,
+    overlap_count: int,
+    overlap_symbols: list[str],
+    current_regime: str,
+) -> list[str]:
+    notes: list[str] = []
+
+    left_score  = left["portfolio_score"]
+    right_score = right["portfolio_score"]
+    abs_delta   = abs(score_delta)
+
+    if abs_delta < _TIE_THRESHOLD:
+        notes.append(
+            f"Scores within tie threshold: left {left_score} vs right {right_score}"
+        )
+    elif score_delta > 0:
+        notes.append(
+            f"Left scores {abs_delta:.4f} higher than right ({left_score} vs {right_score})"
+        )
+    else:
+        notes.append(
+            f"Right scores {abs_delta:.4f} higher than left ({right_score} vs {left_score})"
+        )
+
+    left_align  = left["portfolio_alignment"]
+    right_align = right["portfolio_alignment"]
+    if left_align != right_align:
+        better = "left" if _ALIGN_RANK[left_align] > _ALIGN_RANK[right_align] else "right"
+        notes.append(
+            f"Left alignment: {left_align} vs right alignment: {right_align} "
+            f"— {better} is better aligned with current {current_regime} regime"
+        )
+    else:
+        notes.append(
+            f"Both portfolios share {left_align} alignment with current {current_regime} regime"
+        )
+
+    if overlap_count > 0:
+        notes.append(
+            f"{overlap_count} position(s) overlap between portfolios: {', '.join(overlap_symbols)}"
+        )
+    else:
+        notes.append("No overlapping positions between portfolios")
+
+    if left["positions_missing"] > 0:
+        notes.append(
+            f"Left: {left['positions_missing']} position(s) not found "
+            f"— effective weight {left['effective_weight']}"
+        )
+    if right["positions_missing"] > 0:
+        notes.append(
+            f"Right: {right['positions_missing']} position(s) not found "
+            f"— effective weight {right['effective_weight']}"
+        )
+
+    return notes
+
+
+# ---------------------------------------------------------------------------
+# Compare endpoint — handler
+# ---------------------------------------------------------------------------
+
+@router.post(
+    "/compare",
+    summary="Compare two user-supplied portfolios",
+    description=(
+        "Accepts two portfolios (left and right) and evaluates both using the same "
+        "decision scoring and regime logic as /portfolio/evaluate. "
+        "Both portfolios share one DB round-trip: weekdates, regime aggregation, "
+        "and a combined symbol lookup for the union of all submitted positions. "
+        "Returns per-portfolio results in the /portfolio/evaluate shape, plus a "
+        "structured comparison block and comparison notes. "
+        "Pricing rule: portfolio_compare (1.25 STC per call)."
+    ),
+)
+def compare_portfolios(body: ComparePortfolioRequest, request: Request):
+    request_id = getattr(request.state, "request_id", None)
+
+    # --- Step 1: Parse and validate both sides before any DB access ---
+    left_parsed  = _parse_and_validate_positions(body.left,  "left",  request_id)
+    right_parsed = _parse_and_validate_positions(body.right, "right", request_id)
+
+    engine = get_engine()
+
+    with engine.connect() as conn:
+
+        # --- Query 1: Resolve most recent 5 weekdates ---
+        weekdate_rows = conn.execute(
+            text(
+                """
+                SELECT DISTINCT weekdate
+                FROM st_data
+                WHERE type = 'CS'
+                ORDER BY weekdate DESC
+                LIMIT :limit
+                """
+            ),
+            {"limit": _FORECAST_LOOKBACK},
+        ).mappings().all()
+
+        weekdates = [r["weekdate"] for r in weekdate_rows if r["weekdate"]]
+        if not weekdates:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "request_id": request_id,
+                    "error": "no_signal_data",
+                    "message": "No weekdates available in st_data.",
+                },
+            )
+
+        latest_wd = weekdates[0]
+
+        # --- Query 2: Shared regime aggregation ---
+        # Placeholders built from DB-returned date objects — no user input in SQL
+        week_binds = {f"w{i}": wd for i, wd in enumerate(weekdates)}
+        week_placeholders = ", ".join(f":w{i}" for i in range(len(weekdates)))
+        agg_rows = conn.execute(
+            text(
+                f"""
+                SELECT
+                    weekdate,
+                    trend,
+                    COUNT(*) AS cnt
+                FROM st_data
+                WHERE weekdate IN ({week_placeholders})
+                  AND type = 'CS'
+                GROUP BY weekdate, trend
+                ORDER BY weekdate DESC, trend
+                """
+            ),
+            week_binds,
+        ).mappings().all()
+
+        # --- Query 3: Combined batch symbol lookup for left ∪ right ---
+        # Sorted for deterministic bind ordering — no user input in SQL structure
+        all_pairs = sorted(
+            {(s, ex) for s, ex, _ in left_parsed} | {(s, ex) for s, ex, _ in right_parsed}
+        )
+        or_parts = " OR ".join(
+            f"(symbol = :s{i} AND exchange = :e{i})"
+            for i in range(len(all_pairs))
+        )
+        sym_binds: dict = {"latest_wd": latest_wd}
+        for i, (s, ex) in enumerate(all_pairs):
+            sym_binds[f"s{i}"] = s
+            sym_binds[f"e{i}"] = ex
+
+        sym_rows = conn.execute(
+            text(
+                f"""
+                SELECT
+                    symbol,
+                    exchange,
+                    trend,
+                    trend_cnt,
+                    mt_cnt,
+                    rsi,
+                    weekdate
+                FROM st_data
+                WHERE weekdate = :latest_wd
+                  AND type = 'CS'
+                  AND ({or_parts})
+                """
+            ),
+            sym_binds,
+        ).mappings().all()
+
+    sym_lookup: dict[tuple[str, str], object] = {
+        (r["symbol"], r["exchange"]): r for r in sym_rows
+    }
+
+    # --- Compute shared regime context ---
+    scores_by_week = regime_service.compute_scores_by_week(weekdates, agg_rows)
+    if not scores_by_week:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "request_id": request_id,
+                "error": "no_signal_data",
+                "message": "Cannot compute regime score for the resolved weekdates.",
+            },
+        )
+
+    forecast = regime_service.compute_forecast_signals(scores_by_week)
+    regime_scores = [s_val for _, s_val in scores_by_week]
+    _, current_regime_score = scores_by_week[0]
+    current_regime   = regime_service.classify_regime(current_regime_score)
+    regime_confidence = regime_service.classify_confidence(current_regime_score)
+
+    consistency_count = sum(
+        1 for sv in regime_scores if regime_service.classify_regime(sv) == current_regime
+    )
+    consistency_pct = consistency_count / len(regime_scores)
+    fc_confidence = regime_service.forecast_confidence(
+        consistency_pct, current_regime_score, forecast["avg_delta"]
+    )
+
+    # --- Evaluate both sides in-process ---
+    left_evaluated,  left_internal  = _evaluate_positions_helper(
+        left_parsed,  sym_lookup, current_regime, current_regime_score
+    )
+    right_evaluated, right_internal = _evaluate_positions_helper(
+        right_parsed, sym_lookup, current_regime, current_regime_score
+    )
+
+    # --- Handle all-positions-missing cases ---
+    left_all_missing  = len(left_internal)  == 0
+    right_all_missing = len(right_internal) == 0
+
+    if left_all_missing and right_all_missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "request_id": request_id,
+                "error": "all_positions_missing_both",
+                "message": (
+                    f"No positions from either portfolio were found in st_data "
+                    f"for weekdate {latest_wd}."
+                ),
+            },
+        )
+    if left_all_missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "request_id": request_id,
+                "error": "all_positions_missing",
+                "side": "left",
+                "message": (
+                    f"None of the {len(left_parsed)} left positions were found "
+                    f"in st_data for weekdate {latest_wd}."
+                ),
+            },
+        )
+    if right_all_missing:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "request_id": request_id,
+                "error": "all_positions_missing",
+                "side": "right",
+                "message": (
+                    f"None of the {len(right_parsed)} right positions were found "
+                    f"in st_data for weekdate {latest_wd}."
+                ),
+            },
+        )
+
+    # --- Build per-portfolio summaries ---
+    latest_wd_str = str(latest_wd)
+    left_summary  = _build_portfolio_summary(left_evaluated,  left_internal,  latest_wd_str, current_regime)
+    right_summary = _build_portfolio_summary(right_evaluated, right_internal, latest_wd_str, current_regime)
+
+    # --- Build comparison and notes ---
+    comparison = _compare_summary(left_summary, right_summary, left_parsed, right_parsed)
+    notes = _build_comparison_notes(
+        winner=comparison["winner"],
+        score_delta=comparison["score_delta"],
+        left=left_summary,
+        right=right_summary,
+        overlap_count=comparison["overlap_count"],
+        overlap_symbols=comparison["overlap_symbols"],
+        current_regime=current_regime,
+    )
+
+    return {
+        "request_id": request_id,
+        "weekdate":   latest_wd_str,
+        "left":       left_summary,
+        "right":      right_summary,
+        "comparison": comparison,
+        "regime_context": {
+            "current_regime":    current_regime,
+            "regime_score":      round(current_regime_score, 4),
+            "regime_confidence": regime_confidence,
+            "forecast_regime":   forecast["forecast_regime"],
+            "forecast_confidence": fc_confidence,
+            "recent_direction":  forecast["recent_direction"],
+            "regime_consistency": round(consistency_pct, 4),
+            "weeks_analyzed":    len(scores_by_week),
+        },
+        "comparison_notes": notes,
+    }
