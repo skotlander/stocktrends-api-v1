@@ -152,6 +152,44 @@ def apply_pricing_headers(response, pricing_rule_id: str | None, payment_require
     response.headers["X-StockTrends-Accepted-Payment-Methods"] = accepted_methods
 
 
+def _apply_quota_headers(response, request: Request, decision) -> None:
+    """
+    Inject subscription quota headers onto metered subscription responses.
+
+    Conditions for injection:
+    - is_metered = 1  (not a free/non-metered path)
+    - access_granted = True  (denied responses never receive quota headers)
+    - econ_payment_required = 0  (subscription callers only; x402 has no quota semantics)
+    - request.state.quota_limit is not None  (monthly_quota fetched from api_plans)
+
+    Phase 1 (this implementation):
+    - X-StockTrends-Quota-Limit: monthly_quota from api_plans (available now)
+    - X-StockTrends-Quota-Period: "monthly" (static)
+
+    Deferred to Phase 2 (requires current_period_start confirmed in stocktrends-api-control):
+    - X-StockTrends-Quota-Remaining  (requires usage COUNT query against api_request_logs + caching)
+    - X-StockTrends-Quota-Reset      (requires current billing period boundary datetime)
+    """
+    if not (
+        decision.is_metered
+        and decision.access_granted
+        and decision.econ_payment_required == 0
+    ):
+        return
+
+    quota_limit = getattr(request.state, "quota_limit", None)
+    if quota_limit is None:
+        # monthly_quota not available on this request (e.g. agent-pay, free-metered).
+        # TODO Phase 2: wire usage COUNT query once current_period_start is confirmed.
+        return
+
+    response.headers["X-StockTrends-Quota-Limit"] = str(quota_limit)
+    response.headers["X-StockTrends-Quota-Period"] = "monthly"
+    # X-StockTrends-Quota-Remaining: deferred — requires COUNT(is_billable=1)
+    #   per subscription_id in current billing period, with in-process TTL cache.
+    # X-StockTrends-Quota-Reset: deferred — requires api_subscriptions.current_period_start.
+
+
 def should_log_economics(decision) -> bool:
     return bool(decision.econ_pricing_rule_id)
 
@@ -1756,6 +1794,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     response.headers["PAYMENT-RESPONSE"] = encode_payment_response_header(
                         request.state.x402_payment_response,
                     )
+
+                _apply_quota_headers(response, request, decision)
 
             event = build_request_event(
                 request_id=request_id,
