@@ -236,10 +236,14 @@ def construct_portfolio(body: ConstructPortfolioRequest, request: Request):
             "pool_size": _CANDIDATE_POOL_SIZE,
             **trend_binds,
         }
-        exchange_clause = ""
+        # Exchange filter: explicit exchange overrides the US-market default.
+        # Default (no exchange): restrict to US-listed exchanges (N, Q, A).
+        # type = 'CS' already excludes non-tradable instrument types.
         if norm_exchange:
             exchange_clause = "AND exchange = :exchange"
             candidate_params["exchange"] = norm_exchange
+        else:
+            exchange_clause = "AND exchange IN ('N', 'Q', 'A')"
 
         candidate_rows = conn.execute(
             text(
