@@ -48,6 +48,10 @@ NON_METERED_PATHS = {
     "/health",
     "/favicon.ico",
     "/v1/pricing",
+    # Workflow catalog: public discovery surface, no metering.
+    "/v1/workflows",
+    # Cost estimation: authenticated but non-metered; no usage charge for planning calls.
+    "/v1/cost-estimate",
 }
 
 # Non-API probe/scanner traffic that should never be treated as billable API usage.
