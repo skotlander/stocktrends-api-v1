@@ -169,6 +169,13 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
                 allowed_rails=("subscription", "x402", "mpp"),
                 pricing_rule_id="portfolio_evaluate",
             ),
+            EndpointPaymentPolicy(
+                endpoint_id="portfolio_compare",
+                path_pattern="/v1/portfolio/compare",
+                method="POST",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="portfolio_compare",
+            ),
         ),
         free_metered_paths=(
             "/v1/ai/context",
