@@ -142,11 +142,11 @@ WORKFLOW_REGISTRY: list[dict] = [
         ],
     },
     {
-        "workflow_id": "portfolio_rebalance",
-        "name": "Portfolio Rebalance Review",
+        "workflow_id": "portfolio_compare_review",
+        "name": "Portfolio Compare Review",
         "description": (
-            "Evaluate an existing portfolio, construct a proposed rebalanced version, "
-            "then compare the two portfolios to quantify the impact of the rebalance."
+            "Evaluate an existing portfolio, construct a proposed alternative, "
+            "then compare the two portfolios to quantify the difference."
         ),
         "tags": ["agent", "portfolio"],
         "supported_rails": ["subscription", "x402"],
@@ -162,14 +162,14 @@ WORKFLOW_REGISTRY: list[dict] = [
                 "step_id": "construct_proposed",
                 "endpoint": "POST /v1/portfolio/construct",
                 "pricing_rule_id": "portfolio_construct",
-                "description": "Construct the proposed rebalanced portfolio.",
+                "description": "Construct the proposed alternative portfolio.",
                 "optional": False,
             },
             {
                 "step_id": "compare_portfolios",
                 "endpoint": "POST /v1/portfolio/compare",
                 "pricing_rule_id": "portfolio_compare",
-                "description": "Compare current and proposed portfolios to quantify rebalance impact.",
+                "description": "Compare current and proposed portfolios to quantify the difference.",
                 "optional": False,
             },
         ],
