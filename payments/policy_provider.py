@@ -194,7 +194,7 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
         ),
         enforcement_path_prefixes=_parse_csv_env(
             "AGENT_PAY_ENFORCE_PATH_PREFIXES",
-            "/v1/stim",
+            "/v1/stim,/v1/agent/screener,/v1/market,/v1/decision,/v1/portfolio",
         ),
         accepted_payment_methods_agent_required_default="mpp,x402,crypto",
         accepted_payment_methods_agent_required_by_method={

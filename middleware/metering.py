@@ -167,7 +167,17 @@ def normalize_workflow_type(auth_mode: str | None, agent_identifier: str | None)
 
 
 def is_billable_request(decision) -> int:
-    return 1 if decision.log_pricing_rule_id in {"default_subscription", "agent_pay_required"} else 0
+    # A request is billable (i.e. counts against subscription quota OR is
+    # directly payable via an agent-pay rail) when it is metered AND access
+    # was granted.  Denied requests and free/free-metered paths are never
+    # billable.  This replaces the old rule-name allowlist, which produced
+    # false-positives for denied calls and false-negatives for agent-pay
+    # calls carrying a specific endpoint pricing_rule_id.
+    if not decision.is_metered or not decision.access_granted:
+        return 0
+    if decision.log_pricing_rule_id in {"default_free", "default_free_metered"}:
+        return 0
+    return 1
 
 
 def safe_decimal(value, default: str = "0"):
@@ -857,6 +867,12 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
         economic_rule_name = decision.econ_pricing_rule_id or decision.log_pricing_rule_id
         unit_price_usd, billed_amount_usd, stc_cost = resolve_economic_amounts(economic_rule_name)
+        # Subscription and other quota-based callers are not billed per-request.
+        # Zero billed_amount so the economics log never implies a charge that
+        # wasn't collected.  stc_cost is preserved — it is the STC-equivalent
+        # value used for analytics and future control-plane intelligence.
+        if decision.econ_payment_required == 0:
+            billed_amount_usd = Decimal("0")
         workflow_type = normalize_workflow_type(auth_mode, agent_identifier)
         resolved_payment_method = payment_method_header or decision.log_payment_method
         payment_rail = resolve_payment_rail(
