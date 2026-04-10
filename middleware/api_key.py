@@ -58,6 +58,9 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/v1/openapi.json",
             "/health",
             "/v1/pricing",
+            # Workflow catalog is public discovery — no auth required.
+            # /v1/cost-estimate is intentionally NOT here: it requires auth.
+            "/v1/workflows",
         }
 
         self.public_prefixes = [
@@ -79,12 +82,14 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         request.state.plan_code = None
         request.state.auth_mode = "agent_pay"
         request.state.actor_type = "external_customer"
+        request.state.quota_limit = None
         request.state.auth_context = SimpleNamespace(
             api_key_id=None,
             customer_id=None,
             subscription_id=None,
             plan_code=None,
             actor_type="external_customer",
+            quota_limit=None,
         )
 
     def _authenticate_api_key(self, path: str, raw_key: str) -> tuple[bool, dict]:
@@ -103,7 +108,8 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                         k.revoked_at,
                         s.status AS subscription_status,
                         p.code AS plan_code,
-                        p.active AS plan_active
+                        p.active AS plan_active,
+                        p.monthly_quota
                     FROM api_keys k
                     LEFT JOIN api_subscriptions s
                         ON k.subscription_id = s.id
@@ -127,6 +133,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             subscription_status = result[5]
             plan_code = result[6]
             plan_active = result[7]
+            monthly_quota = result[8]
 
             if key_status != "active" or revoked_at is not None:
                 return False, {"detail": "API key inactive", "status_code": 403}
@@ -169,6 +176,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
                 "subscription_id": subscription_id,
                 "plan_code": plan_code,
                 "actor_type": "external_customer",
+                "monthly_quota": monthly_quota,
             }
 
     def _apply_auth_context(self, request: Request, auth: dict) -> None:
@@ -178,12 +186,14 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         request.state.plan_code = auth["plan_code"]
         request.state.auth_mode = "api_key"
         request.state.actor_type = auth["actor_type"]
+        request.state.quota_limit = auth.get("monthly_quota")
         request.state.auth_context = SimpleNamespace(
             api_key_id=auth["api_key_id"],
             customer_id=auth["customer_id"],
             subscription_id=auth["subscription_id"],
             plan_code=auth["plan_code"],
             actor_type=auth["actor_type"],
+            quota_limit=auth.get("monthly_quota"),
         )
 
     def _log_auth_failure(self, request: Request, *, status_code: int, error_code: str, notes: str | None) -> None:
@@ -207,6 +217,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         request.state.customer_id = None
         request.state.subscription_id = None
         request.state.plan_code = None
+        request.state.quota_limit = None
 
         # Public routes
         if path in self.public_paths or any(path.startswith(prefix) for prefix in self.public_prefixes):
