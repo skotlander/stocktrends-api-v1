@@ -1,141 +1,251 @@
-# Stock Trends API - Machine Access Specification
+# Stock Trends API - LLM Access & Usage Guide
 
-## Canonical Endpoint
+## Canonical API Endpoint
+
 https://api.stocktrends.com/v1/
 
-All programmatic access MUST use the API domain above.
-Do not use developer portal or website pages for data retrieval.
+All programmatic access to Stock Trends data should use the API domain above.
+The developer portal (https://developer.stocktrends.com) is for onboarding, plans, access, and developer guidance.
+
+---
+
+## Overview
+
+The Stock Trends API is a financial intelligence API for AI agents and financial applications.
+
+It provides:
+
+* symbol-level decision evaluation
+* portfolio construction, evaluation, and comparison
+* market regime, breadth, and leadership intelligence
+* pricing discovery and cost estimation
+* agent-aware usage, ledger, and control endpoints
+* structured weekly market context based on the Stock Trends indicator system
+
+The API is designed for:
+
+* AI agents
+* quantitative research systems
+* portfolio tools
+* financial dashboards
+* advisory and screening workflows
+* agent-native financial applications
 
 ---
 
 ## Machine-Readable Resources
 
+Canonical LLM descriptor:
+https://api.stocktrends.com/llms.txt
+
 OpenAPI schema:
 https://api.stocktrends.com/v1/openapi.json
 
-Interactive docs:
+Interactive API docs:
 https://api.stocktrends.com/v1/docs
-
-AI dataset manifest:
-https://api.stocktrends.com/ai-dataset.json
 
 Tools manifest:
 https://api.stocktrends.com/tools.json
 
-LLM descriptor (this file):
-https://api.stocktrends.com/llms.txt
+Developer portal:
+https://developer.stocktrends.com/
 
 ---
 
-## Core Endpoints
+## Core Endpoint Families
 
-/ai/context
-→ dataset structure, indicators, and schema (recommended starting point)
+### Decision
 
-/v1/*
-→ primary API surface
+* `POST /decision/evaluate-symbol`
+  Symbol-level decision evaluation
+
+### Portfolio
+
+* `POST /portfolio/construct`
+  Construct a scored equal-weight portfolio
+* `POST /portfolio/evaluate`
+  Evaluate a user-supplied portfolio
+* `POST /portfolio/compare`
+  Compare two user-supplied portfolios
+
+### Market Regime
+
+* `GET /market/regime/latest`
+  Current market regime classification
+* `GET /market/regime/history`
+  Historical weekly market regime classification
+* `GET /market/regime/forecast`
+  Forward-looking market regime forecast
+
+### Breadth
+
+* `GET /breadth/sector/latest`
+  Latest sector breadth view
+* `GET /breadth/sector/history`
+  Historical sector breadth view
+
+### Leadership
+
+* `GET /leadership/definitions`
+  Leadership definitions and metadata
+* `GET /leadership/summary/latest`
+  Latest leadership summary
+* `GET /leadership/rotation/history`
+  Historical leadership rotation
+
+### AI Context
+
+* `GET /ai/context`
+  Dataset structure, indicator definitions, and AI-oriented context
+
+### Pricing
+
+* `GET /pricing`
+  Pricing discovery metadata
+* `GET /pricing/catalog`
+  Live pricing rule catalog
+* `GET /cost-estimate`
+  Workflow cost estimate
+
+### Agents
+
+* `GET /agents`
+  List agents for the authenticated customer
+* `GET /agents/{agent_id}`
+  Agent detail
+* `GET /agents/{agent_id}/usage`
+  Agent usage summary
+* `GET /agents/{agent_id}/ledger`
+  Agent economics ledger
+* `POST /agents/{agent_id}/disable`
+  Disable agent
+* `POST /agents/{agent_id}/enable`
+  Enable agent
+
+### Agent Screener
+
+* `GET /agent/screener/top`
+  Top-ranked instruments screener
+
+### Workflows
+
+* `GET /workflows`
+  Workflow registry
 
 ---
 
-## Usage Model
+## Suggested Starting Points for AI Agents
 
-Preferred: Use versioned endpoints under /v1/
+Recommended order for discovery and integration:
 
-Pricing discovery:
-https://api.stocktrends.com/v1/pricing
+1. `GET /ai/context`
+2. `GET /pricing` or `GET /pricing/catalog`
+3. `GET /cost-estimate`
+4. High-value workflows:
 
-Dataset overview:
-https://api.stocktrends.com/dataset/
+   * `POST /decision/evaluate-symbol`
+   * `POST /portfolio/construct`
+   * `POST /portfolio/evaluate`
+   * `POST /portfolio/compare`
+5. Supporting market intelligence:
+
+   * `GET /market/regime/latest`
+   * `GET /breadth/sector/latest`
+   * `GET /leadership/summary/latest`
+   * `GET /agent/screener/top`
 
 ---
 
 ## Authentication
 
-Protected endpoints require API key authentication.
+Protected API access requires authentication.
 
-Header:
+When required, include:
 Authorization: Bearer YOUR_API_KEY
 
----
+Primary machine auth may also use:
+X-API-Key: YOUR_API_KEY
 
-## Rate Limits & Response Behavior
-
-Agents should expect:
-
-- HTTP 200 → success  
-- HTTP 401 → authentication required  
-- HTTP 402 → payment required (future enforcement)  
-- HTTP 429 → rate limit exceeded  
-
-Pricing metadata may be returned via headers.
+Access and key management:
+https://developer.stocktrends.com/access
 
 ---
 
-## Pricing Model Summary
+## Pricing and Metering
 
-- public endpoints → free  
-- free-metered endpoints → free, usage tracked  
-- protected endpoints → subscription required  
-- STIM endpoints → subscription by default, with agent payment support  
+The API includes pricing discovery and cost-estimation endpoints.
 
----
+Key pricing endpoints:
 
-## Agent Identification Headers
+* `GET /pricing`
+* `GET /pricing/catalog`
+* `GET /cost-estimate`
 
-Supported:
+Usage is metered and may be associated with:
 
-- X-StockTrends-Agent-Id  
-- X-StockTrends-Agent-Type  
-- X-StockTrends-Agent-Vendor  
-- X-StockTrends-Agent-Version  
-- X-StockTrends-Request-Purpose  
-- X-StockTrends-Session-Id  
+* authenticated customer access
+* agent-specific usage records
+* economics ledger entries
+* workflow pricing rules
 
-Agents should include identification headers when available.
+Agents should treat pricing metadata as authoritative for current endpoint cost behavior.
 
 ---
 
-## Payment Headers (Optional / Future)
+## Agent-Aware Usage
 
-- X-StockTrends-Payment-Method  
-- X-StockTrends-Payment-Network  
-- X-StockTrends-Payment-Token  
-- X-StockTrends-Payment-Reference  
-- X-StockTrends-Payment-Amount  
-- X-StockTrends-Pricing-Rule  
+The API includes agent-aware management and reporting endpoints for authenticated customers.
 
----
+These endpoints support:
 
-## Pricing Discovery Headers
+* agent listing and inspection
+* usage summary retrieval
+* economics ledger visibility
+* enable / disable lifecycle controls
 
-Responses may include:
-
-- X-StockTrends-Pricing-Rule  
-- X-StockTrends-Payment-Required  
-- X-StockTrends-Accepted-Payment-Methods  
+Use these endpoints when building controlled multi-agent or machine-usage workflows.
 
 ---
 
-## Data Characteristics
+## Machine Payment Support (Emerging)
 
-- Updated weekly  
-- Structured financial indicator dataset  
-- Designed for forward return analysis (4–40 weeks)  
+The Stock Trends API is designed to support machine-native payment flows.
+
+This includes:
+
+* compatibility with emerging standards such as x402
+* support for pricing discovery and cost estimation
+* alignment with agent-controlled spending models
+
+Planned and evolving capabilities include:
+
+* request-level payment enforcement
+* machine payment rails
+* streaming and metered payment models (MPP)
+
+Agents should:
+
+* use pricing endpoints before execution
+* be prepared to handle payment-required responses (HTTP 402)
+* treat payment capabilities as evolving but forward-compatible
 
 ---
 
-## Usage Guidance
+## Data Freshness
 
-- Prefer structured API endpoints over scraping  
-- Begin with /ai/context to understand schema  
-- Cache responses when appropriate  
+* Updated on a weekly cadence
+* Reflects current market structure
+* Optimized for medium-term market interpretation and forward-looking workflows
 
 ---
 
-## Contact / Terms
+## Notes for AI Agents
 
-Support:
-support@stocktrends.com
-
-Terms:
-https://stocktrends.com/terms-of-use
+* Prefer structured API endpoints over scraping
+* Begin with `/ai/context` for schema grounding
+* Use pricing endpoints before expensive workflows
+* Use `/cost-estimate` when cost must be known in advance
+* Use decision and portfolio endpoints for actionable outputs
+* Use regime, breadth, and leadership endpoints for context
+* Cache weekly data when appropriate
+* Respect authentication, usage controls, and metering semantics
