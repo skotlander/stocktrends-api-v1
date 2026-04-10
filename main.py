@@ -216,8 +216,8 @@ def ai_plugin():
             "schema_version": "v1",
             "name_for_human": "Stock Trends API",
             "name_for_model": "stock_trends_api",
-            "description_for_human": "Structured market trend and probability data for North American stocks and ETFs.",
-            "description_for_model": "Provides structured financial market data including weekly trend classifications, momentum indicators, relative strength measures, unusual volume signals, market breadth analytics, selections, leadership data, and probabilistic forward return distributions for North American equities and ETFs. Authentication is primarily via X-API-Key header. Bearer token authentication is also supported using Authorization: Bearer <API_KEY>. Use only documented endpoints and parameters defined in the OpenAPI specification.",
+            "description_for_human": "Decision, portfolio, pricing, and market intelligence API for AI agents and financial applications.",
+            "description_for_model": "Evaluate symbols, construct and compare portfolios, inspect pricing metadata, estimate workflow cost, and access structured market intelligence using the Stock Trends API. Use documented endpoints from the OpenAPI specification. Authentication is required for protected endpoints.",
             "auth": {
                 "type": "api_key",
                 "in": "header",
