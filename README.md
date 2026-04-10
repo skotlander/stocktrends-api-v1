@@ -23,7 +23,7 @@ It is:
 
 ### 1. Make your first request
 
-```bash
+```bash id="pwbpb8"
 curl -X POST https://api.stocktrends.com/v1/decision/evaluate_symbol \
   -H "Content-Type: application/json" \
   -d '{
@@ -36,7 +36,7 @@ curl -X POST https://api.stocktrends.com/v1/decision/evaluate_symbol \
 
 ### 2. Example Response
 
-```json
+```json id="57obtf"
 {
   "symbol": "AAPL",
   "decision": "OUTPERFORM",
@@ -59,17 +59,55 @@ curl -X POST https://api.stocktrends.com/v1/decision/evaluate_symbol \
 
 ---
 
+## 💵 Pricing (STC → USD)
+
+STC (Stock Trends Credits) is the **unified pricing unit** of the API.
+
+To make pricing clear and predictable:
+
+👉 **1 STC ≈ $0.01 USD**
+
+This means:
+
+* 10 STC ≈ $0.10
+* 100 STC ≈ $1.00
+
+---
+
+### Example Endpoint Costs
+
+| Endpoint                                | STC Cost | Approx USD   |
+| --------------------------------------- | -------- | ------------ |
+| Evaluate Symbol                         | 10 STC   | ~$0.10       |
+| Evaluate Portfolio                      | 50 STC   | ~$0.50       |
+| Construct Portfolio                     | 25 STC   | ~$0.25       |
+| Market Data (stim, breadth, leadership) | 1–5 STC  | ~$0.01–$0.05 |
+
+---
+
+### How Payment Works
+
+* **Subscription (Stripe)**
+  Purchase STC in advance
+  Example: $50 → 5000 STC
+
+* **x402 (Agent Payments)**
+  Pay per request automatically
+  No account required
+
+---
+
+👉 Pricing is enforced in STC, but value is anchored to USD for transparency
+
+---
+
 ## 💡 Core Concepts
 
 ### STC (Stock Trends Credits)
 
-All API usage is priced in:
-
-→ **STC (Stock Trends Credits)**
-
 * endpoints map to STC cost
+* pricing is defined once (STC)
 * payment rails convert value → STC
-* pricing is independent of payment method
 
 ---
 
@@ -78,18 +116,12 @@ All API usage is priced in:
 Supported:
 
 * **Subscription (Stripe)**
-  prepaid STC allocation
-
-* **x402**
-  per-request agent payments
+* **x402 (per-request payments)**
 
 Planned:
 
 * **MPP (Machine Payments Protocol)**
-  session-based payments
-
-* **STOK token**
-  discount and incentive layer
+* **STOK token (discount + incentive layer)**
 
 ---
 
@@ -99,11 +131,11 @@ Planned:
 
 #### Evaluate a Symbol
 
-```
+```id="4u406s"
 POST /v1/decision/evaluate_symbol
 ```
 
-```json
+```json id="k1obzf"
 {
   "symbol": "AAPL",
   "exchange": "NASDAQ"
@@ -114,11 +146,11 @@ POST /v1/decision/evaluate_symbol
 
 #### Evaluate a Portfolio
 
-```
+```id="gznjct"
 POST /v1/portfolio/evaluate
 ```
 
-```json
+```json id="feof8n"
 {
   "symbols": [
     {"symbol": "AAPL", "exchange": "NASDAQ"},
@@ -131,7 +163,7 @@ POST /v1/portfolio/evaluate
 
 #### Construct a Portfolio
 
-```
+```id="egzgde"
 POST /v1/portfolio/construct
 ```
 
@@ -151,7 +183,7 @@ POST /v1/portfolio/construct
 
 Estimate request cost before execution:
 
-```
+```id="wtzzt6"
 GET /v1/cost-estimate
 ```
 
@@ -263,13 +295,13 @@ Defines execution behavior for Claude Code:
 
 ### 1. Install dependencies
 
-```bash
+```bash id="1yxmwa"
 pip install -r requirements.txt
 ```
 
 ### 2. Run the API
 
-```bash
+```bash id="1e1uio"
 python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 
