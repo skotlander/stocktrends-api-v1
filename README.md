@@ -1,6 +1,6 @@
 # Stock Trends API
 
-## Overview
+## 🚀 Agent-Native Financial Intelligence API
 
 The Stock Trends API is a **financial data platform and agent-native monetization system** built on:
 
@@ -19,7 +19,47 @@ It is:
 
 ---
 
-## Core Concepts
+## ⚡ Quick Start (2 Minutes)
+
+### 1. Make your first request
+
+```bash
+curl -X POST https://api.stocktrends.com/v1/decision/evaluate_symbol \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "AAPL",
+    "exchange": "NASDAQ"
+  }'
+```
+
+---
+
+### 2. Example Response
+
+```json
+{
+  "symbol": "AAPL",
+  "decision": "OUTPERFORM",
+  "confidence": 0.62,
+  "time_horizon": "13-week"
+}
+```
+
+---
+
+### 3. Payment (Automatic)
+
+* If payment is required:
+
+  * API returns x402 payment request
+* Agents complete payment automatically
+* Request is fulfilled
+
+👉 No separate billing integration required
+
+---
+
+## 💡 Core Concepts
 
 ### STC (Stock Trends Credits)
 
@@ -38,26 +78,152 @@ All API usage is priced in:
 Supported:
 
 * **Subscription (Stripe)**
-
-  * prepaid STC allocation
+  prepaid STC allocation
 
 * **x402**
-
-  * per-request agent payments
+  per-request agent payments
 
 Planned:
 
 * **MPP (Machine Payments Protocol)**
-
-  * session-based payments
+  session-based payments
 
 * **STOK token**
-
-  * discount and incentive layer
+  discount and incentive layer
 
 ---
 
-## Documentation
+## 🧠 Key Endpoints
+
+### Decision Engine (High Value)
+
+#### Evaluate a Symbol
+
+```
+POST /v1/decision/evaluate_symbol
+```
+
+```json
+{
+  "symbol": "AAPL",
+  "exchange": "NASDAQ"
+}
+```
+
+---
+
+#### Evaluate a Portfolio
+
+```
+POST /v1/portfolio/evaluate
+```
+
+```json
+{
+  "symbols": [
+    {"symbol": "AAPL", "exchange": "NASDAQ"},
+    {"symbol": "MSFT", "exchange": "NASDAQ"}
+  ]
+}
+```
+
+---
+
+#### Construct a Portfolio
+
+```
+POST /v1/portfolio/construct
+```
+
+---
+
+### Market Intelligence
+
+* `/v1/stim/latest`
+* `/v1/leadership`
+* `/v1/breadth`
+* `/v1/selections`
+* `/v1/indicators`
+
+---
+
+## 📊 Cost Estimation
+
+Estimate request cost before execution:
+
+```
+GET /v1/cost-estimate
+```
+
+---
+
+## 📘 API Documentation (Swagger)
+
+👉 https://api.stocktrends.com/v1/docs
+
+Use the interactive docs to:
+
+* explore endpoints
+* test requests
+* view schemas
+
+---
+
+## 🤖 Designed for AI Agents
+
+This API is built for:
+
+* autonomous agents
+* trading systems
+* financial copilots
+* workflow automation
+
+Features:
+
+* machine-readable pricing
+* deterministic billing
+* stateless payments (x402)
+* predictable response structures
+
+---
+
+## 🧾 Request Lifecycle
+
+1. Request received
+2. Pricing evaluated (STC)
+3. Payment verified (if required)
+4. Request executed
+5. Usage logged + billed
+
+---
+
+## 🔥 What Makes This Different
+
+Most APIs:
+
+* charge subscriptions
+* separate billing from usage
+
+Stock Trends API:
+
+* **monetizes each request**
+* **native to AI agent workflows**
+* **unified pricing across payment rails**
+
+---
+
+## 📂 Repository Structure
+
+* `/routers` → API endpoints
+* `/pricing` → STC pricing logic
+* `/payments` → payment rails
+* `/metering` → request logging + billing
+* `/middleware` → enforcement layer
+* `/docs` → system design and strategy
+
+---
+
+## 📚 Documentation
 
 All system design and strategy lives in:
 
@@ -65,123 +231,76 @@ All system design and strategy lives in:
 
 ### Structure
 
-* `/docs/strategy/`
-
-  * system vision and pricing model
-
-* `/docs/architecture/`
-
-  * system design and request lifecycle
-
-* `/docs/operations/`
-
-  * policies, billing, and runbooks
+* `/docs/strategy/` → system vision and pricing
+* `/docs/architecture/` → request lifecycle and design
+* `/docs/operations/` → policies and billing
 
 ---
 
-## Key Files
+## 📄 Key Files
 
 ### `AGENTS.md`
 
-* defines strict system rules
-* MUST be followed by all AI agents
-* includes:
+Defines strict system rules for AI agents:
 
-  * STC pricing rules
-  * payment architecture
-  * logging requirements
+* pricing enforcement
+* payment behavior
+* logging requirements
 
 ---
 
 ### `CLAUDE.md`
 
-* defines execution behavior
-* automatically loaded into Claude Code
-* ensures:
+Defines execution behavior for Claude Code:
 
-  * alignment
-  * minimal changes
-  * correct implementation flow
+* implementation alignment
+* controlled change strategy
+* system consistency
 
 ---
 
-## Local Development
-
-### Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-## Local Development
+## 🛠 Local Development
 
 ### 1. Install dependencies
 
 ```bash
 pip install -r requirements.txt
-
 ```
+
 ### 2. Run the API
 
 ```bash
 python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
-
 ```
 
-### 3. Open API docs
+### 3. Open docs
 
 http://127.0.0.1:8000/v1/docs
 
 ---
 
-## API Version
+## 🧠 Design Principles
 
-`v1`
-
----
-
-## Major Endpoint Groups
-
-* `/instruments`
-* `/prices`
-* `/indicators`
-* `/stim`
-* `/selections`
-* `/stwr`
-* `/breadth`
-* `/leadership`
-
----
-
-## AI Agent Instructions
-
-Before making any changes:
-
-1. Read `AGENTS.md`
-2. Follow all pricing, payment, and logging rules
-3. Use `/docs` for system understanding
-
----
-
-## Design Principles
-
-* pricing is unified (STC)
+* pricing is defined once (STC)
 * payment rails are modular
 * logging is first-class
-* system must remain multi-rail compatible
-* future token integration must not break pricing
+* system is agent-first
+* token integration must not break pricing
 
 ---
 
-## Key Rule
+## ⚠️ AI Agent Rules
 
-Pricing is defined once (STC) and enforced everywhere.
+Before interacting with the system:
+
+1. Read `AGENTS.md`
+2. Follow pricing and payment rules
+3. Do not bypass billing logic
+4. Use documented endpoints
 
 ---
 
-## Status
+## 🧭 Status
 
 * STC pricing: active
 * subscription model: active
@@ -191,7 +310,7 @@ Pricing is defined once (STC) and enforced everywhere.
 
 ---
 
-## Final Note
+## 📣 Final Note
 
 This repository represents a **programmable financial layer for data access**, designed for:
 
@@ -200,3 +319,5 @@ This repository represents a **programmable financial layer for data access**, d
 * automated systems
 
 ---
+
+👉 Start building. Start querying. Start monetizing intelligence.
