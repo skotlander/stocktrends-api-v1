@@ -54,8 +54,10 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/robots.txt",
             "/docs",
             "/v1/docs",
+            "/v1/docs/",
             "/openapi.json",
             "/v1/openapi.json",
+            "/v1/openapi.js",
             "/health",
             "/v1/pricing",
             # Workflow catalog is public discovery — no auth required.
@@ -66,6 +68,8 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         self.public_prefixes = [
             "/dataset/",
             "/.well-known/",
+            # Swagger UI sub-paths (oauth2-redirect, etc.) are public doc assets.
+            "/v1/docs/",
         ]
 
     def _is_agent_pay_candidate(self, request: Request) -> bool:
