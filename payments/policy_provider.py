@@ -181,12 +181,11 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
             "/v1/ai/context",
             "/v1/breadth/sector/latest",
         ),
+        # Prefix-based agent-pay scope is intentionally limited to /v1/stim.
+        # Newer premium routes (/v1/agent/screener/*, /v1/market/*, etc.) are
+        # governed by exact endpoint_payment_policies above, not by prefix matching.
         agent_pay_path_prefixes=(
             "/v1/stim",
-            "/v1/agent/screener",
-            "/v1/market",
-            "/v1/decision",
-            "/v1/portfolio",
         ),
         agent_pay_auth_bypass_methods=(
             "mpp",
@@ -194,7 +193,7 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
         ),
         enforcement_path_prefixes=_parse_csv_env(
             "AGENT_PAY_ENFORCE_PATH_PREFIXES",
-            "/v1/stim,/v1/agent/screener,/v1/market,/v1/decision,/v1/portfolio",
+            "/v1/stim",
         ),
         accepted_payment_methods_agent_required_default="mpp,x402,crypto",
         accepted_payment_methods_agent_required_by_method={
