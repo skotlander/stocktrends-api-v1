@@ -63,6 +63,8 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             # Workflow catalog is public discovery — no auth required.
             # /v1/cost-estimate is intentionally NOT here: it requires auth.
             "/v1/workflows",
+            # Discovery endpoint — public like /v1/docs and /v1/openapi.json.
+            "/v1/ai/context",
         }
 
         self.public_prefixes = [
