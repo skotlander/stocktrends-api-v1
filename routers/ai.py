@@ -31,7 +31,7 @@ def ai_context():
     return {
         "dataset": "Stock Trends Market Indicators",
         "provider": "Stock Trends Publications",
-        "description": "Weekly structured dataset covering North American equities and ETFs with Stock Trends trend classification, momentum, relative strength, unusual volume, breadth, selections, leadership, and probabilistic forward return analysis.",
+        "description": "Weekly structured market intelligence dataset covering North American equities and ETFs, including Stock Trends trend classification, momentum, relative strength, unusual volume, breadth, leadership, ST-IM forward return distributions, market regime analytics, and deterministic decision/portfolio workflows.",
         "update_frequency": "weekly",
         "last_update": last_update,
         "coverage": {
@@ -39,7 +39,7 @@ def ai_context():
             "asset_types": ["equities", "ETFs"],
             "forecast_horizons_weeks": [4, 13, 40]
         },
-        "indicators": [
+        "core_indicators": [
             "trend",
             "trend_cnt",
             "mt_cnt",
@@ -64,45 +64,100 @@ def ai_context():
             "^v": "bearish crossover"
         },
         "endpoint_groups": {
-            "ai": [
-                "/v1/ai/context"
+            "discovery": [
+                "/v1/ai/context",
+                "/v1/docs",
+                "/v1/openapi.json"
+            ],
+            "pricing": [
+                "/v1/pricing",
+                "/v1/pricing/catalog",
+                "/v1/workflows",
+                "/v1/cost-estimate"
             ],
             "instruments": [
-                "/v1/instruments/lookup"
+                "/v1/instruments/lookup",
+                "/v1/instruments/resolve"
             ],
-            "breadth": [
-                "/v1/breadth/sector/latest"
+            "screening": [
+                "/v1/agent/screener/top"
             ],
             "stim": [
-                "/v1/stim/top"
+                "/v1/stim/latest",
+                "/v1/stim/history"
+            ],
+            "market": [
+                "/v1/market/regime/latest",
+                "/v1/market/regime/history",
+                "/v1/market/regime/forecast"
+            ],
+            "decision": [
+                "/v1/decision/evaluate-symbol"
+            ],
+            "portfolio": [
+                "/v1/portfolio/construct",
+                "/v1/portfolio/evaluate",
+                "/v1/portfolio/compare"
+            ],
+            "breadth": [
+                "/v1/breadth/sector/latest",
+                "/v1/breadth/sector/history"
+            ],
+            "leadership": [
+                "/v1/leadership/definitions",
+                "/v1/leadership/summary/latest",
+                "/v1/leadership/rotation/history"
             ],
             "selections": [
                 "/v1/selections/latest",
-                "/v1/selections-published/latest"
-            ],
-            "leadership": [
-                "/v1/leadership/summary/latest"
+                "/v1/selections/history",
+                "/v1/selections/published/latest",
+                "/v1/selections/published/history"
             ]
         },
+        "access_model": {
+            "public_discovery": [
+                "/v1/ai/context",
+                "/v1/docs",
+                "/v1/openapi.json"
+            ],
+            "subscription_supported": True,
+            "x402_agent_pay": "live",
+            "mpp": "coming_soon"
+        },
         "auth": {
-            "primary_scheme": "X-API-Key",
-            "primary_header": "X-API-Key: YOUR_API_KEY",
+            "subscription_scheme": "X-API-Key",
+            "subscription_header": "X-API-Key: YOUR_API_KEY",
             "alternative_scheme": "Bearer",
             "alternative_header": "Authorization: Bearer YOUR_API_KEY",
-            "required_for_protected_endpoints": True
+            "agent_identity_headers": [
+                "X-StockTrends-Agent-Id",
+                "X-StockTrends-Agent-Type",
+                "X-StockTrends-Agent-Vendor",
+                "X-StockTrends-Agent-Version"
+            ],
+            "payment_headers": [
+                "X-StockTrends-Payment-Method",
+                "X-StockTrends-Payment-Network",
+                "X-StockTrends-Payment-Token",
+                "X-StockTrends-Payment-Reference",
+                "X-StockTrends-Payment-Amount"
+            ]
         },
         "pricing": {
-            "public_endpoints": "available",
-            "free_metered_endpoints": "usage tracked",
-            "protected_endpoints": "subscription required",
-            "pricing_url": "https://api.stocktrends.com/v1/pricing"
+            "catalog_endpoint": "/v1/pricing/catalog",
+            "pricing_metadata_endpoint": "/v1/pricing",
+            "workflow_registry_endpoint": "/v1/workflows",
+            "cost_estimate_endpoint": "/v1/cost-estimate",
+            "note": "Use the live pricing catalog and API response headers as the authoritative source of endpoint pricing and payment requirements."
         },
         "usage_guidance": [
-            "Start with /v1/ai/context to understand dataset structure and terminology.",
-            "Use the OpenAPI specification for exact parameters and response shapes.",
-            "Authentication is primarily via X-API-Key. Bearer token authentication is also supported as an alternative.",
-            "Prefer structured API access over scraping website pages.",
-            "Cache responses where appropriate because the dataset updates weekly."
+            "Start with /v1/ai/context to understand the dataset and endpoint families.",
+            "Use /v1/docs and /v1/openapi.json for exact request and response contracts.",
+            "Use /v1/pricing/catalog to discover live pricing rules before calling premium endpoints.",
+            "Use subscription access for persistent developer workflows and x402 for agent-native pay-per-request access.",
+            "Start premium agent-pay workflows with /v1/agent/screener/top or /v1/stim/latest.",
+            "Cache discovery and metadata responses where appropriate because the dataset updates weekly."
         ],
         "example_queries": [
             {
@@ -110,14 +165,31 @@ def ai_context():
                 "path": "/v1/instruments/lookup?symbol=AAPL"
             },
             {
-                "description": "Retrieve top STIM results",
-                "path": "/v1/stim/top"
+                "description": "Get a premium ranked screener result set",
+                "path": "/v1/agent/screener/top"
             },
             {
-                "description": "Retrieve latest sector breadth",
-                "path": "/v1/breadth/sector/latest"
+                "description": "Retrieve the latest ST-IM distribution for one symbol",
+                "path": "/v1/stim/latest?symbol_exchange=IBM-N"
+            },
+            {
+                "description": "Retrieve the current market regime classification",
+                "path": "/v1/market/regime/latest"
             }
         ],
+        "recommended_first_flows": {
+            "human_developer": [
+                "/v1/docs",
+                "/v1/openapi.json",
+                "/v1/pricing/catalog",
+                "/v1/stim/latest?symbol_exchange=IBM-N"
+            ],
+            "agent": [
+                "/v1/ai/context",
+                "/v1/pricing/catalog",
+                "/v1/agent/screener/top"
+            ]
+        },
         "docs": "https://api.stocktrends.com/v1/docs",
         "openapi": "https://api.stocktrends.com/v1/openapi.json",
         "llms_txt": "https://api.stocktrends.com/llms.txt",
