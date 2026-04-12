@@ -142,13 +142,17 @@ def authorize_mpp_payment(
             response_data=data,
         )
 
-    authorized = bool(
-        (data or {}).get("authorized")
-        or (data or {}).get("success")
-    )
+    # Control-plane authorize returns a reservation object with status="pending"
+    # on success (HTTP 200/201).  There is no top-level "authorized" or "success"
+    # boolean field.  An "id" field confirms an authorization record was created.
+    cp_status = (data or {}).get("status")
+    authorized = cp_status == "pending" and bool((data or {}).get("id"))
     if not authorized:
         error_code = (data or {}).get("error_code") or "authorization_failed"
-        error_detail = (data or {}).get("error_detail") or "Control plane did not authorize payment."
+        error_detail = (
+            (data or {}).get("error_detail")
+            or f"Control plane authorize returned unexpected status: {cp_status!r}."
+        )
         return MppControlPlaneResult(
             success=False,
             error_code=error_code,
@@ -216,13 +220,17 @@ def capture_mpp_payment(
             response_data=data,
         )
 
-    captured = bool(
-        (data or {}).get("captured")
-        or (data or {}).get("success")
-    )
+    # Control-plane capture returns the updated authorization object with
+    # status="captured" and captured_at set on success.  Inferred from the same
+    # object shape as authorize.  Confirm with control-plane contract if shape differs.
+    cp_status = (data or {}).get("status")
+    captured = cp_status == "captured" or bool((data or {}).get("captured_at"))
     if not captured:
         error_code = (data or {}).get("error_code") or "capture_failed"
-        error_detail = (data or {}).get("error_detail") or "Control plane did not confirm capture."
+        error_detail = (
+            (data or {}).get("error_detail")
+            or f"Control plane capture returned unexpected status: {cp_status!r}."
+        )
         return MppControlPlaneResult(
             success=False,
             error_code=error_code,
