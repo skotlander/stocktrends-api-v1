@@ -1656,7 +1656,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     payment_amount_header = str(enforcement_result.payment_amount_native)
                 payment_channel_id = enforcement_result.payment_channel_id
                 request.state.payment_channel_id = payment_channel_id
-                if enforcement_result.outcome == "validation_failed":
+                if enforcement_result.outcome != "proceed":
                     validation_valid = False
                     validation_error = enforcement_result.error_code
                     validation_detail = enforcement_result.error_detail

@@ -123,7 +123,7 @@ def ai_context():
             ],
             "subscription_supported": True,
             "x402_agent_pay": "live",
-            "mpp": "coming_soon"
+            "mpp": "live"
         },
         "auth": {
             "subscription_scheme": "X-API-Key",
