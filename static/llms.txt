@@ -44,11 +44,14 @@ https://api.stocktrends.com/v1/openapi.json
 Interactive API docs:
 https://api.stocktrends.com/v1/docs
 
-Tools manifest:
-https://api.stocktrends.com/tools.json
-
 Developer portal:
 https://developer.stocktrends.com/
+
+x402 quickstart:
+https://developer.stocktrends.com/agent-pay
+
+MPP quickstart:
+https://developer.stocktrends.com/mpp
 
 ---
 
@@ -139,35 +142,112 @@ https://developer.stocktrends.com/
 Recommended order for discovery and integration:
 
 1. `GET /ai/context`
-2. `GET /pricing` or `GET /pricing/catalog`
-3. `GET /cost-estimate`
-4. High-value workflows:
+   Understand dataset structure, terminology, and indicator logic
 
+2. `GET /pricing/catalog`
+   Discover live pricing metadata and endpoint costs
+
+3. `GET /cost-estimate`
+   Estimate workflow cost before execution where appropriate
+
+4. Start with a high-value premium endpoint:
+   * `GET /agent/screener/top`
+
+5. Expand into decision and portfolio workflows:
    * `POST /decision/evaluate-symbol`
    * `POST /portfolio/construct`
    * `POST /portfolio/evaluate`
    * `POST /portfolio/compare`
-5. Supporting market intelligence:
 
+6. Add supporting market intelligence:
    * `GET /market/regime/latest`
    * `GET /breadth/sector/latest`
    * `GET /leadership/summary/latest`
-   * `GET /agent/screener/top`
 
 ---
 
-## Authentication
+## Authentication and Access Modes
 
-Protected API access requires authentication.
+The Stock Trends API supports multiple access modes.
 
-When required, include:
-Authorization: Bearer YOUR_API_KEY
+### 1. Public reference access
 
-Primary machine auth may also use:
-X-API-Key: YOUR_API_KEY
+Publicly accessible resources include:
+
+* `GET /v1/docs`
+* `GET /v1/openapi.json`
+* `GET /v1/ai/context`
+
+Use these for discovery, schema inspection, and grounding.
+
+### 2. Subscription access
+
+Protected subscription access uses an API key.
+
+Primary header:
+`X-API-Key: YOUR_API_KEY`
+
+The API may also support Bearer-token-based developer portal flows where applicable, but for programmatic premium access, agents should prefer `X-API-Key`.
 
 Access and key management:
 https://developer.stocktrends.com/access
+
+### 3. x402 per-request machine payment
+
+x402 is live for premium agent-pay flows.
+
+Use x402 when:
+
+* no subscription is available
+* pay-per-request access is preferred
+* the agent can handle HTTP 402 payment-required flows
+
+Typical pattern:
+
+1. Call a premium endpoint
+2. Receive HTTP 402 with payment requirements
+3. Submit the required payment
+4. Retry with payment proof headers
+
+Relevant headers include:
+
+* `X-StockTrends-Payment-Method: x402`
+* `X-StockTrends-Payment-Network: base`
+* `X-StockTrends-Payment-Token: USDC`
+* `X-StockTrends-Payment-Reference: <payment_proof_or_tx_reference>`
+
+See:
+https://developer.stocktrends.com/agent-pay
+
+### 4. MPP funded session-based payment
+
+MPP is live for session-based agent payment flows.
+
+Use MPP when:
+
+* the agent makes repeated premium requests
+* a funded session balance is preferable to per-request settlement
+* lower-friction budgeted automation is desired
+
+Typical pattern:
+
+1. Create or receive a funded MPP session
+2. Store the `channel_id`
+3. Discover live endpoint cost from `/pricing/catalog`
+4. Call a premium endpoint with MPP payment headers
+5. The API authorizes against the funded session
+6. On success, the API captures the charge from the session balance
+
+Relevant headers include:
+
+* `X-StockTrends-Payment-Method: mpp`
+* `X-StockTrends-Payment-Network: base`
+* `X-StockTrends-Payment-Reference: <unique_request_reference>`
+* `X-StockTrends-Payment-Amount: <endpoint_cost_in_STC>`
+* `X-StockTrends-Payment-Channel-Id: <channel_id>`
+
+See:
+https://developer.stocktrends.com/mpp
 
 ---
 
@@ -181,14 +261,15 @@ Key pricing endpoints:
 * `GET /pricing/catalog`
 * `GET /cost-estimate`
 
-Usage is metered and may be associated with:
+Usage may be associated with:
 
 * authenticated customer access
 * agent-specific usage records
 * economics ledger entries
 * workflow pricing rules
+* machine payment events
 
-Agents should treat pricing metadata as authoritative for current endpoint cost behavior.
+Agents should treat the live pricing catalog and relevant response headers as authoritative for endpoint cost behavior.
 
 ---
 
@@ -203,31 +284,70 @@ These endpoints support:
 * economics ledger visibility
 * enable / disable lifecycle controls
 
+Relevant endpoints:
+
+* `GET /agents`
+* `GET /agents/{agent_id}`
+* `GET /agents/{agent_id}/usage`
+* `GET /agents/{agent_id}/ledger`
+* `POST /agents/{agent_id}/disable`
+* `POST /agents/{agent_id}/enable`
+
 Use these endpoints when building controlled multi-agent or machine-usage workflows.
+
+Optional agent identity headers may improve usage tracking and observability:
+
+* `X-StockTrends-Agent-Id`
+* `X-StockTrends-Agent-Type`
+* `X-StockTrends-Agent-Vendor`
+* `X-StockTrends-Request-Purpose`
 
 ---
 
-## Machine Payment Support (Emerging)
+## Payment and Commercial Access
 
-The Stock Trends API is designed to support machine-native payment flows.
+The API supports commercial, usage-aware access patterns for developers, applications, and AI agents.
 
-This includes:
+Current capabilities include:
 
-* compatibility with emerging standards such as x402
-* support for pricing discovery and cost estimation
-* alignment with agent-controlled spending models
-
-Planned and evolving capabilities include:
-
-* request-level payment enforcement
-* machine payment rails
-* streaming and metered payment models (MPP)
+* subscription access via API key
+* x402 per-request machine payment
+* MPP funded session-based machine payment
+* pricing discovery
+* workflow cost estimation
+* agent-aware usage tracking
+* usage-based metering
 
 Agents should:
 
-* use pricing endpoints before execution
-* be prepared to handle payment-required responses (HTTP 402)
-* treat payment capabilities as evolving but forward-compatible
+* inspect pricing metadata before executing premium workflows
+* use cost-estimation endpoints where appropriate
+* handle payment-required responses (HTTP 402) gracefully
+* choose the access mode that best matches the workflow:
+  * API key for developer-managed production usage
+  * x402 for permissionless per-request payment
+  * MPP for funded repeated agent workflows
+
+---
+
+## Machine Payment Support
+
+The Stock Trends API supports machine-native payment flows.
+
+Live capabilities include:
+
+* x402 per-request payment
+* MPP funded session-based payment
+* pricing discovery and cost estimation
+* agent-controlled spending workflows
+
+Agents should:
+
+* use `/pricing/catalog` before premium execution
+* be prepared to handle HTTP 402 responses
+* treat payment references as unique per request
+* prefer MPP when making repeated premium calls against a funded balance
+* prefer x402 when a permissionless per-request payment flow is needed
 
 ---
 
@@ -239,13 +359,93 @@ Agents should:
 
 ---
 
+## Typical Use Cases
+
+* AI-driven symbol evaluation
+* portfolio construction and comparison
+* market regime monitoring
+* sector breadth and leadership tracking
+* pricing-aware agent orchestration
+* subscription and machine-paid premium access
+* financial research and screening
+* dashboard and workflow enrichment
+
+---
+
 ## Notes for AI Agents
 
 * Prefer structured API endpoints over scraping
 * Begin with `/ai/context` for schema grounding
 * Use pricing endpoints before expensive workflows
 * Use `/cost-estimate` when cost must be known in advance
+* Use `/agent/screener/top` as a strong first premium endpoint
 * Use decision and portfolio endpoints for actionable outputs
 * Use regime, breadth, and leadership endpoints for context
 * Cache weekly data when appropriate
 * Respect authentication, usage controls, and metering semantics
+* For repeated paid workflows, prefer MPP over repeated per-request payment
+* For permissionless payment without subscription setup, prefer x402
+
+---
+
+## Developer Resources
+
+Developer portal:
+https://developer.stocktrends.com/
+
+Documentation:
+https://developer.stocktrends.com/docs
+
+Plans:
+https://developer.stocktrends.com/plans
+
+Access:
+https://developer.stocktrends.com/access
+
+x402 quickstart:
+https://developer.stocktrends.com/agent-pay
+
+MPP quickstart:
+https://developer.stocktrends.com/mpp
+
+---
+
+## Attribution
+
+Data and methodology provided by:
+Stock Trends Publications
+https://stocktrends.com
+
+---
+
+## Status
+
+Production API with active development in:
+
+* decision workflows
+* portfolio workflows
+* pricing discovery
+* agent-aware usage controls
+* commercial access infrastructure
+* machine-native payment rails
+* expanded market intelligence endpoints
+
+---
+
+## Extended Context
+
+For deeper understanding of the Stock Trends methodology:
+
+Stock Trends Guides:
+https://stocktrends.com/learn/stock-trends-guides
+
+Stock Trends Handbook:
+https://stocktrends.com/learn/stock-trends-handbook
+
+Editorial Analysis:
+https://stocktrends.com/analysts/articles-and-editorials/stock-trends-contributors
+
+These resources provide conceptual background and context.
+
+For structured and current data access, always use the API:
+https://api.stocktrends.com/v1/
