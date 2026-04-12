@@ -56,6 +56,7 @@ def enforce_x402_payment(
     validated_payment_token: str | None,
     validated_payment_amount_native: Decimal | None,
     replay_checker: Callable[[str], bool],
+    **_kwargs,
 ) -> PaymentEnforcementResult:
     current_payment_requirements = build_x402_requirements(
         path=path,

@@ -49,10 +49,13 @@ def enforce_mpp_payment(
     validation_detail: str | None,
     amount_usd: Optional[Decimal] = None,
     replay_checker: Optional[Callable[[str], bool]] = None,
+    path: str = "",
+    pricing_rule_id: Optional[str] = None,
+    request_id: Optional[str] = None,
     **_kwargs,
 ):
     """
-    MPP payment enforcement — repo-local first version.
+    MPP payment enforcement — control-plane-backed.
 
     Validation layers (in order):
       1. Propagate upstream pre-validation failure.
@@ -60,19 +63,11 @@ def enforce_mpp_payment(
       3. Payment channel ID check (mandatory for session-based MPP).
       4. Payment amount format and positivity.
       5. Presented amount >= required STC cost.
-      6. Replay protection on payment_reference.
+      6. Replay protection on payment_reference (local fast-fail).
+      7. Control-plane authorize (source of truth for session balance/status).
 
-    ADAPTER BOUNDARY
-    -----------------------------------------------------------------------
-    External MPP facilitator/session verification belongs immediately after
-    step 6.  When a control-plane or MPP facilitator endpoint is available,
-    insert a verify_with_mpp_facilitator() call here.  The local checks above
-    (header presence, amount adequacy, replay) remain valid regardless of the
-    external result.  On external auth failure, return:
-        PaymentEnforcementResult(outcome="authorization_failed", ...)
-    or
-        PaymentEnforcementResult(outcome="inactive_session", ...)
-    -----------------------------------------------------------------------
+    Capture happens in the metering middleware *after* a successful downstream
+    response.  This function only covers steps 1–7 (pre-request gate).
     """
     from payments.enforcement import PaymentEnforcementResult
 
@@ -181,11 +176,32 @@ def enforce_mpp_payment(
             payment_channel_id=payment_channel_id,
         )
 
-    # ADAPTER BOUNDARY — external MPP facilitator/session verify goes here.
-    # See docstring above for integration contract.
+    # 7. Control-plane authorize — source of truth for session balance/status.
+    from payments.mpp_client import authorize_mpp_payment
+
+    auth_result = authorize_mpp_payment(
+        channel_id=payment_channel_id,
+        payment_reference=payment_reference,
+        requested_stc=amount_usd if amount_usd is not None else payment_amount_native,
+        pricing_rule_id=pricing_rule_id,
+        path=path,
+        request_id=request_id,
+    )
+
+    if not auth_result.success:
+        return PaymentEnforcementResult(
+            outcome="authorization_failed",
+            error_code=auth_result.error_code,
+            error_detail=auth_result.error_detail,
+            payment_reference=payment_reference,
+            payment_network=payment_network,
+            payment_token=payment_token,
+            payment_amount_native=payment_amount_native,
+            payment_channel_id=payment_channel_id,
+        )
 
     return PaymentEnforcementResult(
-        outcome="proceed",
+        outcome="authorized",
         payment_reference=payment_reference,
         payment_network=payment_network,
         payment_token=payment_token,

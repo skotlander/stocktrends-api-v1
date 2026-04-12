@@ -1137,8 +1137,9 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             else:
                 validation_valid, validation_error, validation_detail = validate_payment_headers(request)
 
+        enforcement_result = None
+
         if should_enforce_agent_pay and decision.econ_payment_required == 1:
-            enforcement_result = None
             if payment_rail in {"x402", "mpp"}:
                 enforcement_result = enforce_payment_rail(
                     payment_rail=payment_rail,
@@ -1154,6 +1155,8 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     validated_payment_token=validated_payment_token,
                     validated_payment_amount_native=validated_payment_amount_native,
                     replay_checker=is_payment_reference_used,
+                    pricing_rule_id=economic_rule_name,
+                    request_id=request_id,
                 )
 
             if payment_rail == "x402":
@@ -1656,7 +1659,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     payment_amount_header = str(enforcement_result.payment_amount_native)
                 payment_channel_id = enforcement_result.payment_channel_id
                 request.state.payment_channel_id = payment_channel_id
-                if enforcement_result.outcome != "proceed":
+                if enforcement_result.outcome not in {"proceed", "authorized"}:
                     validation_valid = False
                     validation_error = enforcement_result.error_code
                     validation_detail = enforcement_result.error_detail
@@ -1830,6 +1833,57 @@ class MeteringMiddleware(BaseHTTPMiddleware):
             except Exception as e:
                 logger.error("Metering request-log insert failed: %s", e, exc_info=True)
 
+            # ------------------------------------------------------------------
+            # MPP capture — must run after the downstream response is known and
+            # before the economics log so payment_status reflects the outcome.
+            # Capture only when:
+            #   - rail is mpp and enforcement was active
+            #   - enforce_mpp_payment returned "authorized" (control-plane ack'd)
+            #   - downstream succeeded (status_code < 400, no exception)
+            # ------------------------------------------------------------------
+            mpp_capture_outcome: str | None = None
+
+            if (
+                payment_rail == "mpp"
+                and should_enforce_agent_pay
+                and enforcement_result is not None
+                and enforcement_result.outcome == "authorized"
+            ):
+                if response is not None and status_code < 400:
+                    from payments.mpp_client import capture_mpp_payment
+                    _cap = capture_mpp_payment(
+                        channel_id=enforcement_result.payment_channel_id,
+                        payment_reference=enforcement_result.payment_reference,
+                        captured_stc=stc_cost,
+                        pricing_rule_id=economic_rule_name,
+                        request_id=request_id,
+                    )
+                    if _cap.success:
+                        mpp_capture_outcome = "captured"
+                    else:
+                        mpp_capture_outcome = "capture_failed"
+                        logger.error(
+                            "mpp capture failed after successful response — "
+                            "request_id=%s channel_id=%s payment_reference=%s "
+                            "error_code=%s error_detail=%s",
+                            request_id,
+                            enforcement_result.payment_channel_id,
+                            enforcement_result.payment_reference,
+                            _cap.error_code,
+                            _cap.error_detail,
+                        )
+                else:
+                    # Authorized but downstream failed — no capture.
+                    # The control-plane hold will expire or be voided externally.
+                    logger.warning(
+                        "mpp authorized but downstream failed — capture skipped. "
+                        "request_id=%s channel_id=%s payment_reference=%s status_code=%s",
+                        request_id,
+                        enforcement_result.payment_channel_id,
+                        enforcement_result.payment_reference,
+                        status_code,
+                    )
+
             if should_log_economics(decision):
                 payment_status = decision.econ_payment_status
 
@@ -1843,7 +1897,16 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             payment_status = "pending"
                     elif normalized_payment_method == "mpp":
                         if validation_valid and payment_reference_header:
-                            payment_status = "presented"
+                            if mpp_capture_outcome == "captured":
+                                payment_status = "captured"
+                            elif mpp_capture_outcome == "capture_failed":
+                                payment_status = "capture_failed"
+                            elif enforcement_result is not None and enforcement_result.outcome == "authorized":
+                                # Authorized but downstream failed; capture was skipped.
+                                payment_status = "authorized"
+                            else:
+                                # Enforcement disabled or pre-control-plane path.
+                                payment_status = "presented"
                         elif not validation_valid:
                             payment_status = "failed_validation" if should_enforce_agent_pay else "pending"
 
