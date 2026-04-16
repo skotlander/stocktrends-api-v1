@@ -2,17 +2,102 @@ from fastapi import APIRouter
 from sqlalchemy import text
 from db import get_engine
 from routers.workflows import WORKFLOW_REGISTRY
+from pricing.classifier import classify_request as _classify_request, NON_METERED_PATHS
+from payments.policy_provider import (
+    is_free_metered_path as _is_free_metered_path,
+    get_effective_endpoint_payment_policy as _get_endpoint_policy,
+    is_agent_pay_route as _is_agent_pay_route,
+)
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
 # ---------------------------------------------------------------------------
-# Tools manifest — static list of confirmed real endpoints.
-# Derived from actual router implementations and policy_provider.py.
-# Costs are intentionally NOT hardcoded here; use /v1/pricing/catalog for
-# authoritative live STC costs.
+# _MANIFEST_PUBLIC_PATHS mirrors ApiKeyMiddleware.public_paths for the paths
+# that appear in this manifest.  Tests verify this stays in sync.
+# ---------------------------------------------------------------------------
+_MANIFEST_PUBLIC_PATHS: frozenset = frozenset({
+    "/v1/pricing",
+    "/v1/workflows",
+    "/v1/ai/context",
+    "/v1/ai/tools",
+})
+
+
+def _access_metadata(path: str, method: str = "GET") -> dict:
+    """
+    Derive auth_required, metered, pricing_rule_id, and supported_rails
+    from the runtime classifier and policy sources.
+
+    Called once at module load to build _TOOLS — no DB access required.
+    Classifier falls back to the default policy config when no control-plane
+    URL is configured (safe in test and production startup alike).
+
+    Rule ID derivation priority:
+      1. Exact endpoint_payment_policy → stable, specific rule ID
+      2. free_metered path             → "default_free_metered" (stable)
+      3. agent_pay prefix (no policy)  → None  (dynamic: "default_subscription"
+                                                for subscription callers,
+                                                "agent_pay_required" for
+                                                agent-pay callers — not safely
+                                                representable as a single value)
+      4. Metered subscription path     → decision.log_pricing_rule_id
+      5. Auth-required non-metered     → None  (e.g. /v1/cost-estimate)
+      6. Free public                   → None
+    """
+    decision = _classify_request(
+        path=path,
+        has_paid_auth=True,
+        payment_method_header=None,
+        plan_code="pro",
+        agent_identifier=None,
+        method=method,
+    )
+
+    endpoint_policy = _get_endpoint_policy(path, method.upper())
+
+    if endpoint_policy and endpoint_policy.pricing_rule_id:
+        # Exact endpoint policy: rule and rails are stable.
+        pricing_rule_id = endpoint_policy.pricing_rule_id
+        supported_rails = list(endpoint_policy.allowed_rails)
+    elif _is_free_metered_path(path):
+        # Tracked but not billed; rule is stable.
+        pricing_rule_id = "default_free_metered"
+        supported_rails = []
+    elif _is_agent_pay_route(path, method.upper()) and not endpoint_policy:
+        # STIM prefix paths: the runtime rule ID depends on the caller's
+        # access method (subscription vs agent-pay) so it cannot be
+        # represented as a single static value. Use None to avoid drift.
+        pricing_rule_id = None
+        supported_rails = ["subscription", "x402", "mpp"]
+    elif decision.is_metered:
+        # Subscription-covered metered path (e.g. /v1/pricing/catalog).
+        pricing_rule_id = decision.log_pricing_rule_id
+        supported_rails = ["subscription"]
+    elif path not in _MANIFEST_PUBLIC_PATHS:
+        # Auth-required, non-metered (e.g. /v1/cost-estimate).
+        pricing_rule_id = None
+        supported_rails = ["subscription"]
+    else:
+        # Truly free/public.
+        pricing_rule_id = None
+        supported_rails = []
+
+    return {
+        "auth_required": path not in _MANIFEST_PUBLIC_PATHS,
+        "metered": bool(decision.is_metered),
+        "pricing_rule_id": pricing_rule_id,
+        "supported_rails": supported_rails,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool templates — static fields only (description, schema, etc.).
+# auth_required / metered / pricing_rule_id / supported_rails are injected
+# at module load by _build_tools() via _access_metadata() so they always
+# reflect the actual runtime classifier behavior.
 # ---------------------------------------------------------------------------
 
-_TOOLS = [
+_TOOL_TEMPLATES = [
     # ---- Discovery / public ------------------------------------------------
     {
         "name": "ai_context",
@@ -24,10 +109,6 @@ _TOOLS = [
         "endpoint": "/v1/ai/context",
         "method": "GET",
         "category": "discovery",
-        "auth_required": False,
-        "metered": False,
-        "pricing_rule_id": None,
-        "supported_rails": [],
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "output_summary": "Dataset metadata, endpoint groups, auth model, and agent usage guidance.",
     },
@@ -41,10 +122,6 @@ _TOOLS = [
         "endpoint": "/v1/ai/tools",
         "method": "GET",
         "category": "discovery",
-        "auth_required": False,
-        "metered": False,
-        "pricing_rule_id": None,
-        "supported_rails": [],
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "output_summary": "MCP tools manifest: tools, workflows, pricing, auth.",
     },
@@ -58,10 +135,6 @@ _TOOLS = [
         "endpoint": "/v1/pricing",
         "method": "GET",
         "category": "pricing",
-        "auth_required": False,
-        "metered": False,
-        "pricing_rule_id": None,
-        "supported_rails": [],
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "output_summary": "Pricing metadata: payment methods, endpoint families, agent headers.",
     },
@@ -70,15 +143,12 @@ _TOOLS = [
         "title": "Live Pricing Catalog",
         "description": (
             "Returns all active STC pricing rules from the pricing engine. "
+            "Requires a valid API key. "
             "Agents should call this at startup to build a local cost map before issuing data requests."
         ),
         "endpoint": "/v1/pricing/catalog",
         "method": "GET",
         "category": "pricing",
-        "auth_required": False,
-        "metered": False,
-        "pricing_rule_id": None,
-        "supported_rails": [],
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "output_summary": "Live pricing rules: rule_name, cost_per_request (STC), access_type.",
     },
@@ -92,10 +162,6 @@ _TOOLS = [
         "endpoint": "/v1/workflows",
         "method": "GET",
         "category": "discovery",
-        "auth_required": False,
-        "metered": False,
-        "pricing_rule_id": None,
-        "supported_rails": [],
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "output_summary": "Workflow definitions with live per-step STC costs.",
     },
@@ -110,10 +176,6 @@ _TOOLS = [
         "endpoint": "/v1/cost-estimate",
         "method": "GET",
         "category": "pricing",
-        "auth_required": True,
-        "metered": False,
-        "pricing_rule_id": None,
-        "supported_rails": ["subscription"],
         "input_schema": {
             "type": "object",
             "properties": {
@@ -148,10 +210,6 @@ _TOOLS = [
         "endpoint": "/v1/decision/evaluate-symbol",
         "method": "POST",
         "category": "decision",
-        "auth_required": True,
-        "metered": True,
-        "pricing_rule_id": "evaluate_symbol",
-        "supported_rails": ["subscription", "x402", "mpp"],
         "input_schema": {
             "type": "object",
             "properties": {
@@ -186,10 +244,6 @@ _TOOLS = [
         "endpoint": "/v1/market/regime/latest",
         "method": "GET",
         "category": "market",
-        "auth_required": True,
-        "metered": True,
-        "pricing_rule_id": "market_regime_latest",
-        "supported_rails": ["subscription", "x402", "mpp"],
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "output_summary": "Current regime label, score, and classification metadata.",
     },
@@ -200,10 +254,6 @@ _TOOLS = [
         "endpoint": "/v1/market/regime/history",
         "method": "GET",
         "category": "market",
-        "auth_required": True,
-        "metered": True,
-        "pricing_rule_id": "market_regime_history",
-        "supported_rails": ["subscription", "x402", "mpp"],
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "output_summary": "Weekly regime classification history.",
     },
@@ -214,10 +264,6 @@ _TOOLS = [
         "endpoint": "/v1/market/regime/forecast",
         "method": "GET",
         "category": "market",
-        "auth_required": True,
-        "metered": True,
-        "pricing_rule_id": "market_regime_forecast",
-        "supported_rails": ["subscription", "x402", "mpp"],
         "input_schema": {"type": "object", "properties": {}, "required": []},
         "output_summary": "Forward regime probabilities and directional confidence.",
     },
@@ -229,10 +275,6 @@ _TOOLS = [
         "endpoint": "/v1/agent/screener/top",
         "method": "GET",
         "category": "screener",
-        "auth_required": True,
-        "metered": True,
-        "pricing_rule_id": "agent_screener_top",
-        "supported_rails": ["subscription", "x402", "mpp"],
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -249,10 +291,6 @@ _TOOLS = [
         "endpoint": "/v1/portfolio/construct",
         "method": "POST",
         "category": "portfolio",
-        "auth_required": True,
-        "metered": True,
-        "pricing_rule_id": "portfolio_construct",
-        "supported_rails": ["subscription", "x402", "mpp"],
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -268,10 +306,6 @@ _TOOLS = [
         "endpoint": "/v1/portfolio/evaluate",
         "method": "POST",
         "category": "portfolio",
-        "auth_required": True,
-        "metered": True,
-        "pricing_rule_id": "portfolio_evaluate",
-        "supported_rails": ["subscription", "x402", "mpp"],
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -287,10 +321,6 @@ _TOOLS = [
         "endpoint": "/v1/portfolio/compare",
         "method": "POST",
         "category": "portfolio",
-        "auth_required": True,
-        "metered": True,
-        "pricing_rule_id": "portfolio_compare",
-        "supported_rails": ["subscription", "x402", "mpp"],
         "input_schema": {
             "type": "object",
             "properties": {},
@@ -310,10 +340,6 @@ _TOOLS = [
         "endpoint": "/v1/stim/latest",
         "method": "GET",
         "category": "stim",
-        "auth_required": True,
-        "metered": True,
-        "pricing_rule_id": "stc_metered",
-        "supported_rails": ["subscription", "x402", "mpp"],
         "input_schema": {
             "type": "object",
             "properties": {
@@ -333,10 +359,6 @@ _TOOLS = [
         "endpoint": "/v1/stim/history",
         "method": "GET",
         "category": "stim",
-        "auth_required": True,
-        "metered": True,
-        "pricing_rule_id": "stc_metered",
-        "supported_rails": ["subscription", "x402", "mpp"],
         "input_schema": {
             "type": "object",
             "properties": {
@@ -350,6 +372,23 @@ _TOOLS = [
         "output_summary": "Historical ST-IM distribution records.",
     },
 ]
+
+
+def _build_tools() -> list:
+    """
+    Build the final tools list by merging each template with runtime-derived
+    access metadata from _access_metadata().  Called once at module load.
+    """
+    result = []
+    for template in _TOOL_TEMPLATES:
+        meta = _access_metadata(template["endpoint"], template["method"])
+        result.append({**template, **meta})
+    return result
+
+
+# Populated at module load; immutable thereafter.  The endpoint returns this
+# list directly so callers always see a stable object reference.
+_TOOLS: list = _build_tools()
 
 
 def _build_workflow_summary(workflow: dict) -> dict:

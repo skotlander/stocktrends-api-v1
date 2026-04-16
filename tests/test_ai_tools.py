@@ -12,6 +12,7 @@ Validates:
 5. Workflows derive from WORKFLOW_REGISTRY (no duplication)
 6. Pricing section references STC model without hardcoded costs
 7. Auth section reflects actual system behavior
+8. Runtime-derived metadata matches classifier / policy sources
 """
 
 import sys
@@ -31,9 +32,10 @@ sys.modules.setdefault("sqlalchemy.orm", _SQLALCHEMY_MOCK)
 sys.modules.setdefault("db", _DB_MOCK)
 
 # Now safe to import project modules
-from routers.ai import _TOOLS, _build_workflow_summary, ai_tools
+from routers.ai import _TOOLS, _TOOL_TEMPLATES, _MANIFEST_PUBLIC_PATHS, _build_workflow_summary, ai_tools
 from routers.workflows import WORKFLOW_REGISTRY
 from pricing.classifier import NON_METERED_PATHS, classify_request
+from payments.policy_provider import is_free_metered_path, is_agent_pay_route
 
 
 # ---------------------------------------------------------------------------
@@ -154,14 +156,46 @@ def test_required_tools_present():
     assert not missing, f"Required tools missing: {missing}"
 
 
-def test_metered_tools_have_pricing_rule_id():
-    """Every metered tool must declare a pricing_rule_id."""
+def test_metered_endpoint_policy_tools_have_pricing_rule_id():
+    """
+    Tools with an exact endpoint_payment_policy must declare a pricing_rule_id.
+    STIM tools are excluded: their rule ID is dynamic (depends on access method)
+    and is intentionally None in the manifest.
+    """
     result = ai_tools()
     for tool in result["tools"]:
-        if tool["metered"]:
+        if not tool["metered"]:
+            continue
+        # STIM paths have dynamic rule IDs (subscription vs agent_pay_required).
+        # They are metered but pricing_rule_id=None by design — skip them.
+        if is_agent_pay_route(tool["endpoint"], tool["method"]):
+            continue
+        # Free-metered paths carry a stable rule ID.
+        if is_free_metered_path(tool["endpoint"]):
             assert tool["pricing_rule_id"] is not None, (
-                f"Metered tool '{tool['name']}' has no pricing_rule_id"
+                f"Free-metered tool '{tool['name']}' has no pricing_rule_id"
             )
+            continue
+        assert tool["pricing_rule_id"] is not None, (
+            f"Metered tool '{tool['name']}' (with endpoint policy) has no pricing_rule_id"
+        )
+
+
+def test_stim_tools_metered_but_no_pricing_rule_id():
+    """
+    STIM tools must be metered=True but pricing_rule_id=None because the
+    runtime rule depends on the access method (subscription vs agent-pay).
+    """
+    result = ai_tools()
+    stim_tools = [t for t in result["tools"] if t["endpoint"].startswith("/v1/stim")]
+    assert stim_tools, "No STIM tools found in manifest"
+    for tool in stim_tools:
+        assert tool["metered"] is True, (
+            f"STIM tool '{tool['name']}' must be metered=True"
+        )
+        assert tool["pricing_rule_id"] is None, (
+            f"STIM tool '{tool['name']}' must have pricing_rule_id=None (dynamic rule)"
+        )
 
 
 def test_non_metered_tools_have_no_pricing_rule_id():
@@ -335,3 +369,150 @@ def test_build_workflow_summary_does_not_include_live_costs():
     summary = _build_workflow_summary(sample)
     assert "stc_cost" not in summary
     assert "total_stc_cost" not in summary
+
+
+# ---------------------------------------------------------------------------
+# 9. Runtime metadata regression tests
+# ---------------------------------------------------------------------------
+
+def test_regression_ai_context_tool():
+    """
+    /v1/ai/context is a free-metered path.
+    Manifest must reflect: auth_required=False, metered=True,
+    pricing_rule_id="default_free_metered".
+    """
+    result = ai_tools()
+    tool = next(t for t in result["tools"] if t["endpoint"] == "/v1/ai/context")
+    assert tool["auth_required"] is False, "/v1/ai/context must be auth_required=False"
+    assert tool["metered"] is True, "/v1/ai/context must be metered=True (free-metered)"
+    assert tool["pricing_rule_id"] == "default_free_metered", (
+        f"/v1/ai/context must have pricing_rule_id='default_free_metered', got {tool['pricing_rule_id']!r}"
+    )
+
+
+def test_regression_pricing_catalog_tool():
+    """
+    /v1/pricing/catalog is a standard /v1/ authenticated subscription path.
+    Manifest must reflect: auth_required=True, metered=True, pricing_rule_id not None.
+    """
+    result = ai_tools()
+    tool = next(t for t in result["tools"] if t["endpoint"] == "/v1/pricing/catalog")
+    assert tool["auth_required"] is True, "/v1/pricing/catalog must be auth_required=True"
+    assert tool["metered"] is True, "/v1/pricing/catalog must be metered=True"
+    assert tool["pricing_rule_id"] is not None, (
+        "/v1/pricing/catalog must have a pricing_rule_id (subscription-metered path)"
+    )
+
+
+def test_regression_stim_tools():
+    """
+    /v1/stim/* paths are STIM agent-pay prefix routes.
+    Manifest must reflect: auth_required=True, metered=True, pricing_rule_id=None.
+    pricing_rule_id is None because the rule depends on the access method
+    (default_subscription for subscription callers, agent_pay_required for agent-pay).
+    """
+    result = ai_tools()
+    stim_tools = [t for t in result["tools"] if t["endpoint"].startswith("/v1/stim")]
+    assert stim_tools, "No STIM tools found in manifest"
+    for tool in stim_tools:
+        assert tool["auth_required"] is True, (
+            f"STIM tool '{tool['name']}' must be auth_required=True"
+        )
+        assert tool["metered"] is True, (
+            f"STIM tool '{tool['name']}' must be metered=True"
+        )
+        assert tool["pricing_rule_id"] is None, (
+            f"STIM tool '{tool['name']}' must have pricing_rule_id=None (dynamic rule)"
+        )
+
+
+def test_regression_public_manifest_tools_not_auth_required():
+    """
+    Tools whose endpoints are in _MANIFEST_PUBLIC_PATHS must be auth_required=False.
+    """
+    result = ai_tools()
+    for tool in result["tools"]:
+        if tool["endpoint"] in _MANIFEST_PUBLIC_PATHS:
+            assert tool["auth_required"] is False, (
+                f"Tool '{tool['name']}' ({tool['endpoint']}) is a public path "
+                f"but manifest has auth_required=True"
+            )
+
+
+# ---------------------------------------------------------------------------
+# 10. Runtime cross-checks against classifier
+# ---------------------------------------------------------------------------
+
+def test_tool_metered_matches_classifier():
+    """
+    For every tool, manifest metered flag must match classify_request()
+    with has_paid_auth=True (simulating an authenticated pro caller).
+    This is the same probe used by _access_metadata() at module load.
+    """
+    result = ai_tools()
+    for tool in result["tools"]:
+        path = tool["endpoint"]
+        method = tool["method"]
+        decision = classify_request(
+            path=path,
+            has_paid_auth=True,
+            payment_method_header=None,
+            plan_code="pro",
+            agent_identifier=None,
+            method=method,
+        )
+        expected_metered = bool(decision.is_metered)
+        assert tool["metered"] == expected_metered, (
+            f"Tool '{tool['name']}' ({path}): manifest metered={tool['metered']!r} "
+            f"but classifier returned is_metered={decision.is_metered}"
+        )
+
+
+def test_tool_auth_required_matches_manifest_public_paths():
+    """
+    Tools under _MANIFEST_PUBLIC_PATHS must have auth_required=False.
+    Tools NOT in _MANIFEST_PUBLIC_PATHS must have auth_required=True.
+    This verifies _access_metadata() logic is consistent.
+    """
+    result = ai_tools()
+    for tool in result["tools"]:
+        expected_auth_required = tool["endpoint"] not in _MANIFEST_PUBLIC_PATHS
+        assert tool["auth_required"] == expected_auth_required, (
+            f"Tool '{tool['name']}' ({tool['endpoint']}): "
+            f"auth_required={tool['auth_required']!r} but expected {expected_auth_required!r} "
+            f"based on _MANIFEST_PUBLIC_PATHS"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 11. Sync checks: manifest constants vs middleware/classifier
+# ---------------------------------------------------------------------------
+
+def test_manifest_public_paths_subset_of_middleware():
+    """
+    Every path in _MANIFEST_PUBLIC_PATHS must also appear in
+    ApiKeyMiddleware.public_paths. If a path is public in the manifest
+    but not in the middleware, agents will receive 401s.
+    """
+    import pathlib
+    source = pathlib.Path("middleware/api_key.py").read_text(encoding="utf-8")
+    for path in _MANIFEST_PUBLIC_PATHS:
+        assert f'"{path}"' in source, (
+            f"_MANIFEST_PUBLIC_PATHS path '{path}' not found in "
+            f"ApiKeyMiddleware.public_paths (middleware/api_key.py)"
+        )
+
+
+def test_manifest_public_paths_subset_of_non_metered_paths():
+    """
+    Every path in _MANIFEST_PUBLIC_PATHS must also appear in NON_METERED_PATHS
+    (or is a free-metered path).  A public path that is metered would charge
+    anonymous callers, which is not the intent.
+    """
+    for path in _MANIFEST_PUBLIC_PATHS:
+        is_non_metered = path in NON_METERED_PATHS
+        is_free_metered = is_free_metered_path(path)
+        assert is_non_metered or is_free_metered, (
+            f"_MANIFEST_PUBLIC_PATHS path '{path}' is neither in NON_METERED_PATHS "
+            f"nor a free_metered_path — public callers would be metered or denied"
+        )
