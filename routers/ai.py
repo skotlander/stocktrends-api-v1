@@ -108,7 +108,8 @@ _TOOL_TEMPLATES = [
         "title": "AI Context",
         "description": (
             "Returns dataset overview, endpoint groups, access model, and agent usage guidance. "
-            "Recommended starting point for any agent interacting with the Stock Trends API."
+            "Secondary explanatory context for agents after reading the machine-readable "
+            "/v1/ai/tools manifest."
         ),
         "endpoint": "/v1/ai/context",
         "method": "GET",
@@ -120,7 +121,8 @@ _TOOL_TEMPLATES = [
         "name": "ai_tools",
         "title": "AI Tools Manifest",
         "description": (
-            "Returns this MCP-compatible tools manifest. "
+            "Returns this MCP-compatible tools manifest. Primary machine-readable entry point "
+            "for agents. "
             "Lists all discoverable tools, workflows, pricing model, and auth expectations."
         ),
         "endpoint": "/v1/ai/tools",
@@ -434,6 +436,12 @@ def ai_context():
         "dataset": "Stock Trends Market Indicators",
         "provider": "Stock Trends Publications",
         "description": "Weekly structured market intelligence dataset covering North American equities and ETFs, including Stock Trends trend classification, momentum, relative strength, unusual volume, breadth, leadership, ST-IM forward return distributions, market regime analytics, and deterministic decision/portfolio workflows.",
+        "discovery_entrypoints": {
+            "primary_machine_readable": "/v1/ai/tools",
+            "secondary_explanatory": "/v1/ai/context",
+            "docs": "/v1/docs",
+            "openapi": "/v1/openapi.json",
+        },
         "update_frequency": "weekly",
         "last_update": last_update,
         "coverage": {
@@ -467,6 +475,7 @@ def ai_context():
         },
         "endpoint_groups": {
             "discovery": [
+                "/v1/ai/tools",
                 "/v1/ai/context",
                 "/v1/docs",
                 "/v1/openapi.json"
@@ -519,6 +528,7 @@ def ai_context():
         },
         "access_model": {
             "public_discovery": [
+                "/v1/ai/tools",
                 "/v1/ai/context",
                 "/v1/docs",
                 "/v1/openapi.json"
@@ -554,7 +564,8 @@ def ai_context():
             "note": "Use the live pricing catalog and API response headers as the authoritative source of endpoint pricing and payment requirements."
         },
         "usage_guidance": [
-            "Start with /v1/ai/context to understand the dataset and endpoint families.",
+            "Start with /v1/ai/tools as the primary machine-readable manifest for agent discovery.",
+            "Use /v1/ai/context as the secondary explanatory endpoint for dataset and endpoint-family context.",
             "Use /v1/docs and /v1/openapi.json for exact request and response contracts.",
             "Use /v1/pricing/catalog to discover live pricing rules before calling premium endpoints.",
             "Use subscription access for persistent developer workflows and x402 for agent-native pay-per-request access.",
@@ -587,6 +598,7 @@ def ai_context():
                 "/v1/stim/latest?symbol_exchange=IBM-N"
             ],
             "agent": [
+                "/v1/ai/tools",
                 "/v1/ai/context",
                 "/v1/pricing/catalog",
                 "/v1/agent/screener/top"
@@ -597,7 +609,7 @@ def ai_context():
         "llms_txt": "https://api.stocktrends.com/llms.txt",
         "ai_plugin": "https://api.stocktrends.com/.well-known/ai-plugin.json",
         "dataset_manifest": "https://api.stocktrends.com/ai-dataset.json",
-        "tools_manifest": "https://api.stocktrends.com/tools.json",
+        "tools_manifest": "https://api.stocktrends.com/v1/ai/tools",
         "license": "https://stocktrends.com/stock-trends-data-license",
         "terms": "https://stocktrends.com/terms-of-use",
         "support": {
@@ -618,8 +630,9 @@ def ai_context():
     summary="MCP tools manifest",
     description=(
         "Public, non-metered. Returns the Stock Trends API as an MCP/Bazaar-compatible "
-        "tools manifest. Exposes confirmed real endpoints only. Costs reference the STC "
-        "model; use /v1/pricing/catalog for authoritative live values. "
+        "tools manifest and primary machine-readable entry point for agents. Exposes "
+        "confirmed real endpoints only. Costs reference the STC model; use "
+        "/v1/pricing/catalog for authoritative live values. "
         "Workflows are exposed in a simplified format; use /v1/workflows for live per-step costs."
     ),
 )
@@ -683,10 +696,11 @@ def ai_tools():
             },
         },
         "notes": [
+            "Start with /v1/ai/tools as the primary machine-readable entry point for agents.",
             "All metered endpoints price in STC. Fetch /v1/pricing/catalog at agent startup.",
             "Use /v1/workflows for multi-step workflows with live per-step STC costs.",
             "Use /v1/cost-estimate to plan STC spend before executing a workflow.",
-            "Start with /v1/ai/context for a full dataset and endpoint overview.",
+            "Use /v1/ai/context as the secondary explanatory endpoint for dataset and endpoint overview.",
             "See /v1/docs and /v1/openapi.json for exact request/response contracts.",
         ],
     }
