@@ -7,6 +7,7 @@ from payments.policy_provider import (
     is_free_metered_path as _is_free_metered_path,
     get_effective_endpoint_payment_policy as _get_endpoint_policy,
     is_agent_pay_route as _is_agent_pay_route,
+    get_agent_pay_auth_bypass_methods as _get_agent_pay_bypass_methods,
 )
 
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -67,8 +68,11 @@ def _access_metadata(path: str, method: str = "GET") -> dict:
         # STIM prefix paths: the runtime rule ID depends on the caller's
         # access method (subscription vs agent-pay) so it cannot be
         # represented as a single static value. Use None to avoid drift.
+        # Rails: subscription is always valid for paid callers; agent-pay
+        # bypass methods come from the runtime config (not hardcoded).
         pricing_rule_id = None
-        supported_rails = ["subscription", "x402", "mpp"]
+        agent_pay_rails = list(_get_agent_pay_bypass_methods(path, method.upper()))
+        supported_rails = ["subscription"] + agent_pay_rails
     elif decision.is_metered:
         # Subscription-covered metered path (e.g. /v1/pricing/catalog).
         pricing_rule_id = decision.log_pricing_rule_id
@@ -376,19 +380,17 @@ _TOOL_TEMPLATES = [
 
 def _build_tools() -> list:
     """
-    Build the final tools list by merging each template with runtime-derived
-    access metadata from _access_metadata().  Called once at module load.
+    Build the tools list by merging each template with runtime-derived
+    access metadata from _access_metadata().
+
+    Called at request time inside ai_tools() so the manifest always
+    reflects current runtime policy rather than startup-time policy.
     """
     result = []
     for template in _TOOL_TEMPLATES:
         meta = _access_metadata(template["endpoint"], template["method"])
         result.append({**template, **meta})
     return result
-
-
-# Populated at module load; immutable thereafter.  The endpoint returns this
-# list directly so callers always see a stable object reference.
-_TOOLS: list = _build_tools()
 
 
 def _build_workflow_summary(workflow: dict) -> dict:
@@ -622,12 +624,13 @@ def ai_context():
     ),
 )
 def ai_tools():
+    tools = _build_tools()
     workflows = [_build_workflow_summary(w) for w in WORKFLOW_REGISTRY]
 
     return {
         "provider": "stocktrends",
         "version": "v1",
-        "tools": _TOOLS,
+        "tools": tools,
         "workflows": workflows,
         "pricing": {
             "unit": "STC",

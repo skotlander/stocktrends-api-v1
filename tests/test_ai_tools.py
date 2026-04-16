@@ -32,10 +32,14 @@ sys.modules.setdefault("sqlalchemy.orm", _SQLALCHEMY_MOCK)
 sys.modules.setdefault("db", _DB_MOCK)
 
 # Now safe to import project modules
-from routers.ai import _TOOLS, _TOOL_TEMPLATES, _MANIFEST_PUBLIC_PATHS, _build_workflow_summary, ai_tools
+from routers.ai import _TOOL_TEMPLATES, _MANIFEST_PUBLIC_PATHS, _build_workflow_summary, ai_tools
 from routers.workflows import WORKFLOW_REGISTRY
 from pricing.classifier import NON_METERED_PATHS, classify_request
-from payments.policy_provider import is_free_metered_path, is_agent_pay_route
+from payments.policy_provider import (
+    is_free_metered_path,
+    is_agent_pay_route,
+    get_agent_pay_auth_bypass_methods,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +202,24 @@ def test_stim_tools_metered_but_no_pricing_rule_id():
         )
 
 
+def test_stim_tools_supported_rails_match_policy():
+    """
+    STIM tool supported_rails must be derived from runtime policy, not hardcoded.
+    Expected: ["subscription"] + get_agent_pay_auth_bypass_methods(path, method).
+    This test would catch a hardcoded list diverging from the config.
+    """
+    result = ai_tools()
+    stim_tools = [t for t in result["tools"] if t["endpoint"].startswith("/v1/stim")]
+    assert stim_tools, "No STIM tools found in manifest"
+    for tool in stim_tools:
+        agent_rails = list(get_agent_pay_auth_bypass_methods(tool["endpoint"], tool["method"]))
+        expected_rails = ["subscription"] + agent_rails
+        assert tool["supported_rails"] == expected_rails, (
+            f"STIM tool '{tool['name']}' supported_rails={tool['supported_rails']!r} "
+            f"expected {expected_rails!r} (derived from runtime policy)"
+        )
+
+
 def test_non_metered_tools_have_no_pricing_rule_id():
     """Non-metered tools must not declare a pricing_rule_id."""
     result = ai_tools()
@@ -236,10 +258,21 @@ def test_no_usd_pricing_in_tools():
     assert "price_usd" not in serialized
 
 
-def test_tools_list_is_module_constant():
-    """ai_tools() tools list must be identical to the _TOOLS module constant."""
-    result = ai_tools()
-    assert result["tools"] is _TOOLS
+def test_tools_built_fresh_per_request():
+    """
+    ai_tools() must build the tools list at request time, not return a
+    frozen module-level constant.  Two calls must return equal lists that
+    are not the same object — proving runtime policy is re-evaluated
+    on each invocation.
+    """
+    first = ai_tools()["tools"]
+    second = ai_tools()["tools"]
+    assert first == second, "Two calls to ai_tools() returned different tool lists"
+    assert first is not second, (
+        "ai_tools() returned the same list object on successive calls — "
+        "tools appear to be a frozen module-level constant rather than "
+        "being built fresh per request"
+    )
 
 
 # ---------------------------------------------------------------------------
