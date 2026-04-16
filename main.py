@@ -1,9 +1,11 @@
 # main.py
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from middleware.request_id import RequestIdMiddleware
 from middleware.api_key import ApiKeyMiddleware
@@ -40,10 +42,47 @@ FREE_METERED_V1_PATHS = {
 }
 
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
+DISCOVERY_START_HERE = "/v1/ai/tools"
+DISCOVERY_SECONDARY = "/v1/ai/context"
+DISCOVERY_DOCS = "/v1/docs"
+DISCOVERY_OPENAPI = "/v1/openapi.json"
 
 
 def is_protected_v1_path(path: str) -> bool:
     return path not in FREE_METERED_V1_PATHS
+
+
+def _discovery_links() -> dict[str, str]:
+    return {
+        "start_here": DISCOVERY_START_HERE,
+        "secondary": DISCOVERY_SECONDARY,
+        "docs": DISCOVERY_DOCS,
+        "openapi": DISCOVERY_OPENAPI,
+    }
+
+
+def _not_found_payload(request: Request, detail: str) -> dict[str, str]:
+    return {
+        "detail": detail,
+        "requested_path": request.url.path,
+        **_discovery_links(),
+    }
+
+
+async def _discovery_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    is_unmatched_route = (
+        exc.status_code == 404
+        and request.scope.get("route") is None
+    )
+
+    if not is_unmatched_route:
+        return await http_exception_handler(request, exc)
+
+    detail = exc.detail if isinstance(exc.detail, str) else "Not Found"
+    return JSONResponse(
+        status_code=404,
+        content=_not_found_payload(request, detail),
+    )
 
 
 def _ensure_parameter_refs(operation: dict, refs: list[str]) -> None:
@@ -203,6 +242,15 @@ def apply_api_key_security_to_openapi(v1_app: FastAPI) -> dict:
 
 
 app = FastAPI(title=APP_TITLE, version=APP_VERSION)
+app.add_exception_handler(StarletteHTTPException, _discovery_http_exception_handler)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    return {
+        "message": "Start with the machine-readable tools manifest for agent discovery.",
+        **_discovery_links(),
+    }
 
 
 @app.get("/llms.txt", include_in_schema=False)
@@ -252,6 +300,7 @@ v1 = FastAPI(
     docs_url="/docs",
     openapi_url="/openapi.json",
 )
+v1.add_exception_handler(StarletteHTTPException, _discovery_http_exception_handler)
 
 # Routers
 v1.include_router(instruments_router)

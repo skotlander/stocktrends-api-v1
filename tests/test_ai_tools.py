@@ -32,7 +32,7 @@ sys.modules.setdefault("sqlalchemy.orm", _SQLALCHEMY_MOCK)
 sys.modules.setdefault("db", _DB_MOCK)
 
 # Now safe to import project modules
-from routers.ai import _TOOL_TEMPLATES, _MANIFEST_PUBLIC_PATHS, _build_workflow_summary, ai_tools
+from routers.ai import _TOOL_TEMPLATES, _MANIFEST_PUBLIC_PATHS, _build_workflow_summary, ai_context, ai_tools
 from routers.workflows import WORKFLOW_REGISTRY
 from pricing.classifier import NON_METERED_PATHS, classify_request
 from payments.policy_provider import (
@@ -113,6 +113,42 @@ def test_ai_tools_notes_is_non_empty_list():
     result = ai_tools()
     assert isinstance(result["notes"], list)
     assert len(result["notes"]) > 0
+
+
+def test_ai_tools_notes_prioritize_tools_manifest():
+    result = ai_tools()
+    assert result["notes"][0].startswith("Start with /v1/ai/tools")
+
+
+def test_ai_context_discovery_entrypoints_prioritize_ai_tools():
+    result = ai_context()
+    assert result["discovery_entrypoints"] == {
+        "primary_machine_readable": "/v1/ai/tools",
+        "secondary_explanatory": "/v1/ai/context",
+        "docs": "/v1/docs",
+        "openapi": "/v1/openapi.json",
+    }
+
+
+def test_ai_context_discovery_lists_put_ai_tools_first():
+    result = ai_context()
+    assert result["endpoint_groups"]["discovery"][0] == "/v1/ai/tools"
+    assert result["access_model"]["public_discovery"][0] == "/v1/ai/tools"
+    assert result["recommended_first_flows"]["agent"][:2] == [
+        "/v1/ai/tools",
+        "/v1/ai/context",
+    ]
+
+
+def test_ai_context_usage_guidance_references_primary_tools_manifest():
+    result = ai_context()
+    assert result["usage_guidance"][0].startswith("Start with /v1/ai/tools")
+    assert "/v1/ai/context" in result["usage_guidance"][1]
+
+
+def test_ai_context_tools_manifest_points_to_primary_entrypoint():
+    result = ai_context()
+    assert result["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
 
 
 # ---------------------------------------------------------------------------
