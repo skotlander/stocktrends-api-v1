@@ -35,6 +35,7 @@ class EndpointPaymentPolicy:
     method: str
     allowed_rails: tuple[str, ...]
     pricing_rule_id: str | None = None
+    machine_payments_enabled: bool = True
 
 
 @dataclass
@@ -83,6 +84,23 @@ def _normalize_string_list(value, *, default: tuple[str, ...]) -> tuple[str, ...
                 items.append(normalized)
         return tuple(items) or default
     return default
+
+
+def _extract_enabled_rail_codes(value) -> tuple[str, ...]:
+    """Normalize allowed_rails whether it arrives as strings or control-plane rail objects."""
+    if not isinstance(value, (list, tuple)):
+        return ()
+    codes: list[str] = []
+    for item in value:
+        if isinstance(item, dict):
+            if not item.get("enabled", True):
+                continue
+            code = str(item.get("rail_code") or "").strip().lower()
+        else:
+            code = str(item).strip().lower()
+        if code:
+            codes.append(code)
+    return tuple(codes)
 
 
 def _normalize_string_map(value, *, default: dict[str, str]) -> dict[str, str]:
@@ -222,7 +240,7 @@ def _normalize_enabled_rails(value) -> tuple[str, ...]:
 
 def _normalize_pricing_rule_ids(value) -> tuple[str, ...]:
     if isinstance(value, dict):
-        value = list(value.values()) or list(value.keys())
+        value = list(value.keys())
 
     if not isinstance(value, (list, tuple)):
         return ()
@@ -258,19 +276,21 @@ def _normalize_endpoint_payment_policies(value) -> tuple[EndpointPaymentPolicy, 
         if not path_pattern or not method:
             continue
 
-        allowed_rails = _normalize_string_list(item.get("allowed_rails"), default=())
+        allowed_rails = _extract_enabled_rail_codes(item.get("allowed_rails"))
         endpoint_id = str(
-            item.get("endpoint_id") or item.get("endpoint_key") or item.get("id") or f"{method}:{path_pattern}"
+            item.get("endpoint_id") or item.get("endpoint_code") or item.get("endpoint_key") or item.get("id") or f"{method}:{path_pattern}"
         ).strip()
         pricing_rule_id = str(item.get("pricing_rule_id") or "").strip() or None
+        machine_payments_enabled = bool(item.get("machine_payments_enabled", True))
 
         policies.append(
             EndpointPaymentPolicy(
                 endpoint_id=endpoint_id,
                 path_pattern=path_pattern,
                 method=method,
-                allowed_rails=tuple(rail.lower() for rail in allowed_rails),
+                allowed_rails=tuple(allowed_rails),
                 pricing_rule_id=pricing_rule_id,
+                machine_payments_enabled=machine_payments_enabled,
             )
         )
 
@@ -339,9 +359,12 @@ def _build_effective_endpoint_policy(
 
     raw_policy = _lookup_exact_endpoint_policy(config, path, method)
     pricing_rule_id = raw_policy.pricing_rule_id if raw_policy else None
-    machine_payment_rails = tuple(
-        rail for rail in allowed_rails if rail in {"x402", "mpp", "crypto"}
-    )
+    if raw_policy and not raw_policy.machine_payments_enabled:
+        machine_payment_rails: tuple[str, ...] = ()
+    else:
+        machine_payment_rails = tuple(
+            rail for rail in allowed_rails if rail in {"x402", "mpp", "crypto"}
+        )
     return EffectiveEndpointPaymentPolicy(
         source="control_plane_exact",
         allowed_rails=allowed_rails,
@@ -475,6 +498,23 @@ def get_runtime_payment_policy_config(force_refresh: bool = False) -> RuntimePay
         _cached_config = fetched_config
         _cached_at = time.time()
         _last_known_good_config = fetched_config
+        if _last_reported_fallback_reason is not None:
+            logger.info(
+                "Payment policy config restored from control plane (was: %s). "
+                "version=%s environment=%s endpoints=%d",
+                _last_reported_fallback_reason,
+                fetched_config.version,
+                fetched_config.environment,
+                len(fetched_config.endpoint_payment_policies),
+            )
+        else:
+            logger.debug(
+                "Payment policy config refreshed from control plane. "
+                "version=%s environment=%s endpoints=%d",
+                fetched_config.version,
+                fetched_config.environment,
+                len(fetched_config.endpoint_payment_policies),
+            )
         _last_reported_fallback_reason = None
         return fetched_config
 
