@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -87,6 +88,20 @@ def _normalize_string_list(value, *, default: tuple[str, ...]) -> tuple[str, ...
 
 
 _MACHINE_PAYMENT_RAILS = frozenset({"x402", "mpp"})
+
+# Matches standard 8-4-4-4-12 UUID format.  Control-plane systems sometimes use
+# their internal database UUID as a policy identifier rather than the semantic
+# DB rule_name.  A UUID-like value is not a valid api_pricing_rules.rule_name and
+# would cause resolve_economic_amounts() to return (0, 0, 0).
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _is_uuid_like(value: str) -> bool:
+    """Return True if *value* looks like a UUID (internal identifier, not a DB rule_name)."""
+    return bool(_UUID_RE.match(value))
 
 
 def _extract_enabled_rail_codes(value) -> tuple[str, ...]:
@@ -283,6 +298,21 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
                 method="GET",
                 allowed_rails=("subscription", "x402", "mpp"),
                 pricing_rule_id="breadth_sector_history_paid",
+            ),
+            # --- selections/published endpoints ---
+            EndpointPaymentPolicy(
+                endpoint_id="selections_published_latest_paid",
+                path_pattern="/v1/selections/published/latest",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="selections_published_latest_paid",
+            ),
+            EndpointPaymentPolicy(
+                endpoint_id="selections_published_history_paid",
+                path_pattern="/v1/selections/published/history",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="selections_published_history_paid",
             ),
         ),
         free_metered_paths=(
@@ -482,16 +512,76 @@ def _parse_config_payload(payload: dict) -> RuntimePaymentPolicyConfig:
     )
     _parsed_endpoint_policies = _normalize_endpoint_payment_policies(_raw_endpoint_policies)
     if _parsed_endpoint_policies:
-        _cp_keys = {(p.path_pattern, p.method) for p in _parsed_endpoint_policies}
+        _defaults_by_key = {
+            (p.path_pattern, p.method): p for p in defaults.endpoint_payment_policies
+        }
+
+        # Repair pass: control-plane entries sometimes carry a UUID as their
+        # pricing_rule_id (an internal CP database key) rather than the semantic
+        # api_pricing_rules.rule_name.  A UUID is NOT a valid rule_name:
+        # resolve_economic_amounts() would query the DB, find nothing, and return
+        # (0, 0, 0), producing a zero-amount x402 challenge.
+        #
+        # Similarly, CP entries may omit machine payment rails (e.g. mpp) that
+        # are present in the authoritative defaults.
+        #
+        # For every CP entry that has a matching default, we backfill:
+        #   1. pricing_rule_id  — replace UUID with the default's rule_name
+        #   2. allowed_rails    — add any machine rails present in default but absent from CP
+        #
+        # Intentional CP decisions (valid semantic rule IDs, explicit rail exclusions
+        # for non-machine rails) are preserved.
+        def _repair_cp_policy(cp: EndpointPaymentPolicy) -> EndpointPaymentPolicy:
+            default = _defaults_by_key.get((cp.path_pattern, cp.method))
+            if default is None:
+                return cp  # no matching default — keep CP entry as-is
+
+            rule_id = cp.pricing_rule_id
+            if (not rule_id or _is_uuid_like(rule_id)) and default.pricing_rule_id:
+                logger.warning(
+                    "CP pricing_rule_id %r for %s %s looks like an internal UUID; "
+                    "backfilling from defaults: %r",
+                    rule_id, cp.method, cp.path_pattern, default.pricing_rule_id,
+                )
+                rule_id = default.pricing_rule_id
+
+            # Add machine rails that the default includes but the CP omitted
+            cp_rail_set = set(cp.allowed_rails)
+            added: list[str] = []
+            for rail in default.allowed_rails:
+                if rail in _MACHINE_PAYMENT_RAILS and rail not in cp_rail_set:
+                    added.append(rail)
+            if added:
+                logger.warning(
+                    "CP allowed_rails for %s %s missing machine rails %r; "
+                    "backfilling from defaults.",
+                    cp.method, cp.path_pattern, added,
+                )
+
+            if rule_id == cp.pricing_rule_id and not added:
+                return cp  # nothing changed
+
+            new_rails = tuple(cp.allowed_rails) + tuple(added)
+            return EndpointPaymentPolicy(
+                endpoint_id=cp.endpoint_id,
+                path_pattern=cp.path_pattern,
+                method=cp.method,
+                allowed_rails=new_rails,
+                pricing_rule_id=rule_id,
+                machine_payments_enabled=cp.machine_payments_enabled,
+            )
+
+        _repaired = tuple(_repair_cp_policy(p) for p in _parsed_endpoint_policies)
+        _cp_keys = {(p.path_pattern, p.method) for p in _repaired}
         _gap_policies = tuple(
             p for p in defaults.endpoint_payment_policies
             if (p.path_pattern, p.method) not in _cp_keys
         )
-        endpoint_payment_policies = _parsed_endpoint_policies + _gap_policies
+        endpoint_payment_policies = _repaired + _gap_policies
         if _gap_policies:
             logger.info(
                 "Payment policy config: %d control-plane endpoint policies + %d hardcoded defaults for uncovered endpoints.",
-                len(_parsed_endpoint_policies),
+                len(_repaired),
                 len(_gap_policies),
             )
     else:
