@@ -60,6 +60,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/v1/openapi.js",
             "/health",
             "/v1/pricing",
+            "/v1/pricing/catalog",
             # Workflow catalog is public discovery — no auth required.
             # /v1/cost-estimate is intentionally NOT here: it requires auth.
             "/v1/workflows",
