@@ -243,6 +243,12 @@ def classify_request(
         if ENABLE_AGENT_PAY and identified_agent and has_agent_payment_intent:
             return _agent_pay_decision(normalized_payment_method, pricing_rule_id=endpoint_policy.pricing_rule_id)
 
+        # Issue a 402 challenge for any no-auth request on an agent-pay-capable endpoint
+        # when agent pay is enabled, so the caller learns to pay rather than receiving an
+        # opaque deny. Mirrors the equivalent path in the STIM prefix block below.
+        if ENABLE_AGENT_PAY and not has_paid_auth and endpoint_policy.machine_payment_rails:
+            return _agent_pay_decision("mpp", pricing_rule_id=endpoint_policy.pricing_rule_id)
+
         if endpoint_policy.allows_subscription:
             if identified_agent and endpoint_policy.machine_payment_rails:
                 return _deny_decision("agent_payment_required")
@@ -264,9 +270,11 @@ def classify_request(
         if has_paid_auth and has_paid_plan:
             return _subscription_decision()
 
-        # Identified agent with no payment intent and no paid auth: issue a 402 challenge
-        # so the agent learns how to pay rather than receiving an opaque 403.
-        if ENABLE_AGENT_PAY and identified_agent and not has_paid_auth:
+        # Any keyless request with no paid auth: issue a 402 challenge so the caller
+        # learns how to pay rather than receiving an opaque 403. The API key middleware
+        # already gates entry to this block via is_agent_pay_enforcement_path, so all
+        # traffic here is on a known agent-pay enforcement scope.
+        if ENABLE_AGENT_PAY and not has_paid_auth:
             return _agent_pay_decision("mpp", pricing_rule_id="agent_pay_required")
 
         # Sandbox/free/test callers are not entitled to STIM subscription access.
