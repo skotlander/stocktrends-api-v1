@@ -86,8 +86,13 @@ def _normalize_string_list(value, *, default: tuple[str, ...]) -> tuple[str, ...
     return default
 
 
+_MACHINE_PAYMENT_RAILS = frozenset({"x402", "mpp", "crypto"})
+
+
 def _extract_enabled_rail_codes(value) -> tuple[str, ...]:
-    """Normalize allowed_rails whether it arrives as strings or control-plane rail objects."""
+    """Normalize allowed_rails from strings, comma-separated strings, or control-plane rail objects."""
+    if isinstance(value, str):
+        value = [item.strip() for item in value.split(",") if item.strip()]
     if not isinstance(value, (list, tuple)):
         return ()
     codes: list[str] = []
@@ -271,6 +276,9 @@ def _normalize_endpoint_payment_policies(value) -> tuple[EndpointPaymentPolicy, 
         if not isinstance(item, dict):
             continue
 
+        if not item.get("active", True):
+            continue
+
         path_pattern = str(item.get("path_pattern") or "").strip()
         method = str(item.get("method") or "").strip().upper()
         if not path_pattern or not method:
@@ -361,9 +369,10 @@ def _build_effective_endpoint_policy(
     pricing_rule_id = raw_policy.pricing_rule_id if raw_policy else None
     if raw_policy and not raw_policy.machine_payments_enabled:
         machine_payment_rails: tuple[str, ...] = ()
+        allowed_rails = tuple(r for r in allowed_rails if r not in _MACHINE_PAYMENT_RAILS)
     else:
         machine_payment_rails = tuple(
-            rail for rail in allowed_rails if rail in {"x402", "mpp", "crypto"}
+            rail for rail in allowed_rails if rail in _MACHINE_PAYMENT_RAILS
         )
     return EffectiveEndpointPaymentPolicy(
         source="control_plane_exact",

@@ -51,9 +51,16 @@ class TestExtractEnabledRailCodes:
         result = _extract_enabled_rail_codes(["Subscription", "X402"])
         assert result == ("subscription", "x402")
 
-    def test_non_list_returns_empty(self):
+    def test_comma_separated_string_parsed(self):
+        result = _extract_enabled_rail_codes("subscription,x402,mpp")
+        assert result == ("subscription", "x402", "mpp")
+
+    def test_comma_separated_string_with_spaces(self):
+        result = _extract_enabled_rail_codes("subscription, x402 , mpp")
+        assert result == ("subscription", "x402", "mpp")
+
+    def test_non_list_non_string_returns_empty(self):
         assert _extract_enabled_rail_codes(None) == ()
-        assert _extract_enabled_rail_codes("subscription") == ()
         assert _extract_enabled_rail_codes({}) == ()
 
     def test_empty_list_returns_empty(self):
@@ -273,3 +280,61 @@ class TestMachinePaymentsEnabledFlag:
         assert effective is not None
         assert effective.machine_payment_rails == ()
         assert effective.allows_subscription is True
+
+    def test_machine_payments_enabled_false_strips_machine_rails_from_allowed(self, monkeypatch):
+        cfg = self._make_config_with_policy(machine_payments_enabled=False)
+        import payments.policy_provider as pp
+        monkeypatch.setattr(pp, "get_runtime_payment_policy_config", lambda **kw: cfg)
+        effective = pp._build_effective_endpoint_policy("/v1/test", "GET")
+        assert effective is not None
+        for rail in ("x402", "mpp", "crypto"):
+            assert rail not in effective.allowed_rails, f"{rail} should not be in allowed_rails"
+        assert "subscription" in effective.allowed_rails
+
+    def test_machine_payments_enabled_false_affects_accepted_methods(self, monkeypatch):
+        cfg = self._make_config_with_policy(machine_payments_enabled=False)
+        import payments.policy_provider as pp
+        monkeypatch.setattr(pp, "get_runtime_payment_policy_config", lambda **kw: cfg)
+        accepted = pp.get_accepted_payment_methods_for_path("/v1/test", "test_endpoint", method="GET")
+        for rail in ("x402", "mpp", "crypto"):
+            assert rail not in accepted.split(","), f"{rail} should not appear in accepted methods"
+        assert "subscription" in accepted.split(",")
+
+
+# ---------------------------------------------------------------------------
+# active=False endpoint policies skipped during normalization
+# ---------------------------------------------------------------------------
+
+class TestActiveFieldFiltering:
+    def test_inactive_policy_skipped(self):
+        value = [
+            {
+                "endpoint_id": "active_ep",
+                "path_pattern": "/v1/active",
+                "method": "GET",
+                "active": True,
+                "allowed_rails": ["subscription"],
+            },
+            {
+                "endpoint_id": "inactive_ep",
+                "path_pattern": "/v1/inactive",
+                "method": "GET",
+                "active": False,
+                "allowed_rails": ["subscription"],
+            },
+        ]
+        result = _normalize_endpoint_payment_policies(value)
+        assert len(result) == 1
+        assert result[0].path_pattern == "/v1/active"
+
+    def test_active_defaults_to_true_when_absent(self):
+        value = [
+            {
+                "endpoint_id": "ep",
+                "path_pattern": "/v1/test",
+                "method": "GET",
+                "allowed_rails": ["subscription"],
+            }
+        ]
+        result = _normalize_endpoint_payment_policies(value)
+        assert len(result) == 1
