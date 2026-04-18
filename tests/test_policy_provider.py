@@ -9,11 +9,14 @@ from __future__ import annotations
 import pytest
 
 from payments.policy_provider import (
+    _MACHINE_PAYMENT_RAILS,
+    _default_policy_config,
     _extract_enabled_rail_codes,
     _normalize_endpoint_payment_policies,
     _normalize_pricing_rule_ids,
     _parse_config_payload,
     _build_effective_endpoint_policy,
+    get_accepted_payment_methods_for_path,
     EndpointPaymentPolicy,
 )
 
@@ -201,8 +204,10 @@ _CONTROL_PLANE_PAYLOAD = {
 
 class TestParseConfigPayload:
     def test_endpoint_policies_parsed(self):
+        # The control-plane payload covers 2 endpoints. Gap-filling merges in the
+        # remaining hardcoded defaults for uncovered endpoints (6 more = 8 total).
         cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD)
-        assert len(cfg.endpoint_payment_policies) == 2
+        assert len(cfg.endpoint_payment_policies) == 8
 
     def test_allowed_rails_are_strings(self):
         cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD)
@@ -338,3 +343,124 @@ class TestActiveFieldFiltering:
         ]
         result = _normalize_endpoint_payment_policies(value)
         assert len(result) == 1
+
+
+# ---------------------------------------------------------------------------
+# Accepted-method normalization — crypto removed, subscription included
+# ---------------------------------------------------------------------------
+
+class TestAcceptedMethodNormalization:
+    """Verify that crypto is gone and subscription,x402,mpp is the standard
+    surface for all paid/agent-pay endpoints."""
+
+    def test_machine_payment_rails_does_not_contain_crypto(self):
+        assert "crypto" not in _MACHINE_PAYMENT_RAILS
+
+    def test_machine_payment_rails_contains_x402_and_mpp(self):
+        assert "x402" in _MACHINE_PAYMENT_RAILS
+        assert "mpp" in _MACHINE_PAYMENT_RAILS
+
+    def test_default_config_agent_required_default_has_no_crypto(self):
+        cfg = _default_policy_config()
+        assert "crypto" not in cfg.accepted_payment_methods_agent_required_default.split(",")
+
+    def test_default_config_agent_required_default_includes_subscription(self):
+        cfg = _default_policy_config()
+        assert "subscription" in cfg.accepted_payment_methods_agent_required_default.split(",")
+
+    def test_default_config_agent_required_default_normalized(self):
+        cfg = _default_policy_config()
+        assert cfg.accepted_payment_methods_agent_required_default == "subscription,x402,mpp"
+
+    def test_default_config_agent_optional_normalized(self):
+        cfg = _default_policy_config()
+        assert cfg.accepted_payment_methods_agent_optional == "subscription,x402,mpp"
+
+    def test_default_config_by_method_map_has_no_crypto_key(self):
+        cfg = _default_policy_config()
+        assert "crypto" not in cfg.accepted_payment_methods_agent_required_by_method
+
+    def test_default_config_by_method_map_has_x402_and_mpp(self):
+        cfg = _default_policy_config()
+        assert "x402" in cfg.accepted_payment_methods_agent_required_by_method
+        assert "mpp" in cfg.accepted_payment_methods_agent_required_by_method
+
+
+# ---------------------------------------------------------------------------
+# get_accepted_payment_methods_for_path — stim and screener paths
+# ---------------------------------------------------------------------------
+
+class TestGetAcceptedPaymentMethodsForPath:
+    """End-to-end check that the header value assembled for each endpoint
+    matches the intended product model: subscription,x402,mpp."""
+
+    def test_stim_latest_stim_paid_returns_normalized_methods(self, monkeypatch):
+        import payments.policy_provider as pp
+        monkeypatch.setattr(pp, "get_runtime_payment_policy_config", lambda **kw: _default_policy_config())
+        result = get_accepted_payment_methods_for_path(
+            "/v1/stim/latest",
+            "stim_paid",
+            method="GET",
+        )
+        assert result == "subscription,x402,mpp"
+
+    def test_stim_latest_no_crypto(self, monkeypatch):
+        import payments.policy_provider as pp
+        monkeypatch.setattr(pp, "get_runtime_payment_policy_config", lambda **kw: _default_policy_config())
+        result = get_accepted_payment_methods_for_path(
+            "/v1/stim/latest",
+            "stim_paid",
+            method="GET",
+        )
+        assert "crypto" not in result.split(",")
+
+    def test_stim_latest_includes_subscription(self, monkeypatch):
+        import payments.policy_provider as pp
+        monkeypatch.setattr(pp, "get_runtime_payment_policy_config", lambda **kw: _default_policy_config())
+        result = get_accepted_payment_methods_for_path(
+            "/v1/stim/latest",
+            "stim_paid",
+            method="GET",
+        )
+        assert "subscription" in result.split(",")
+
+    def test_agent_screener_top_returns_normalized_methods(self, monkeypatch):
+        import payments.policy_provider as pp
+        monkeypatch.setattr(pp, "get_runtime_payment_policy_config", lambda **kw: _default_policy_config())
+        result = get_accepted_payment_methods_for_path(
+            "/v1/agent/screener/top",
+            "agent_screener_top",
+            method="GET",
+        )
+        assert result == "subscription,x402,mpp"
+
+    def test_agent_screener_top_no_crypto(self, monkeypatch):
+        import payments.policy_provider as pp
+        monkeypatch.setattr(pp, "get_runtime_payment_policy_config", lambda **kw: _default_policy_config())
+        result = get_accepted_payment_methods_for_path(
+            "/v1/agent/screener/top",
+            "agent_screener_top",
+            method="GET",
+        )
+        assert "crypto" not in result.split(",")
+
+    def test_no_paid_endpoint_surfaces_crypto(self, monkeypatch):
+        import payments.policy_provider as pp
+        cfg = _default_policy_config()
+        monkeypatch.setattr(pp, "get_runtime_payment_policy_config", lambda **kw: cfg)
+        paid_paths = [
+            ("/v1/stim/latest", "stim_paid", "GET"),
+            ("/v1/agent/screener/top", "agent_screener_top", "GET"),
+            ("/v1/market/regime/latest", "market_regime_latest", "GET"),
+            ("/v1/market/regime/history", "market_regime_history", "GET"),
+            ("/v1/market/regime/forecast", "market_regime_forecast", "GET"),
+            ("/v1/decision/evaluate-symbol", "evaluate_symbol", "POST"),
+            ("/v1/portfolio/construct", "portfolio_construct", "POST"),
+            ("/v1/portfolio/evaluate", "portfolio_evaluate", "POST"),
+            ("/v1/portfolio/compare", "portfolio_compare", "POST"),
+        ]
+        for path, rule_id, http_method in paid_paths:
+            result = get_accepted_payment_methods_for_path(path, rule_id, method=http_method)
+            assert "crypto" not in result.split(","), (
+                f"crypto surfaced for {path}: got {result!r}"
+            )

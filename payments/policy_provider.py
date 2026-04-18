@@ -63,7 +63,7 @@ class RuntimePaymentPolicyConfig:
     enforcement_path_prefixes: tuple[str, ...]
     accepted_payment_methods_agent_required_default: str
     accepted_payment_methods_agent_required_by_method: dict[str, str] = field(default_factory=dict)
-    accepted_payment_methods_agent_optional: str = "subscription,mpp,x402,crypto"
+    accepted_payment_methods_agent_optional: str = "subscription,x402,mpp"
     accepted_payment_methods_subscription: str = "subscription"
     accepted_payment_methods_default: str = "none"
 
@@ -86,7 +86,7 @@ def _normalize_string_list(value, *, default: tuple[str, ...]) -> tuple[str, ...
     return default
 
 
-_MACHINE_PAYMENT_RAILS = frozenset({"x402", "mpp", "crypto"})
+_MACHINE_PAYMENT_RAILS = frozenset({"x402", "mpp"})
 
 
 def _extract_enabled_rail_codes(value) -> tuple[str, ...]:
@@ -218,13 +218,12 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
             "AGENT_PAY_ENFORCE_PATH_PREFIXES",
             "/v1/stim",
         ),
-        accepted_payment_methods_agent_required_default="mpp,x402,crypto",
+        accepted_payment_methods_agent_required_default="subscription,x402,mpp",
         accepted_payment_methods_agent_required_by_method={
             "x402": "x402",
             "mpp": "mpp",
-            "crypto": "crypto",
         },
-        accepted_payment_methods_agent_optional="subscription,mpp,x402,crypto",
+        accepted_payment_methods_agent_optional="subscription,x402,mpp",
         accepted_payment_methods_subscription="subscription",
         accepted_payment_methods_default="none",
     )
@@ -633,7 +632,7 @@ def get_accepted_payment_methods_for_path(
     if endpoint_allowed_rails is not None:
         return ",".join(endpoint_allowed_rails) if endpoint_allowed_rails else config.accepted_payment_methods_default
 
-    if pricing_rule_id == "agent_pay_required":
+    if pricing_rule_id in ("stim_paid", "agent_pay_required"):
         if normalized_method:
             return config.accepted_payment_methods_agent_required_by_method.get(
                 normalized_method,

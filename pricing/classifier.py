@@ -247,7 +247,7 @@ def classify_request(
         # when agent pay is enabled, so the caller learns to pay rather than receiving an
         # opaque deny. Mirrors the equivalent path in the STIM prefix block below.
         if ENABLE_AGENT_PAY and not has_paid_auth and endpoint_policy.machine_payment_rails:
-            return _agent_pay_decision("mpp", pricing_rule_id=endpoint_policy.pricing_rule_id)
+            return _agent_pay_decision("x402", pricing_rule_id=endpoint_policy.pricing_rule_id)
 
         if endpoint_policy.allows_subscription:
             if identified_agent and endpoint_policy.machine_payment_rails:
@@ -264,7 +264,7 @@ def classify_request(
     if is_stim:
         # Explicit Lane B path: identified agent presents a machine-payment intent.
         if ENABLE_AGENT_PAY and identified_agent and has_agent_payment_intent:
-            return _agent_pay_decision(normalized_payment_method)
+            return _agent_pay_decision(normalized_payment_method, pricing_rule_id="stim_paid")
 
         # Paid subscription customer remains entitled on the subscription lane.
         if has_paid_auth and has_paid_plan:
@@ -275,7 +275,7 @@ def classify_request(
         # already gates entry to this block via is_agent_pay_enforcement_path, so all
         # traffic here is on a known agent-pay enforcement scope.
         if ENABLE_AGENT_PAY and not has_paid_auth:
-            return _agent_pay_decision("mpp", pricing_rule_id="agent_pay_required")
+            return _agent_pay_decision("x402", pricing_rule_id="stim_paid")
 
         # Sandbox/free/test callers are not entitled to STIM subscription access.
         normalized_plan = (plan_code or "").strip().lower()

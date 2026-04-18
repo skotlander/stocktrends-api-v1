@@ -12,7 +12,7 @@ SELECT
     COUNT(*) AS presented_requests,
     SUM(billed_amount_usd) AS billed_usd
 FROM api_request_economics
-WHERE pricing_rule_id = 'agent_pay_required'
+WHERE pricing_rule_id = 'stim_paid'
   AND payment_status = 'presented'
   AND created_at >= '2026-03-01'
   AND created_at <  '2026-04-01'
@@ -59,7 +59,7 @@ SELECT
     customer_id,
     COUNT(*) AS failed_requests
 FROM api_request_economics
-WHERE pricing_rule_id = 'agent_pay_required'
+WHERE pricing_rule_id = 'stim_paid'
   AND payment_status = 'failed_validation'
   AND created_at >= '2026-03-01'
   AND created_at <  '2026-04-01'
@@ -101,10 +101,10 @@ GROUP BY pricing_rule_id, payment_status;
 * `default_subscription`
    covered by plan  not billed per request
 
-* `agent_pay_required + presented`
+* `stim_paid + presented`
    billable usage
 
-* `agent_pay_required + failed_validation`
+* `stim_paid + failed_validation`
    not billed, but indicates failed payment attempts
 
 ---
