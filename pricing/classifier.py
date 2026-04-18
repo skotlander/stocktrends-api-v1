@@ -264,14 +264,15 @@ def classify_request(
         if has_paid_auth and has_paid_plan:
             return _subscription_decision()
 
+        # Identified agent with no payment intent and no paid auth: issue a 402 challenge
+        # so the agent learns how to pay rather than receiving an opaque 403.
+        if ENABLE_AGENT_PAY and identified_agent and not has_paid_auth:
+            return _agent_pay_decision("mpp", pricing_rule_id="agent_pay_required")
+
         # Sandbox/free/test callers are not entitled to STIM subscription access.
         normalized_plan = (plan_code or "").strip().lower()
         if normalized_plan == "sandbox":
             return _deny_decision("sandbox_plan_denied")
-
-        # Agent-like request without valid payment path or paid entitlement.
-        if identified_agent and not has_paid_auth:
-            return _deny_decision("agent_payment_required")
 
         if not has_paid_auth:
             return _deny_decision("authentication_required")

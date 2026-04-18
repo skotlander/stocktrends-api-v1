@@ -392,9 +392,20 @@ def _parse_config_payload(payload: dict) -> RuntimePaymentPolicyConfig:
     accepted_methods = policy.get("accepted_payment_methods")
     if not isinstance(accepted_methods, dict):
         accepted_methods = {}
-    endpoint_payment_policies = _normalize_endpoint_payment_policies(
-        policy.get("endpoint_payment_policies", payload.get("endpoint_payment_policies"))
+    _raw_endpoint_policies = policy.get(
+        "endpoint_payment_policies",
+        payload.get("endpoint_payment_policies"),
     )
+    _parsed_endpoint_policies = _normalize_endpoint_payment_policies(_raw_endpoint_policies)
+    if _parsed_endpoint_policies:
+        endpoint_payment_policies = _parsed_endpoint_policies
+    else:
+        logger.warning(
+            "Payment policy config provided no endpoint_payment_policies; "
+            "falling back to hardcoded defaults (%d entries).",
+            len(defaults.endpoint_payment_policies),
+        )
+        endpoint_payment_policies = defaults.endpoint_payment_policies
 
     agent_required = accepted_methods.get("agent_pay_required")
     if isinstance(agent_required, dict):
