@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import os
 from types import SimpleNamespace
 from typing import Optional
 
@@ -10,7 +11,9 @@ from sqlalchemy import text
 
 from db import get_auth_engine
 from metering.logger import log_auth_failure_event
-from payments.policy_provider import is_agent_pay_auth_candidate, is_free_metered_path
+from payments.policy_provider import is_agent_pay_auth_candidate, is_agent_pay_enforcement_path, is_free_metered_path
+
+_ENABLE_AGENT_PAY = os.getenv("ENABLE_AGENT_PAY", "false").lower() == "true"
 
 
 ALLOWED_SUBSCRIPTION_STATUSES = {"active", "trialing"}
@@ -256,9 +259,19 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Lane B anonymous agent-pay entry:
-        # allow /v1/stim* through without an API key only when the request clearly presents
+        # allow through without an API key when the request clearly presents
         # as an agent payment attempt. Subscription callers can still use API keys normally.
         if self._is_agent_pay_candidate(request):
+            self._apply_agent_pay_context(request)
+            return await call_next(request)
+
+        # Lane B path-based fallback: when agent pay is enabled, keyless requests on
+        # enforcement-scoped paths are forwarded to MeteringMiddleware so the 402 challenge
+        # flow can run. This handles the initial anonymous request before any agent-pay
+        # headers are present. is_agent_pay_enforcement_path() does not check ENABLE_AGENT_PAY
+        # itself, so the guard is applied explicitly here.
+        # API-key holders are unaffected — `not raw_key` ensures they continue to normal auth.
+        if _ENABLE_AGENT_PAY and not raw_key and is_agent_pay_enforcement_path(path, method=request.method):
             self._apply_agent_pay_context(request)
             return await call_next(request)
 
