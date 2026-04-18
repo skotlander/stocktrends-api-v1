@@ -1161,7 +1161,20 @@ class MeteringMiddleware(BaseHTTPMiddleware):
 
             if payment_rail == "x402":
                 if enforcement_result.outcome == "challenge":
-                    challenge_body = enforcement_result.challenge_body
+                    # Resolve accepted methods from policy before building the
+                    # response so both the header and the body carry the full
+                    # endpoint capability list (subscription,x402,mpp for paid
+                    # endpoints) rather than the selected challenge rail only.
+                    pricing_rule_for_headers = decision.econ_pricing_rule_id or decision.log_pricing_rule_id
+                    accepted_methods_str = get_accepted_payment_methods(
+                        path,
+                        pricing_rule_for_headers,
+                        method=method,
+                    )
+
+                    # Shallow-copy so we don't mutate the cached enforcement result.
+                    challenge_body = dict(enforcement_result.challenge_body)
+                    challenge_body["accepted_payment_methods"] = accepted_methods_str.split(",")
                     payment_required_header = enforcement_result.payment_required_header
 
                     response = JSONResponse(
@@ -1170,17 +1183,11 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     )
                     response.headers["PAYMENT-REQUIRED"] = payment_required_header
 
-                    pricing_rule_for_headers = decision.econ_pricing_rule_id or decision.log_pricing_rule_id
                     apply_pricing_headers(
                         response,
                         pricing_rule_id=pricing_rule_for_headers,
                         payment_required=True,
-                        accepted_methods=get_accepted_payment_methods(
-                            path,
-                            pricing_rule_for_headers,
-                            method=method,
-                            enforced_payment_method="x402",
-                        ),
+                        accepted_methods=accepted_methods_str,
                     )
 
                     latency_ms = int((time.time() - start_time) * 1000)
