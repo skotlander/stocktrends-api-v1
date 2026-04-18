@@ -206,7 +206,8 @@ def test_metered_endpoint_policy_tools_have_pricing_rule_id():
     for tool in result["tools"]:
         if not tool["metered"]:
             continue
-        # STIM paths have dynamic rule IDs (subscription vs agent_pay_required).
+        # STIM paths have dynamic rule IDs (default_subscription for subscription
+        # callers, stim_paid for agent-pay callers).
         # They are metered but pricing_rule_id=None by design — skip them.
         if is_agent_pay_route(tool["endpoint"], tool["method"]):
             continue
@@ -478,7 +479,7 @@ def test_regression_stim_tools():
     /v1/stim/* paths are STIM agent-pay prefix routes.
     Manifest must reflect: auth_required=True, metered=True, pricing_rule_id=None.
     pricing_rule_id is None because the rule depends on the access method
-    (default_subscription for subscription callers, agent_pay_required for agent-pay).
+    (default_subscription for subscription callers, stim_paid for agent-pay callers).
     """
     result = ai_tools()
     stim_tools = [t for t in result["tools"] if t["endpoint"].startswith("/v1/stim")]
