@@ -99,8 +99,12 @@ class TestAnonymousChallengePath:
         )
         assert decision.econ_payment_required == 1
         assert decision.econ_payment_status == "pending"
-        assert decision.econ_pricing_rule_id == "stim_paid", (
-            f"expected stim_paid rule, got {decision.econ_pricing_rule_id!r}"
+        # /v1/stim/latest now has an explicit EndpointPaymentPolicy mapping it to the
+        # active DB rule 'stim_latest_paid'. The old fallback rule 'stim_paid' was
+        # deactivated when per-endpoint DB rules were introduced; using it would produce
+        # zero-amount x402 challenges. The explicit policy must take precedence.
+        assert decision.econ_pricing_rule_id == "stim_latest_paid", (
+            f"expected stim_latest_paid (active per-endpoint rule), got {decision.econ_pricing_rule_id!r}"
         )
 
     def test_stim_anon_does_not_default_to_mpp(self, monkeypatch):
@@ -221,3 +225,141 @@ class TestSubscriptionPreserved:
         assert decision.access_granted is True
         assert decision.econ_payment_method == "subscription"
         assert decision.econ_payment_required == 0
+
+
+# ---------------------------------------------------------------------------
+# Per-endpoint policy rule IDs — zero-amount regression guard
+# ---------------------------------------------------------------------------
+
+def _mock_explicit_endpoint_policy(monkeypatch, path: str, pricing_rule_id: str):
+    """Inject an explicit EffectiveEndpointPaymentPolicy for a specific path,
+    mirroring the entries added to _default_policy_config() for stim, indicators,
+    prices, selections, stwr, and breadth endpoints."""
+    from payments.policy_provider import EffectiveEndpointPaymentPolicy
+
+    policy = EffectiveEndpointPaymentPolicy(
+        source="test",
+        allowed_rails=("subscription", "x402", "mpp"),
+        machine_payment_rails=("x402", "mpp"),
+        allows_subscription=True,
+        pricing_rule_id=pricing_rule_id,
+    )
+
+    def _fake_get_effective(p, method=None):
+        if p == path:
+            return policy
+        return None
+
+    import payments.policy_provider as pp
+    monkeypatch.setattr(pp, "get_effective_endpoint_payment_policy", _fake_get_effective)
+    monkeypatch.setattr(pp, "get_allowed_payment_rails_for_path",
+                        lambda p, method=None: policy.allowed_rails if p == path else None)
+    monkeypatch.setattr(pp, "get_agent_pay_auth_bypass_methods",
+                        lambda p, method=None: ("x402", "mpp") if p == path else ())
+    monkeypatch.setattr(pp, "is_agent_pay_route",
+                        lambda p, method=None: p == path)
+    monkeypatch.setattr(pp, "is_free_metered_path", lambda p: False)
+
+
+class TestPerEndpointPricingRuleId:
+    """Explicit endpoint payment policies must propagate the correct
+    pricing_rule_id into PricingDecision so that resolve_economic_amounts()
+    looks up the right (active) DB row and produces a non-zero STC/USD value.
+
+    This is a regression guard for the zero-amount x402 challenge bug where
+    classifier.py's is_stim fallback block hardcoded the inactive 'stim_paid'
+    rule name.  Once stim/latest and stim/history have explicit endpoint
+    policies, they must use 'stim_latest_paid' / 'stim_history_paid'.
+    """
+
+    def test_stim_latest_explicit_policy_uses_stim_latest_paid(self, monkeypatch):
+        _enable_agent_pay(monkeypatch)
+        _mock_explicit_endpoint_policy(monkeypatch, "/v1/stim/latest", "stim_latest_paid")
+
+        decision = classify_request(
+            path="/v1/stim/latest",
+            has_paid_auth=False,
+            payment_method_header=None,
+            plan_code=None,
+            agent_identifier=None,
+            method="GET",
+        )
+
+        assert decision.econ_pricing_rule_id == "stim_latest_paid", (
+            f"expected stim_latest_paid, got {decision.econ_pricing_rule_id!r} — "
+            "stale 'stim_paid' rule is inactive in DB and would produce zero amounts"
+        )
+        assert decision.econ_payment_method == "x402"
+        assert decision.econ_payment_required == 1
+
+    def test_stim_history_explicit_policy_uses_stim_history_paid(self, monkeypatch):
+        _enable_agent_pay(monkeypatch)
+        _mock_explicit_endpoint_policy(monkeypatch, "/v1/stim/history", "stim_history_paid")
+
+        decision = classify_request(
+            path="/v1/stim/history",
+            has_paid_auth=False,
+            payment_method_header=None,
+            plan_code=None,
+            agent_identifier=None,
+            method="GET",
+        )
+
+        assert decision.econ_pricing_rule_id == "stim_history_paid", (
+            f"expected stim_history_paid, got {decision.econ_pricing_rule_id!r}"
+        )
+        assert decision.econ_payment_method == "x402"
+
+    def test_indicators_latest_explicit_policy_uses_indicators_latest_paid(self, monkeypatch):
+        _enable_agent_pay(monkeypatch)
+        _mock_explicit_endpoint_policy(monkeypatch, "/v1/indicators/latest", "indicators_latest_paid")
+
+        decision = classify_request(
+            path="/v1/indicators/latest",
+            has_paid_auth=False,
+            payment_method_header=None,
+            plan_code=None,
+            agent_identifier=None,
+            method="GET",
+        )
+
+        assert decision.econ_pricing_rule_id == "indicators_latest_paid"
+        assert decision.econ_payment_method == "x402"
+        assert decision.econ_payment_required == 1
+
+    def test_prices_latest_explicit_policy_uses_prices_latest_paid(self, monkeypatch):
+        _enable_agent_pay(monkeypatch)
+        _mock_explicit_endpoint_policy(monkeypatch, "/v1/prices/latest", "prices_latest_paid")
+
+        decision = classify_request(
+            path="/v1/prices/latest",
+            has_paid_auth=False,
+            payment_method_header=None,
+            plan_code=None,
+            agent_identifier=None,
+            method="GET",
+        )
+
+        assert decision.econ_pricing_rule_id == "prices_latest_paid"
+        assert decision.econ_payment_method == "x402"
+        assert decision.econ_payment_required == 1
+
+    def test_explicit_policy_subscription_preserves_correct_rule_id(self, monkeypatch):
+        """Subscription requests must also use the per-endpoint rule ID, not 'stim_paid'."""
+        _enable_agent_pay(monkeypatch)
+        _mock_explicit_endpoint_policy(monkeypatch, "/v1/stim/latest", "stim_latest_paid")
+
+        decision = classify_request(
+            path="/v1/stim/latest",
+            has_paid_auth=True,
+            payment_method_header=None,
+            plan_code="pro",
+            agent_identifier=None,
+            method="GET",
+        )
+
+        assert decision.access_granted is True
+        assert decision.econ_payment_method == "subscription"
+        assert decision.econ_pricing_rule_id == "stim_latest_paid", (
+            f"subscription lane must use per-endpoint rule id, got {decision.econ_pricing_rule_id!r}"
+        )

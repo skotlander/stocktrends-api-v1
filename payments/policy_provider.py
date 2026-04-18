@@ -199,6 +199,91 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
                 allowed_rails=("subscription", "x402", "mpp"),
                 pricing_rule_id="portfolio_compare",
             ),
+            # --- stim endpoints (explicit per-endpoint rules supersede the /v1/stim prefix
+            #     fallback; each maps to its own active DB pricing rule so resolve_economic_amounts
+            #     returns the correct non-zero STC/USD values for the x402 challenge) ---
+            EndpointPaymentPolicy(
+                endpoint_id="stim_latest_paid",
+                path_pattern="/v1/stim/latest",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="stim_latest_paid",
+            ),
+            EndpointPaymentPolicy(
+                endpoint_id="stim_history_paid",
+                path_pattern="/v1/stim/history",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="stim_history_paid",
+            ),
+            # --- indicators endpoints ---
+            EndpointPaymentPolicy(
+                endpoint_id="indicators_latest_paid",
+                path_pattern="/v1/indicators/latest",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="indicators_latest_paid",
+            ),
+            EndpointPaymentPolicy(
+                endpoint_id="indicators_history_paid",
+                path_pattern="/v1/indicators/history",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="indicators_history_paid",
+            ),
+            # --- prices endpoints ---
+            EndpointPaymentPolicy(
+                endpoint_id="prices_latest_paid",
+                path_pattern="/v1/prices/latest",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="prices_latest_paid",
+            ),
+            EndpointPaymentPolicy(
+                endpoint_id="prices_history_paid",
+                path_pattern="/v1/prices/history",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="prices_history_paid",
+            ),
+            # --- selections endpoints ---
+            EndpointPaymentPolicy(
+                endpoint_id="selections_latest_paid",
+                path_pattern="/v1/selections/latest",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="selections_latest_paid",
+            ),
+            EndpointPaymentPolicy(
+                endpoint_id="selections_history_paid",
+                path_pattern="/v1/selections/history",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="selections_history_paid",
+            ),
+            # --- stwr report endpoints ---
+            EndpointPaymentPolicy(
+                endpoint_id="stwr_reports_latest_paid",
+                path_pattern="/v1/stwr/reports/latest",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="stwr_reports_latest_paid",
+            ),
+            EndpointPaymentPolicy(
+                endpoint_id="stwr_reports_history_paid",
+                path_pattern="/v1/stwr/reports/history",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="stwr_reports_history_paid",
+            ),
+            # --- breadth history endpoint (sector/latest is free-metered) ---
+            EndpointPaymentPolicy(
+                endpoint_id="breadth_sector_history_paid",
+                path_pattern="/v1/breadth/sector/history",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="breadth_sector_history_paid",
+            ),
         ),
         free_metered_paths=(
             "/v1/ai/context",

@@ -199,17 +199,12 @@ def test_required_tools_present():
 def test_metered_endpoint_policy_tools_have_pricing_rule_id():
     """
     Tools with an exact endpoint_payment_policy must declare a pricing_rule_id.
-    STIM tools are excluded: their rule ID is dynamic (depends on access method)
-    and is intentionally None in the manifest.
+    Agent-pay routes (stim, indicators, prices, selections, stwr, breadth) all have
+    explicit per-endpoint policies now and therefore carry stable pricing_rule_ids.
     """
     result = ai_tools()
     for tool in result["tools"]:
         if not tool["metered"]:
-            continue
-        # STIM paths have dynamic rule IDs (default_subscription for subscription
-        # callers, stim_paid for agent-pay callers).
-        # They are metered but pricing_rule_id=None by design — skip them.
-        if is_agent_pay_route(tool["endpoint"], tool["method"]):
             continue
         # Free-metered paths carry a stable rule ID.
         if is_free_metered_path(tool["endpoint"]):
@@ -222,10 +217,13 @@ def test_metered_endpoint_policy_tools_have_pricing_rule_id():
         )
 
 
-def test_stim_tools_metered_but_no_pricing_rule_id():
+def test_stim_tools_metered_and_have_pricing_rule_id():
     """
-    STIM tools must be metered=True but pricing_rule_id=None because the
-    runtime rule depends on the access method (subscription vs agent-pay).
+    STIM tools must be metered=True and carry a stable per-endpoint pricing_rule_id.
+    /v1/stim/latest → stim_latest_paid
+    /v1/stim/history → stim_history_paid
+    (Before per-endpoint policies were added, stim tools had pricing_rule_id=None
+    because the fallback stim_paid wildcard rule was used.  Explicit policies fix this.)
     """
     result = ai_tools()
     stim_tools = [t for t in result["tools"] if t["endpoint"].startswith("/v1/stim")]
@@ -234,8 +232,8 @@ def test_stim_tools_metered_but_no_pricing_rule_id():
         assert tool["metered"] is True, (
             f"STIM tool '{tool['name']}' must be metered=True"
         )
-        assert tool["pricing_rule_id"] is None, (
-            f"STIM tool '{tool['name']}' must have pricing_rule_id=None (dynamic rule)"
+        assert tool["pricing_rule_id"] is not None, (
+            f"STIM tool '{tool['name']}' must have a pricing_rule_id (per-endpoint active DB rule)"
         )
 
 
@@ -476,10 +474,11 @@ def test_regression_pricing_catalog_tool():
 
 def test_regression_stim_tools():
     """
-    /v1/stim/* paths are STIM agent-pay prefix routes.
-    Manifest must reflect: auth_required=True, metered=True, pricing_rule_id=None.
-    pricing_rule_id is None because the rule depends on the access method
-    (default_subscription for subscription callers, stim_paid for agent-pay callers).
+    /v1/stim/* paths have explicit per-endpoint payment policies.
+    Manifest must reflect: auth_required=True, metered=True,
+    pricing_rule_id is not None (stable per-endpoint active DB rule).
+    Previously stim tools used pricing_rule_id=None due to a prefix-based fallback
+    that mapped to the now-inactive 'stim_paid' wildcard rule; explicit policies fix this.
     """
     result = ai_tools()
     stim_tools = [t for t in result["tools"] if t["endpoint"].startswith("/v1/stim")]
@@ -491,8 +490,8 @@ def test_regression_stim_tools():
         assert tool["metered"] is True, (
             f"STIM tool '{tool['name']}' must be metered=True"
         )
-        assert tool["pricing_rule_id"] is None, (
-            f"STIM tool '{tool['name']}' must have pricing_rule_id=None (dynamic rule)"
+        assert tool["pricing_rule_id"] is not None, (
+            f"STIM tool '{tool['name']}' must have a pricing_rule_id (per-endpoint active DB rule)"
         )
 
 
