@@ -284,7 +284,7 @@ def _resolve_config_url() -> str | None:
 
     control_plane_base = (os.getenv("CONTROL_PLANE_BASE_URL") or "").strip()
     if control_plane_base:
-        return f"{control_plane_base.rstrip('/')}/v1/pricing/catalog"
+        return f"{control_plane_base.rstrip('/')}/v1/runtime/payment-config"
 
     return None
 
