@@ -398,7 +398,18 @@ def _parse_config_payload(payload: dict) -> RuntimePaymentPolicyConfig:
     )
     _parsed_endpoint_policies = _normalize_endpoint_payment_policies(_raw_endpoint_policies)
     if _parsed_endpoint_policies:
-        endpoint_payment_policies = _parsed_endpoint_policies
+        _cp_keys = {(p.path_pattern, p.method) for p in _parsed_endpoint_policies}
+        _gap_policies = tuple(
+            p for p in defaults.endpoint_payment_policies
+            if (p.path_pattern, p.method) not in _cp_keys
+        )
+        endpoint_payment_policies = _parsed_endpoint_policies + _gap_policies
+        if _gap_policies:
+            logger.info(
+                "Payment policy config: %d control-plane endpoint policies + %d hardcoded defaults for uncovered endpoints.",
+                len(_parsed_endpoint_policies),
+                len(_gap_policies),
+            )
     else:
         logger.warning(
             "Payment policy config provided no endpoint_payment_policies; "
