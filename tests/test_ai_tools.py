@@ -97,7 +97,12 @@ def test_classify_request_free_even_with_auth():
 def test_ai_tools_response_top_level_keys():
     """Response must include all required top-level keys."""
     result = ai_tools()
-    required_keys = {"provider", "version", "tools", "workflows", "pricing", "auth", "notes"}
+    required_keys = {
+        "provider", "version", "tools", "workflows", "pricing", "auth", "notes",
+        # onboarding guidance fields
+        "discovery_entrypoints", "recommended_first_call", "quickstart",
+        "recommended_first_workflows", "agent_onboarding_notes",
+    }
     assert required_keys.issubset(result.keys()), (
         f"Missing keys: {required_keys - result.keys()}"
     )
@@ -585,3 +590,97 @@ def test_manifest_public_paths_subset_of_non_metered_paths():
             f"_MANIFEST_PUBLIC_PATHS path '{path}' is neither in NON_METERED_PATHS "
             f"nor a free_metered_path — public callers would be metered or denied"
         )
+
+
+# ---------------------------------------------------------------------------
+# 12. Onboarding / guidance fields
+# ---------------------------------------------------------------------------
+
+def test_discovery_entrypoints_in_ai_tools():
+    """ai_tools must expose discovery_entrypoints mirroring ai_context."""
+    result = ai_tools()
+    de = result["discovery_entrypoints"]
+    assert de["primary_machine_readable"] == "/v1/ai/tools"
+    assert de["secondary_explanatory"] == "/v1/ai/context"
+    assert de["docs"] == "/v1/docs"
+    assert de["openapi"] == "/v1/openapi.json"
+
+
+def test_discovery_entrypoints_consistent_between_tools_and_context():
+    """discovery_entrypoints must be identical in ai_tools and ai_context."""
+    tools_result = ai_tools()
+    context_result = ai_context()
+    assert tools_result["discovery_entrypoints"] == context_result["discovery_entrypoints"]
+
+
+def test_recommended_first_call_structure():
+    result = ai_tools()
+    rfc = result["recommended_first_call"]
+    assert rfc["endpoint"].startswith("/v1/")
+    assert rfc["method"] in {"GET", "POST"}
+    assert isinstance(rfc["auth_required"], bool)
+    assert isinstance(rfc["supported_rails"], list)
+    assert len(rfc["supported_rails"]) > 0
+    assert isinstance(rfc["expected_flow"], list)
+    assert len(rfc["expected_flow"]) > 0
+    assert "reason" in rfc
+
+
+def test_recommended_first_call_endpoint_exists_in_tools():
+    """recommended_first_call.endpoint must reference a real tool in the manifest."""
+    result = ai_tools()
+    rfc_endpoint = result["recommended_first_call"]["endpoint"]
+    tool_endpoints = {t["endpoint"] for t in result["tools"]}
+    assert rfc_endpoint in tool_endpoints, (
+        f"recommended_first_call.endpoint '{rfc_endpoint}' not found in tools list"
+    )
+
+
+def test_quickstart_is_ordered_steps():
+    result = ai_tools()
+    qs = result["quickstart"]
+    assert isinstance(qs, list)
+    assert len(qs) >= 3
+    steps = [s["step"] for s in qs]
+    assert steps == sorted(steps), "quickstart steps must be in ascending order"
+    for step in qs:
+        assert "step" in step
+        assert "action" in step
+        assert "path" in step
+        assert step["path"].startswith("/v1/")
+
+
+def test_recommended_first_workflows_subset_of_registry():
+    """recommended_first_workflows must only reference workflow_ids from WORKFLOW_REGISTRY."""
+    result = ai_tools()
+    registry_ids = {w["workflow_id"] for w in WORKFLOW_REGISTRY}
+    for wf in result["recommended_first_workflows"]:
+        assert wf["workflow_id"] in registry_ids, (
+            f"recommended_first_workflows references unknown workflow_id '{wf['workflow_id']}'"
+        )
+
+
+def test_recommended_first_workflows_non_empty():
+    result = ai_tools()
+    assert isinstance(result["recommended_first_workflows"], list)
+    assert len(result["recommended_first_workflows"]) >= 1
+
+
+def test_agent_onboarding_notes_non_empty_list():
+    result = ai_tools()
+    notes = result["agent_onboarding_notes"]
+    assert isinstance(notes, list)
+    assert len(notes) > 0
+
+
+def test_agent_onboarding_notes_no_hardcode_instruction():
+    """Must instruct agents not to hardcode STC costs."""
+    result = ai_tools()
+    combined = " ".join(result["agent_onboarding_notes"]).lower()
+    assert "hardcode" in combined or "do not hardcode" in combined
+
+
+def test_agent_onboarding_notes_references_pricing_catalog():
+    result = ai_tools()
+    combined = " ".join(result["agent_onboarding_notes"])
+    assert "/v1/pricing/catalog" in combined
