@@ -625,6 +625,9 @@ def ai_context():
 # agents should call /v1/pricing/catalog for authoritative live STC costs.
 # ---------------------------------------------------------------------------
 
+_RECOMMENDED_WORKFLOW_IDS = {"portfolio_build", "symbol_decision", "regime_analysis"}
+
+
 @router.get(
     "/tools",
     summary="MCP tools manifest",
@@ -636,13 +639,51 @@ def ai_context():
         "Workflows are exposed in a simplified format; use /v1/workflows for live per-step costs."
     ),
 )
+
+
 def ai_tools():
     tools = _build_tools()
     workflows = [_build_workflow_summary(w) for w in WORKFLOW_REGISTRY]
+    recommended_workflows = [w for w in workflows if w["workflow_id"] in _RECOMMENDED_WORKFLOW_IDS]
 
     return {
         "provider": "stocktrends",
         "version": "v1",
+        "discovery_entrypoints": {
+            "primary_machine_readable": "/v1/ai/tools",
+            "secondary_explanatory": "/v1/ai/context",
+            "docs": "/v1/docs",
+            "openapi": "/v1/openapi.json",
+        },
+        "recommended_first_call": {
+            "endpoint": "/v1/agent/screener/top",
+            "method": "GET",
+            "reason": "Returns top-ranked actionable screener results — highest immediate value for agent portfolio and signal workflows.",
+            "auth_required": True,
+            "supported_rails": ["subscription", "x402", "mpp"],
+            "expected_flow": [
+                "fetch /v1/ai/tools",
+                "fetch /v1/pricing/catalog to resolve live STC costs",
+                "call /v1/agent/screener/top with auth header",
+                "if x402 rail: receive HTTP 402 challenge on first attempt",
+                "retry with X-StockTrends-Payment-* headers to complete payment",
+            ],
+        },
+        "quickstart": [
+            {"step": 1, "action": "fetch", "path": "/v1/ai/tools", "note": "Primary machine-readable discovery. This endpoint."},
+            {"step": 2, "action": "fetch", "path": "/v1/pricing", "note": "Inspect metering model and pricing overview."},
+            {"step": 3, "action": "fetch", "path": "/v1/pricing/catalog", "note": "Resolve live STC costs. Requires subscription auth."},
+            {"step": 4, "action": "fetch", "path": "/v1/workflows", "note": "Inspect available multi-step workflows with per-step STC costs."},
+            {"step": 5, "action": "call", "path": "/v1/agent/screener/top", "note": "First premium endpoint. Auth required. x402 and subscription supported."},
+        ],
+        "recommended_first_workflows": recommended_workflows,
+        "agent_onboarding_notes": [
+            "Do not hardcode STC costs. Fetch /v1/pricing/catalog at agent startup.",
+            "Prefer /v1/ai/tools as the primary machine-readable entrypoint.",
+            "Use /v1/ai/context for explanatory dataset context and endpoint group overviews.",
+            "Use /v1/docs or /v1/openapi.json for exact request/response contracts.",
+            "All metered endpoints support subscription, x402, and mpp payment rails.",
+        ],
         "tools": tools,
         "workflows": workflows,
         "pricing": {

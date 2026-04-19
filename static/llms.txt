@@ -96,10 +96,13 @@ https://developer.stocktrends.com/mpp
 * `GET /leadership/rotation/history`
   Historical leadership rotation
 
-### AI Context
+### AI Discovery
+
+* `GET /ai/tools`
+  Primary machine-readable discovery entrypoint. MCP-compatible tools manifest, pricing metadata, quickstart, and recommended workflows.
 
 * `GET /ai/context`
-  Dataset structure, indicator definitions, and AI-oriented context
+  Secondary explanatory entrypoint. Dataset structure, indicator definitions, endpoint groups, and AI-oriented context.
 
 ### Pricing
 
@@ -141,19 +144,22 @@ https://developer.stocktrends.com/mpp
 
 Recommended order for discovery and integration:
 
-1. `GET /ai/context`
-   Understand dataset structure, terminology, and indicator logic
+1. `GET /ai/tools`
+   Primary machine-readable discovery. Fetch this first for the tools manifest, quickstart, recommended first call, and agent onboarding notes.
 
-2. `GET /pricing/catalog`
+2. `GET /ai/context`
+   Secondary explanatory entrypoint. Understand dataset structure, terminology, indicator logic, and endpoint groups.
+
+3. `GET /pricing/catalog`
    Discover live pricing metadata and endpoint costs
 
-3. `GET /cost-estimate`
+4. `GET /cost-estimate`
    Estimate workflow cost before execution where appropriate
 
-4. Start with a high-value premium endpoint:
+5. Start with a high-value premium endpoint:
    * `GET /agent/screener/top`
 
-5. Expand into decision and portfolio workflows:
+6. Expand into decision and portfolio workflows:
    * `POST /decision/evaluate-symbol`
    * `POST /portfolio/construct`
    * `POST /portfolio/evaluate`
@@ -174,11 +180,12 @@ The Stock Trends API supports multiple access modes.
 
 Publicly accessible resources include:
 
+* `GET /v1/ai/tools`
+* `GET /v1/ai/context`
 * `GET /v1/docs`
 * `GET /v1/openapi.json`
-* `GET /v1/ai/context`
 
-Use these for discovery, schema inspection, and grounding.
+Use these for discovery, schema inspection, and grounding. Start with `/v1/ai/tools`.
 
 ### 2. Subscription access
 
@@ -375,7 +382,7 @@ Agents should:
 ## Notes for AI Agents
 
 * Prefer structured API endpoints over scraping
-* Begin with `/ai/context` for schema grounding
+* Begin with `/ai/tools` for primary machine-readable discovery; use `/ai/context` for schema grounding and dataset context
 * Use pricing endpoints before expensive workflows
 * Use `/cost-estimate` when cost must be known in advance
 * Use `/agent/screener/top` as a strong first premium endpoint

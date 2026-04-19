@@ -5,6 +5,7 @@
   "base_url": "https://api.stocktrends.com/v1",
   "openapi": "https://api.stocktrends.com/v1/openapi.json",
   "docs": "https://api.stocktrends.com/v1/docs",
+  "ai_tools": "https://api.stocktrends.com/v1/ai/tools",
   "ai_context": "https://api.stocktrends.com/v1/ai/context",
   "llms": "https://api.stocktrends.com/llms.txt",
   "auth": {
@@ -192,7 +193,9 @@
   }
   ],
   "usage_guidance": [
-  "Start with /v1/ai/context to understand dataset structure and terminology.",
+  "Start with /v1/ai/tools as the primary machine-readable discovery entrypoint.",
+  "Use /v1/ai/context for explanatory dataset context and endpoint group overviews.",
+  "Fetch /v1/pricing/catalog at agent startup to resolve live STC costs — do not hardcode.",
   "Use /v1/pricing and /v1/cost-estimate before expensive workflows.",
   "Use decision and portfolio endpoints for high-value actionable outputs.",
   "Use market regime, breadth, and leadership endpoints for contextual enrichment.",
