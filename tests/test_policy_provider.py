@@ -12,6 +12,7 @@ from payments.policy_provider import (
     _MACHINE_PAYMENT_RAILS,
     _default_policy_config,
     _extract_enabled_rail_codes,
+    _is_uuid_like,
     _normalize_endpoint_payment_policies,
     _normalize_pricing_rule_ids,
     _parse_config_payload,
@@ -205,9 +206,9 @@ _CONTROL_PLANE_PAYLOAD = {
 class TestParseConfigPayload:
     def test_endpoint_policies_parsed(self):
         # The control-plane payload covers 2 endpoints. Gap-filling merges in the
-        # remaining hardcoded defaults for uncovered endpoints (17 more = 19 total).
+        # remaining hardcoded defaults for uncovered endpoints (19 more = 21 total).
         cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD)
-        assert len(cfg.endpoint_payment_policies) == 19
+        assert len(cfg.endpoint_payment_policies) == 21
 
     def test_allowed_rails_are_strings(self):
         cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD)
@@ -544,3 +545,151 @@ class TestEnforcedMethodDoesNotNarrowAcceptedMethods:
         assert patched_body["protocol"] == "x402"
         # Original raw body is NOT mutated (shallow-copy guard).
         assert raw_body["accepted_payment_methods"] == ["x402"]
+
+
+# ---------------------------------------------------------------------------
+# _is_uuid_like helper
+# ---------------------------------------------------------------------------
+
+class TestIsUuidLike:
+    def test_standard_uuid_detected(self):
+        assert _is_uuid_like("bbe6d658-19db-4ed1-99f5-e54d0514d9d1") is True
+
+    def test_uppercase_uuid_detected(self):
+        assert _is_uuid_like("BBE6D658-19DB-4ED1-99F5-E54D0514D9D1") is True
+
+    def test_semantic_rule_name_not_uuid(self):
+        assert _is_uuid_like("indicators_latest_paid") is False
+
+    def test_short_string_not_uuid(self):
+        assert _is_uuid_like("stim_paid") is False
+
+    def test_empty_string_not_uuid(self):
+        assert _is_uuid_like("") is False
+
+
+# ---------------------------------------------------------------------------
+# Control-plane UUID repair — regression guard for the indicators zero-amount bug
+#
+# Production scenario: the control-plane stored its own internal UUID as the
+# pricing_rule_id for /v1/indicators/latest, and excluded mpp from allowed_rails.
+# resolve_economic_amounts(uuid) found no DB row → returned (0,0,0) → zero-amount
+# x402 challenge.  The repair pass in _parse_config_payload must fix both.
+# ---------------------------------------------------------------------------
+
+# Simulates the CP entry that caused the production indicator bug
+_CP_INDICATORS_UUID = "bbe6d658-19db-4ed1-99f5-e54d0514d9d1"
+
+_CONTROL_PLANE_PAYLOAD_WITH_UUID_INDICATORS = {
+    "version": "3",
+    "environment": "production",
+    "ttl_seconds": 60,
+    "endpoint_payment_policies": {
+        # indicators/latest: UUID pricing_rule_id + missing mpp (the broken CP entry)
+        _CP_INDICATORS_UUID: {
+            "id": _CP_INDICATORS_UUID,
+            "path_pattern": "/v1/indicators/latest",
+            "method": "GET",
+            "pricing_rule_id": _CP_INDICATORS_UUID,
+            "machine_payments_enabled": True,
+            "active": True,
+            "allowed_rails": ["subscription", "x402"],  # mpp deliberately omitted by CP
+        },
+        # market_regime_latest: valid semantic rule_name (must NOT be overridden)
+        "market_regime_latest": {
+            "endpoint_code": "market_regime_latest",
+            "path_pattern": "/v1/market/regime/latest",
+            "method": "GET",
+            "pricing_rule_id": "market_regime_latest",
+            "machine_payments_enabled": True,
+            "active": True,
+            "allowed_rails": ["subscription", "x402", "mpp"],
+        },
+    },
+}
+
+
+class TestControlPlaneUuidRepair:
+    """Verify that the repair pass in _parse_config_payload fixes CP entries
+    whose pricing_rule_id is a UUID (internal identifier, not a DB rule_name).
+
+    Guards against the exact production bug where /v1/indicators/latest was
+    served with amount_usd=0.000000 because the CP had 'bbe6d658-...' as its
+    pricing_rule_id instead of 'indicators_latest_paid'.
+    """
+
+    def test_uuid_pricing_rule_id_backfilled_to_default(self):
+        """UUID pricing_rule_id must be replaced with the default's rule_name."""
+        cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD_WITH_UUID_INDICATORS)
+        indicators_policy = next(
+            p for p in cfg.endpoint_payment_policies
+            if p.path_pattern == "/v1/indicators/latest"
+        )
+        assert indicators_policy.pricing_rule_id == "indicators_latest_paid", (
+            f"expected indicators_latest_paid, got {indicators_policy.pricing_rule_id!r} — "
+            "UUID pricing_rule_id was not backfilled from defaults"
+        )
+
+    def test_missing_mpp_added_back_from_default(self):
+        """mpp must be present in allowed_rails after repair even if CP omitted it."""
+        cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD_WITH_UUID_INDICATORS)
+        indicators_policy = next(
+            p for p in cfg.endpoint_payment_policies
+            if p.path_pattern == "/v1/indicators/latest"
+        )
+        assert "mpp" in indicators_policy.allowed_rails, (
+            f"mpp missing from allowed_rails: {indicators_policy.allowed_rails!r} — "
+            "backfill from defaults failed"
+        )
+
+    def test_subscription_and_x402_preserved_from_cp(self):
+        """CP-specified rails must be kept; repair only adds, never removes."""
+        cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD_WITH_UUID_INDICATORS)
+        indicators_policy = next(
+            p for p in cfg.endpoint_payment_policies
+            if p.path_pattern == "/v1/indicators/latest"
+        )
+        assert "subscription" in indicators_policy.allowed_rails
+        assert "x402" in indicators_policy.allowed_rails
+
+    def test_valid_semantic_rule_id_not_overridden(self):
+        """A CP entry with a valid (non-UUID) pricing_rule_id must not be touched."""
+        cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD_WITH_UUID_INDICATORS)
+        regime_policy = next(
+            p for p in cfg.endpoint_payment_policies
+            if p.path_pattern == "/v1/market/regime/latest"
+        )
+        assert regime_policy.pricing_rule_id == "market_regime_latest", (
+            "valid semantic pricing_rule_id must not be overridden by the repair pass"
+        )
+
+    def test_effective_policy_resolves_correct_rule_id(self):
+        """End-to-end: _build_effective_endpoint_policy must surface indicators_latest_paid."""
+        import payments.policy_provider as pp
+
+        cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD_WITH_UUID_INDICATORS)
+        # Monkeypatch the runtime config so _build_effective_endpoint_policy uses our parsed cfg
+        original = pp.get_runtime_payment_policy_config
+        try:
+            pp.get_runtime_payment_policy_config = lambda: cfg  # type: ignore[assignment]
+            effective = pp.get_effective_endpoint_payment_policy("/v1/indicators/latest", "GET")
+        finally:
+            pp.get_runtime_payment_policy_config = original
+
+        assert effective is not None
+        assert effective.pricing_rule_id == "indicators_latest_paid", (
+            f"effective policy pricing_rule_id: {effective.pricing_rule_id!r}"
+        )
+        assert "mpp" in effective.machine_payment_rails, (
+            f"mpp missing from machine_payment_rails: {effective.machine_payment_rails!r}"
+        )
+
+    def test_gap_fill_still_applies_for_uncovered_paths(self):
+        """Paths not in the CP payload must still receive their default policies."""
+        cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD_WITH_UUID_INDICATORS)
+        stim_latest = next(
+            (p for p in cfg.endpoint_payment_policies if p.path_pattern == "/v1/stim/latest"),
+            None,
+        )
+        assert stim_latest is not None, "/v1/stim/latest must be gap-filled from defaults"
+        assert stim_latest.pricing_rule_id == "stim_latest_paid"
