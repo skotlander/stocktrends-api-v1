@@ -33,7 +33,7 @@ Primary goals:
 
 The API uses a unified pricing system based on:
 
-**Stock Trends Credits (STC)**
+→ **Stock Trends Credits (STC)**
 
 * 1 STC ≈ $1 USD (reference value, not a fixed peg)
 * All endpoints must map to a fixed STC cost
@@ -61,16 +61,16 @@ The API uses a unified pricing system based on:
 
 ## Payment Architecture (CRITICAL)
 
-This API supports **multiple payment rails**.
+This API supports **multiple production payment rails**.
 
-### Active / Implemented
+### Active / Production Rails
 
 * **Subscription (Stripe)** → account-based access (monthly STC allocation)
 * **x402** → per-request agent payments
-
-### Planned / Supported by Design
-
 * **MPP (Machine Payments Protocol)** → session-based payments
+
+### Future / Planned Layer
+
 * **STOK** → token-based discount and incentive layer
 
 ---
@@ -111,7 +111,7 @@ Payment handling is decomposed into layers:
 
 ## Critical Rule
 
-⚠️ **Do NOT couple the system to a single payment rail (e.g., x402).**
+⚠️ **Do NOT couple the system to a single payment rail.**
 
 All payment-related logic must remain:
 
@@ -126,7 +126,7 @@ All payment-related logic must remain:
 
 All payment rails must implement a translation layer:
 
-```text
+```
 STC → Payment Rail
 ```
 
@@ -157,7 +157,7 @@ STC → Payment Rail
 
 ---
 
-### x402 (Current Focus)
+### x402
 
 * Per-request payment model
 * Uses HTTP 402 challenge/verify flow
@@ -171,21 +171,29 @@ Ensure:
 
 ---
 
-### MPP (Future Integration)
+### MPP (PRODUCTION)
 
-* Session-based payments
+* Session-based payment model
 * Deduct STC from session balance
-* May not follow x402 challenge flow
+* May NOT follow x402 challenge flow
 
 System must support:
 
-* alternate verification models
-* session tracking
-* batched payments
+* session lifecycle tracking
+* concurrent session safety
+* idempotent authorization and settlement
+* accurate session-based logging
+
+### MPP Design Constraints
+
+* do NOT assume request-by-request settlement
+* do NOT assume x402-style headers or flow
+* do NOT collapse MPP into x402 logic
+* maintain session integrity across requests
 
 ---
 
-### STOK (Token Integration — Future)
+### STOK (Future Integration)
 
 STOK is an **incentive and discount layer**, not a pricing unit.
 
@@ -324,20 +332,6 @@ Examples:
 
 ---
 
-## MPP Readiness Guidance
-
-System must support:
-
-* session-based balances
-* alternate verification flows
-* multiple request settlement models
-
-Do not assume:
-
-* x402-style challenge/verify applies universally
-
----
-
 ## Debugging Strategy
 
 Always identify failure layer first:
@@ -350,6 +344,11 @@ Always identify failure layer first:
 6. payment translation
 7. payment verification
 8. logging/metering
+
+Additionally:
+
+* identify which payment rail is active
+* isolate the failing rail before fixing
 
 Fix the **lowest responsible layer only**
 
@@ -385,10 +384,9 @@ Be careful when modifying:
 
 ### Payment
 
-* free routes behave correctly
 * subscription decrements STC correctly
 * x402 derives correct payment amount
-* MPP (if present) deducts session balance correctly
+* MPP deducts session balance correctly
 
 ### Logging
 
@@ -397,6 +395,7 @@ Be careful when modifying:
 * stc_cost is correct
 * payment_rail is correct
 * payment_status is correct
+* session_id present for MPP
 
 ### Safety
 
@@ -424,6 +423,7 @@ For every task:
 * remove logging
 * hardcode pricing into endpoints
 * assume a single payment rail
+* treat MPP as x402
 * introduce breaking API changes
 * refactor unrelated code
 
@@ -435,8 +435,8 @@ A task is complete only when:
 
 * issue is resolved at correct layer
 * STC pricing is correctly applied
-* payment logic remains accurate
+* payment logic remains accurate across ALL rails
 * logging/metering remains complete
 * system remains multi-rail compatible
-* future rails (MPP, STOK) remain supported
+* MPP session behavior is correct
 * validation steps are documented
