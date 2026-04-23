@@ -9,10 +9,10 @@ Coverage:
 2. 404 for unknown payment_channel_id
 3. Correct aggregation: total_stc_requested vs total_stc_captured
 4. Regression: x402 channels are invisible (payment_rail='mpp' filter)
-5. Production MPP lane: customer_id is NULL in MPP rows — authenticated
-   operator (customer_id set) can still look up the session without
-   customer_id appearing in the query scope
+5. Production MPP lane: customer_id is NULL in MPP rows — internal secret
+   holder can still look up the session without customer_id in the query scope
 6. Non-billable classification: /v1/observability/ paths never consume quota
+7. Internal auth model: only INTERNAL_OBSERVABILITY_SECRET grants access
 """
 from __future__ import annotations
 
@@ -32,6 +32,10 @@ import routers.observability as observability_module
 from pricing.classifier import NON_METERED_PREFIXES, classify_request
 
 
+_SECRET = "test-internal-secret-xyz"
+_SECRET_HEADER = {"X-Internal-Secret": _SECRET}
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -45,20 +49,6 @@ def _stub_runtime(monkeypatch):
         lambda *a, **kw: (Decimal("0"), Decimal("0"), Decimal("0")),
     )
     monkeypatch.setattr(api_key_module, "log_auth_failure_event", lambda *a, **kw: None)
-
-
-def _stub_auth(monkeypatch, customer_id: str = "cust-operator-123"):
-    """Simulate a subscription API-key holder (operator) calling the endpoint."""
-    def fake_authenticate(self, path: str, raw_key: str):
-        return True, {
-            "api_key_id": "test-key-id",
-            "customer_id": customer_id,
-            "subscription_id": "sub-1",
-            "plan_code": "pro",
-            "actor_type": "external_customer",
-            "monthly_quota": 1000,
-        }
-    monkeypatch.setattr(api_key_module.ApiKeyMiddleware, "_authenticate_api_key", fake_authenticate)
 
 
 def _make_result(rows: list[dict]):
@@ -146,6 +136,7 @@ _RECENT_ROWS = [
 @pytest.fixture
 def client(monkeypatch):
     _stub_runtime(monkeypatch)
+    monkeypatch.setenv("INTERNAL_OBSERVABILITY_SECRET", _SECRET)
     with TestClient(main.app) as c:
         yield c
 
@@ -156,7 +147,6 @@ def client(monkeypatch):
 
 class TestGetMppSessionFound:
     def test_200_returns_expected_shape(self, client, monkeypatch):
-        _stub_auth(monkeypatch)
         _make_engine(monkeypatch, [
             _make_result([_SUMMARY_MIXED]),
             _make_result(_STATUS_ROWS_MIXED),
@@ -165,7 +155,7 @@ class TestGetMppSessionFound:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/chan-xyz",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         assert resp.status_code == 200
@@ -177,7 +167,6 @@ class TestGetMppSessionFound:
         assert body["last_seen_at"] == _T1.isoformat()
 
     def test_200_includes_status_breakdown(self, client, monkeypatch):
-        _stub_auth(monkeypatch)
         _make_engine(monkeypatch, [
             _make_result([_SUMMARY_MIXED]),
             _make_result(_STATUS_ROWS_MIXED),
@@ -186,7 +175,7 @@ class TestGetMppSessionFound:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/chan-xyz",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         breakdown = resp.json()["payment_status_breakdown"]
@@ -195,7 +184,6 @@ class TestGetMppSessionFound:
         assert breakdown[1] == {"payment_status": "authorized", "request_count": 1}
 
     def test_200_includes_recent_requests(self, client, monkeypatch):
-        _stub_auth(monkeypatch)
         _make_engine(monkeypatch, [
             _make_result([_SUMMARY_MIXED]),
             _make_result(_STATUS_ROWS_MIXED),
@@ -204,7 +192,7 @@ class TestGetMppSessionFound:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/chan-xyz",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         recent = resp.json()["recent_requests"]
@@ -214,7 +202,6 @@ class TestGetMppSessionFound:
         assert recent[0]["stc_cost"] == pytest.approx(1.0)
 
     def test_200_session_id_none_when_absent(self, client, monkeypatch):
-        _stub_auth(monkeypatch)
         summary_no_session = {**_SUMMARY_MIXED, "session_id": None}
         _make_engine(monkeypatch, [
             _make_result([summary_no_session]),
@@ -224,7 +211,7 @@ class TestGetMppSessionFound:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/chan-xyz",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         assert resp.status_code == 200
@@ -237,7 +224,6 @@ class TestGetMppSessionFound:
 
 class TestGetMppSessionNotFound:
     def test_404_when_count_zero(self, client, monkeypatch):
-        _stub_auth(monkeypatch)
         empty_summary = {
             "request_count": 0,
             "session_id": None,
@@ -251,26 +237,26 @@ class TestGetMppSessionNotFound:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/unknown-chan",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         assert resp.status_code == 404
         assert resp.json()["detail"] == "MPP session not found"
 
     def test_404_when_summary_returns_none(self, client, monkeypatch):
-        _stub_auth(monkeypatch)
         _make_engine(monkeypatch, [_make_result([])])
 
         resp = client.get(
             "/v1/observability/mpp/sessions/unknown-chan",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         assert resp.status_code == 404
 
-    def test_401_without_api_key(self, client):
+    def test_403_without_secret(self, client):
+        """No secret header → 403, even for a valid-looking channel ID."""
         resp = client.get("/v1/observability/mpp/sessions/chan-xyz")
-        assert resp.status_code == 401
+        assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +270,6 @@ class TestAggregationSemantics:
         must report total_stc_captured = 2.0, not 3.0.
         total_stc_requested = 3.0 (all rows, informational).
         """
-        _stub_auth(monkeypatch)
         _make_engine(monkeypatch, [
             _make_result([_SUMMARY_MIXED]),
             _make_result(_STATUS_ROWS_MIXED),
@@ -293,7 +278,7 @@ class TestAggregationSemantics:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/chan-mixed",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         body = resp.json()
@@ -306,7 +291,6 @@ class TestAggregationSemantics:
 
     def test_fully_captured_session_totals_match(self, client, monkeypatch):
         """When every request was captured, requested == captured."""
-        _stub_auth(monkeypatch)
         summary_all_captured = {
             "request_count": 2,
             "session_id": "sess-full",
@@ -324,7 +308,7 @@ class TestAggregationSemantics:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/chan-full",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         body = resp.json()
@@ -334,7 +318,6 @@ class TestAggregationSemantics:
 
     def test_all_authorized_session_has_zero_captured(self, client, monkeypatch):
         """A session where all requests were authorized-but-not-captured shows 0 captured."""
-        _stub_auth(monkeypatch)
         summary_no_capture = {
             "request_count": 2,
             "session_id": "sess-auth",
@@ -352,7 +335,7 @@ class TestAggregationSemantics:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/chan-auth-only",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         body = resp.json()
@@ -362,7 +345,6 @@ class TestAggregationSemantics:
 
     def test_null_totals_default_to_zero(self, client, monkeypatch):
         """NULL aggregates (no stc_cost set on rows) default safely to 0."""
-        _stub_auth(monkeypatch)
         summary_nulls = {
             "request_count": 1,
             "session_id": None,
@@ -380,7 +362,7 @@ class TestAggregationSemantics:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/chan-null",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         body = resp.json()
@@ -393,7 +375,6 @@ class TestAggregationSemantics:
         The old 'total_billed_usd' field (sum of all rows regardless of capture
         status) must not appear in the response — it was semantically wrong.
         """
-        _stub_auth(monkeypatch)
         _make_engine(monkeypatch, [
             _make_result([_SUMMARY_MIXED]),
             _make_result(_STATUS_ROWS_MIXED),
@@ -402,7 +383,7 @@ class TestAggregationSemantics:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/chan-xyz",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         assert "total_billed_usd" not in resp.json()
@@ -418,7 +399,6 @@ class TestMppDistinctFromX402:
         A channel that exists only under payment_rail='x402' must return 404
         because the query's AND payment_rail = 'mpp' filter yields count=0.
         """
-        _stub_auth(monkeypatch)
         x402_summary = {
             "request_count": 0,
             "session_id": None,
@@ -432,7 +412,7 @@ class TestMppDistinctFromX402:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/x402-chan-001",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         assert resp.status_code == 404
@@ -440,7 +420,6 @@ class TestMppDistinctFromX402:
 
     def test_mpp_response_contains_no_payment_rail_bleed(self, client, monkeypatch):
         """Response body must not expose a payment_rail field — endpoint is MPP-scoped by construction."""
-        _stub_auth(monkeypatch)
         _make_engine(monkeypatch, [
             _make_result([_SUMMARY_MIXED]),
             _make_result([{"payment_status": "captured", "request_count": 3}]),
@@ -449,7 +428,7 @@ class TestMppDistinctFromX402:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/mpp-chan-001",
-            headers={"X-API-Key": "test-key"},
+            headers=_SECRET_HEADER,
         )
 
         assert resp.status_code == 200
@@ -461,18 +440,13 @@ class TestMppDistinctFromX402:
 # ---------------------------------------------------------------------------
 
 class TestProductionMppLane:
-    def test_operator_with_customer_id_can_query_mpp_session(self, client, monkeypatch):
+    def test_internal_secret_holder_can_query_mpp_session(self, client, monkeypatch):
         """
         Real MPP rows have customer_id=NULL in api_request_economics because
         _apply_agent_pay_context() sets request.state.customer_id=None.
-        The observability endpoint is called by an operator who has a subscription
-        API key (customer_id IS set on their request).  The query must NOT filter
-        by customer_id or it would return zero rows.
-
-        This test confirms that an operator authenticated as 'cust-operator-123'
-        successfully retrieves a channel whose metered rows carry NULL customer_id.
+        The endpoint is internal-only (no customer API key required).
+        The query must NOT filter by customer_id or it would return zero rows.
         """
-        _stub_auth(monkeypatch, customer_id="cust-operator-123")
         _make_engine(monkeypatch, [
             _make_result([_SUMMARY_MIXED]),
             _make_result(_STATUS_ROWS_MIXED),
@@ -481,10 +455,9 @@ class TestProductionMppLane:
 
         resp = client.get(
             "/v1/observability/mpp/sessions/mpp-agent-chan",
-            headers={"X-API-Key": "operator-key"},
+            headers=_SECRET_HEADER,
         )
 
-        # Must succeed — the operator's customer_id must not scope the query
         assert resp.status_code == 200
         assert resp.json()["request_count"] == 3
 
@@ -493,7 +466,6 @@ class TestProductionMppLane:
         The SQL executed against the DB must not receive customer_id as a bind
         parameter.  If it did, MPP rows (customer_id=NULL) would never match.
         """
-        _stub_auth(monkeypatch, customer_id="cust-operator-999")
         conn = _make_engine(monkeypatch, [
             _make_result([_SUMMARY_MIXED]),
             _make_result(_STATUS_ROWS_MIXED),
@@ -502,7 +474,7 @@ class TestProductionMppLane:
 
         client.get(
             "/v1/observability/mpp/sessions/mpp-agent-chan",
-            headers={"X-API-Key": "operator-key"},
+            headers=_SECRET_HEADER,
         )
 
         # Inspect every execute() call — none should carry customer_id in params
@@ -516,10 +488,10 @@ class TestProductionMppLane:
                     f"customer_id found in SQL params — would exclude NULL MPP rows: {params}"
                 )
 
-    def test_unauthenticated_request_still_returns_401(self, client):
-        """No API key → 401, even though MPP rows have NULL customer_id."""
+    def test_403_without_secret_header(self, client):
+        """No secret header → 403 (internal auth check fails before DB query)."""
         resp = client.get("/v1/observability/mpp/sessions/mpp-chan-001")
-        assert resp.status_code == 401
+        assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -550,7 +522,7 @@ class TestObservabilityNonBillable:
         assert decision.econ_pricing_rule_id is None
 
     def test_observability_path_is_not_billed_even_with_paid_auth(self):
-        """A paid-plan operator calling the observability endpoint must not be billed."""
+        """A paid-plan caller hitting the observability endpoint must not be billed."""
         decision = classify_request(
             path="/v1/observability/mpp/sessions/chan-abc",
             has_paid_auth=True,
@@ -576,3 +548,91 @@ class TestObservabilityNonBillable:
             plan_code="pro",
         )
         assert decision.is_metered == 0
+
+
+# ---------------------------------------------------------------------------
+# 7. Internal auth model: only INTERNAL_OBSERVABILITY_SECRET grants access
+# ---------------------------------------------------------------------------
+
+class TestInternalAuthModel:
+    def test_correct_secret_returns_200(self, client, monkeypatch):
+        """Valid secret in header → 200 (database query proceeds)."""
+        _make_engine(monkeypatch, [
+            _make_result([_SUMMARY_MIXED]),
+            _make_result(_STATUS_ROWS_MIXED),
+            _make_result(_RECENT_ROWS),
+        ])
+
+        resp = client.get(
+            "/v1/observability/mpp/sessions/chan-xyz",
+            headers={"X-Internal-Secret": _SECRET},
+        )
+
+        assert resp.status_code == 200
+
+    def test_wrong_secret_returns_403(self, client):
+        """Wrong value in secret header → 403 before any DB query."""
+        resp = client.get(
+            "/v1/observability/mpp/sessions/chan-xyz",
+            headers={"X-Internal-Secret": "wrong-secret-value"},
+        )
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Internal access only"
+
+    def test_missing_secret_header_returns_403(self, client):
+        """No secret header at all → 403."""
+        resp = client.get("/v1/observability/mpp/sessions/chan-xyz")
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Internal access only"
+
+    def test_env_var_unset_returns_403(self, client, monkeypatch):
+        """When INTERNAL_OBSERVABILITY_SECRET is not set, endpoint is disabled → 403."""
+        monkeypatch.delenv("INTERNAL_OBSERVABILITY_SECRET", raising=False)
+
+        resp = client.get(
+            "/v1/observability/mpp/sessions/chan-xyz",
+            headers={"X-Internal-Secret": _SECRET},
+        )
+
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == "Observability endpoint is disabled"
+
+    def test_valid_customer_api_key_alone_returns_403(self, client, monkeypatch):
+        """
+        A valid customer API key without the internal secret must not grant access.
+        The endpoint is in public_prefixes so the API key middleware bypasses it —
+        but _require_internal_secret() still gates the route.
+        Env var is unset here to prove API key alone is never sufficient.
+        """
+        monkeypatch.delenv("INTERNAL_OBSERVABILITY_SECRET", raising=False)
+
+        # Simulate a valid API key auth (would normally succeed for other routes)
+        def fake_authenticate(self, path: str, raw_key: str):
+            return True, {
+                "api_key_id": "test-key-id",
+                "customer_id": "cust-123",
+                "subscription_id": "sub-1",
+                "plan_code": "pro",
+                "actor_type": "external_customer",
+                "monthly_quota": 1000,
+            }
+
+        monkeypatch.setattr(api_key_module.ApiKeyMiddleware, "_authenticate_api_key", fake_authenticate)
+
+        resp = client.get(
+            "/v1/observability/mpp/sessions/chan-xyz",
+            headers={"X-API-Key": "customer-api-key"},
+        )
+
+        assert resp.status_code == 403
+
+    def test_empty_string_secret_returns_403(self, client):
+        """Empty string in the secret header is treated as missing → 403."""
+        resp = client.get(
+            "/v1/observability/mpp/sessions/chan-xyz",
+            headers={"X-Internal-Secret": ""},
+        )
+
+        assert resp.status_code == 403
