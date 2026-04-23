@@ -1,12 +1,9 @@
 from decimal import Decimal
-import sys
 
 import pytest
 from fastapi.testclient import TestClient
 
-for module_name in ("sqlalchemy", "sqlalchemy.orm", "db"):
-    sys.modules.pop(module_name, None)
-
+# Module stubs for sqlalchemy/db/etc. are provided by tests/conftest.py.
 import main
 import middleware.api_key as api_key_module
 import middleware.metering as metering_module

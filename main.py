@@ -30,6 +30,7 @@ from routers.market import router as market_router
 from routers.decision import router as decision_router
 from routers.portfolio import router as portfolio_router
 from routers.workflows import router as workflows_router
+from routers.observability import router as observability_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -321,6 +322,7 @@ v1.include_router(market_router)
 v1.include_router(decision_router)
 v1.include_router(portfolio_router)
 v1.include_router(workflows_router)
+v1.include_router(observability_router)
 
 v1.openapi = lambda: apply_api_key_security_to_openapi(v1)
 
