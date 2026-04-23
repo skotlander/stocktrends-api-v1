@@ -77,6 +77,11 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/.well-known/",
             # Swagger UI sub-paths (oauth2-redirect, etc.) are public doc assets.
             "/v1/docs/",
+            # Observability endpoints are internal/admin-only, guarded by
+            # INTERNAL_OBSERVABILITY_SECRET in the router layer.  They must
+            # not be gated by customer API keys — internal tooling has no
+            # customer API key to present.
+            "/v1/observability/",
         ]
 
     def _is_agent_pay_candidate(self, request: Request) -> bool:
