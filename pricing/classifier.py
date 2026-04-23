@@ -56,6 +56,12 @@ NON_METERED_PATHS = {
     "/v1/ai/tools",
 }
 
+# Path prefixes that are non-metered regardless of the full path.
+# Used for operational/diagnostic surfaces that must never consume subscription quota.
+NON_METERED_PREFIXES: frozenset[str] = frozenset({
+    "/v1/observability/",
+})
+
 # Non-API probe/scanner traffic that should never be treated as billable API usage.
 NON_API_NOISE_PREFIXES = {
     "/cdn-cgi/",
@@ -220,6 +226,9 @@ def classify_request(
         return _free_decision()
 
     if _is_noise_path(path):
+        return _free_decision()
+
+    if any(path.startswith(p) for p in NON_METERED_PREFIXES):
         return _free_decision()
 
     if is_free_metered_path(path):
