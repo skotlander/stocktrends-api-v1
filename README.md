@@ -1,34 +1,34 @@
 # Stock Trends API
 
-## 🚀 Agent-Native Financial Intelligence API
+##  Agent-Native Financial Intelligence API
 
-The Stock Trends API is a **financial data platform and agent-native monetization system** built on:
+The Stock Trends API is a **financial intelligence platform and agent-native monetization system** built on:
 
 * FastAPI
 * unified pricing (STC — Stock Trends Credits)
-* multi-rail payments (subscription, x402, MPP-ready)
+* multi-rail payments (subscription, x402, MPP)
 * full request metering and billing
 
 This is not just a data API.
 
 It is:
 
-→ a **pricing engine**
-→ a **payment system**
-→ an **agent-accessible financial layer**
+ a **pricing engine**  
+ a **payment system**  
+ a **programmable financial layer for agents**
 
 ---
 
-## ⚡ Quick Start (2 Minutes)
+##  Quick Start (2 Minutes)
 
 ### 1. Make your first request
 
-```bash id="pwbpb8"
+```bash
 curl -X POST https://api.stocktrends.com/v1/decision/evaluate_symbol \
   -H "Content-Type: application/json" \
   -d '{
     "symbol": "AAPL",
-    "exchange": "NASDAQ"
+    "exchange": "Q"
   }'
 ```
 
@@ -36,9 +36,10 @@ curl -X POST https://api.stocktrends.com/v1/decision/evaluate_symbol \
 
 ### 2. Example Response
 
-```json id="57obtf"
+```json
 {
   "symbol": "AAPL",
+  "exchange": "Q",
   "decision": "OUTPERFORM",
   "confidence": 0.62,
   "time_horizon": "13-week"
@@ -47,163 +48,144 @@ curl -X POST https://api.stocktrends.com/v1/decision/evaluate_symbol \
 
 ---
 
-### 3. Payment (Automatic)
+### 3. Payment
 
-* If payment is required:
+If payment is required:
 
-  * API returns x402 payment request
-* Agents complete payment automatically
-* Request is fulfilled
-
-👉 No separate billing integration required
+* API returns an x402 payment request
+* agents complete payment automatically
+* request is fulfilled
 
 ---
 
-## 💵 Pricing (STC → USD)
+##  Pricing Model (STC)
 
 STC (Stock Trends Credits) is the **unified pricing unit** of the API.
 
-To make pricing clear and predictable:
+### Key Principle
 
-👉 **1 STC ≈ $0.01 USD**
+ **STC is an internal consumption unit**
 
-This means:
+### Current Policy
 
-* 10 STC ≈ $0.10
-* 100 STC ≈ $1.00
+ **1 STC ˜ $1.00 USD**
 
----
-
-### Example Endpoint Costs
-
-| Endpoint                                | STC Cost | Approx USD   |
-| --------------------------------------- | -------- | ------------ |
-| Evaluate Symbol                         | 10 STC   | ~$0.10       |
-| Evaluate Portfolio                      | 50 STC   | ~$0.50       |
-| Construct Portfolio                     | 25 STC   | ~$0.25       |
-| Market Data (stim, breadth, leadership) | 1–5 STC  | ~$0.01–$0.05 |
+This is a **configurable pricing policy**, not a fixed peg.
 
 ---
 
-### How Payment Works
+##  Example Endpoint Costs
 
-* **Subscription (Stripe)**
-  Purchase STC in advance
-  Example: $50 → 5000 STC
-
-* **x402 (Agent Payments)**
-  Pay per request automatically
-  No account required
-
----
-
-👉 Pricing is enforced in STC, but value is anchored to USD for transparency
+| Endpoint | STC | Approx USD |
+|---|---:|---:|
+| `/stim/latest` | 0.0025 | $0.0025 |
+| `/prices/latest` | 0.0025 | $0.0025 |
+| `/agent/screener/top` | 0.5 | $0.50 |
+| `/portfolio/construct` | 1.0 | $1.00 |
 
 ---
 
-## 💡 Core Concepts
+##  How Payment Works
 
-### STC (Stock Trends Credits)
+### Subscription
 
-* endpoints map to STC cost
-* pricing is defined once (STC)
-* payment rails convert value → STC
+* purchase STC in advance
+* spend STC per request
+
+### x402
+
+* pay per request automatically
+* no account required
+
+#### Important
+
+x402 responses include two price formats:
+
+| Field | Meaning |
+|---|---|
+| `amount_usd` | human-readable USD price |
+| `amount` | token base units |
+
+Example:
+
+```json
+{
+  "amount_usd": "0.500000",
+  "amount": "500000"
+}
+```
+
+ `500000` = `0.5 USDC` with 6 decimals, **not $500,000**.
+
+### MPP
+
+* session-based payments
+* optimized for high-frequency agents
+* funded via external payment rails
 
 ---
+
+##  Core Concepts
+
+### STC
+
+* all endpoints are priced in STC
+* STC is the single source of pricing truth
+* payment rails convert into STC
 
 ### Multi-Rail Payments
 
 Supported:
 
-* **Subscription (Stripe)**
-* **x402 (per-request payments)**
+* Subscription
+* x402
+* MPP
 
 Planned:
 
-* **MPP (Machine Payments Protocol)**
-* **STOK token (discount + incentive layer)**
+* STOK token incentives
 
 ---
 
-## 🧠 Key Endpoints
+##  Key Endpoints
 
-### Decision Engine (High Value)
+### Decision Engine
 
-#### Evaluate a Symbol
-
-```id="4u406s"
+```text
 POST /v1/decision/evaluate_symbol
-```
-
-```json id="k1obzf"
-{
-  "symbol": "AAPL",
-  "exchange": "NASDAQ"
-}
-```
-
----
-
-#### Evaluate a Portfolio
-
-```id="gznjct"
 POST /v1/portfolio/evaluate
-```
-
-```json id="feof8n"
-{
-  "symbols": [
-    {"symbol": "AAPL", "exchange": "NASDAQ"},
-    {"symbol": "MSFT", "exchange": "NASDAQ"}
-  ]
-}
-```
-
----
-
-#### Construct a Portfolio
-
-```id="egzgde"
 POST /v1/portfolio/construct
 ```
 
----
-
 ### Market Intelligence
 
-* `/v1/stim/latest`
-* `/v1/leadership`
-* `/v1/breadth`
-* `/v1/selections`
-* `/v1/indicators`
+```text
+GET /v1/stim/latest
+GET /v1/indicators/latest
+GET /v1/prices/latest
+GET /v1/selections/latest
+GET /v1/breadth/sector/latest
+```
 
 ---
 
-## 📊 Cost Estimation
+##  Cost Estimation
 
-Estimate request cost before execution:
-
-```id="wtzzt6"
+```text
 GET /v1/cost-estimate
 ```
 
 ---
 
-## 📘 API Documentation (Swagger)
+##  API Documentation
 
-👉 https://api.stocktrends.com/v1/docs
-
-Use the interactive docs to:
-
-* explore endpoints
-* test requests
-* view schemas
+https://api.stocktrends.com/v1/docs
 
 ---
 
-## 🤖 Designed for AI Agents
+##  Built for AI Agents
 
-This API is built for:
+This API is designed for:
 
 * autonomous agents
 * trading systems
@@ -214,142 +196,87 @@ Features:
 
 * machine-readable pricing
 * deterministic billing
-* stateless payments (x402)
+* stateless payments through x402
+* session-based payments through MPP
 * predictable response structures
 
 ---
 
-## 🧾 Request Lifecycle
+##  Request Lifecycle
 
-1. Request received
-2. Pricing evaluated (STC)
-3. Payment verified (if required)
-4. Request executed
-5. Usage logged + billed
+1. request received
+2. pricing evaluated in STC
+3. payment verified
+4. request executed
+5. usage logged and billed
 
 ---
 
-## 🔥 What Makes This Different
+##  What Makes This Different
 
 Most APIs:
 
-* charge subscriptions
 * separate billing from usage
+* rely mainly on subscriptions
 
 Stock Trends API:
 
 * **monetizes each request**
-* **native to AI agent workflows**
-* **unified pricing across payment rails**
+* **is agent-native**
+* **unifies pricing across rails**
 
 ---
 
-## 📂 Repository Structure
+##  Repository Structure
 
-* `/routers` → API endpoints
-* `/pricing` → STC pricing logic
-* `/payments` → payment rails
-* `/metering` → request logging + billing
-* `/middleware` → enforcement layer
-* `/docs` → system design and strategy
-
----
-
-## 📚 Documentation
-
-All system design and strategy lives in:
-
-→ `/docs`
-
-### Structure
-
-* `/docs/strategy/` → system vision and pricing
-* `/docs/architecture/` → request lifecycle and design
-* `/docs/operations/` → policies and billing
-
----
-
-## 📄 Key Files
-
-### `AGENTS.md`
-
-Defines strict system rules for AI agents:
-
-* pricing enforcement
-* payment behavior
-* logging requirements
-
----
-
-### `CLAUDE.md`
-
-Defines execution behavior for Claude Code:
-
-* implementation alignment
-* controlled change strategy
-* system consistency
-
----
-
-## 🛠 Local Development
-
-### 1. Install dependencies
-
-```bash id="1yxmwa"
-pip install -r requirements.txt
+```text
+/routers       endpoints
+/pricing       STC pricing
+/payments      payment rails
+/metering      logging and billing
+/middleware    enforcement
+/docs          system design
 ```
 
-### 2. Run the API
+---
 
-```bash id="1e1uio"
-python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
+##  Documentation
+
+```text
+/docs/strategy/       pricing and economics
+/docs/architecture/   system design
+/docs/operations/     billing and policies
 ```
 
-### 3. Open docs
+---
 
-http://127.0.0.1:8000/v1/docs
+##  AI Agent Rules
+
+Before interacting:
+
+1. read `AGENTS.md`
+2. follow pricing rules
+3. do not bypass billing
+4. use documented endpoints
 
 ---
 
-## 🧠 Design Principles
-
-* pricing is defined once (STC)
-* payment rails are modular
-* logging is first-class
-* system is agent-first
-* token integration must not break pricing
-
----
-
-## ⚠️ AI Agent Rules
-
-Before interacting with the system:
-
-1. Read `AGENTS.md`
-2. Follow pricing and payment rules
-3. Do not bypass billing logic
-4. Use documented endpoints
-
----
-
-## 🧭 Status
+##  Status
 
 * STC pricing: active
-* subscription model: active
-* x402 payments: active
-* MPP: planned
-* STOK integration: planned
+* subscription: active
+* x402: active
+* MPP: active
+* STOK: planned
 
 ---
 
-## 📣 Final Note
+##  Final Note
 
-This repository represents a **programmable financial layer for data access**, designed for:
+This API is a **programmable financial layer for intelligence access**, built for:
 
 * developers
 * AI agents
 * automated systems
 
----
-
-👉 Start building. Start querying. Start monetizing intelligence.
+Start querying. Start building. Start monetizing intelligence.
