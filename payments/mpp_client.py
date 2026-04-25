@@ -239,3 +239,72 @@ def capture_mpp_payment(
         )
 
     return MppControlPlaneResult(success=True, response_data=data)
+
+
+# ---------------------------------------------------------------------------
+# Void
+# ---------------------------------------------------------------------------
+
+def void_mpp_authorization(
+    *,
+    payment_reference: str,
+    request_id: Optional[str],
+) -> MppControlPlaneResult:
+    """
+    Call the control-plane void endpoint after a failed protected response.
+
+    Void is best-effort: the caller must log failures but must NOT alter
+    the original API error response returned to the client.
+
+    Success is signalled by the control-plane returning status in
+    {"voided", "expired"} — both indicate the reservation is released
+    (or was never active).
+    """
+    payload: dict[str, Any] = {
+        "payment_reference": payment_reference,
+    }
+
+    logger.info(
+        "mpp void payment_reference=%s request_id=%s",
+        payment_reference,
+        request_id,
+    )
+
+    status, data, raw = _mpp_post("/v1/internal/mpp/void", payload)
+
+    logger.info("mpp void response status=%s body=%s", status, raw)
+
+    if status == 0:
+        return MppControlPlaneResult(
+            success=False,
+            error_code="control_plane_unreachable",
+            error_detail=raw or "Control plane did not respond.",
+        )
+
+    if status >= 400:
+        error_code = (data or {}).get("error_code") or "void_failed"
+        error_detail = (
+            (data or {}).get("error_detail")
+            or f"Control plane void returned HTTP {status}."
+        )
+        return MppControlPlaneResult(
+            success=False,
+            error_code=error_code,
+            error_detail=error_detail,
+            response_data=data,
+        )
+
+    # Control-plane void returns the authorization object.  Both "voided" and
+    # "expired" indicate the reservation is released (or was already released).
+    cp_status = (data or {}).get("status")
+    if cp_status not in ("voided", "expired"):
+        return MppControlPlaneResult(
+            success=False,
+            error_code="void_unexpected_status",
+            error_detail=(
+                f"Control plane void returned unexpected status: {cp_status!r}."
+            ),
+            response_data=data,
+        )
+
+    return MppControlPlaneResult(success=True, response_data=data)

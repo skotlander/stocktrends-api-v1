@@ -1880,16 +1880,48 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                             _cap.error_detail,
                         )
                 else:
-                    # Authorized but downstream failed — no capture.
-                    # The control-plane hold will expire or be voided externally.
-                    logger.warning(
-                        "mpp authorized but downstream failed — capture skipped. "
-                        "request_id=%s channel_id=%s payment_reference=%s status_code=%s",
-                        request_id,
-                        enforcement_result.payment_channel_id,
-                        enforcement_result.payment_reference,
-                        status_code,
-                    )
+                    # Authorized but downstream failed — void the authorization
+                    # so reserved STC is returned to available immediately.
+                    # Void is best-effort: errors are logged but must not alter
+                    # the original API error response returned to the client.
+                    try:
+                        from payments.mpp_client import void_mpp_authorization
+                        _void = void_mpp_authorization(
+                            payment_reference=enforcement_result.payment_reference,
+                            request_id=request_id,
+                        )
+                        if _void.success:
+                            mpp_capture_outcome = "voided"
+                            logger.info(
+                                "mpp void succeeded — "
+                                "request_id=%s channel_id=%s payment_reference=%s status_code=%s",
+                                request_id,
+                                enforcement_result.payment_channel_id,
+                                enforcement_result.payment_reference,
+                                status_code,
+                            )
+                        else:
+                            mpp_capture_outcome = "void_failed"
+                            logger.error(
+                                "mpp void failed after authorized downstream failure — "
+                                "request_id=%s channel_id=%s payment_reference=%s "
+                                "error_code=%s error_detail=%s",
+                                request_id,
+                                enforcement_result.payment_channel_id,
+                                enforcement_result.payment_reference,
+                                _void.error_code,
+                                _void.error_detail,
+                            )
+                    except Exception as _void_exc:
+                        mpp_capture_outcome = "void_failed"
+                        logger.error(
+                            "mpp void raised exception — "
+                            "request_id=%s payment_reference=%s exc=%s",
+                            request_id,
+                            enforcement_result.payment_reference,
+                            _void_exc,
+                            exc_info=True,
+                        )
 
             if should_log_economics(decision):
                 payment_status = decision.econ_payment_status
@@ -1908,9 +1940,12 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                                 payment_status = "captured"
                             elif mpp_capture_outcome == "capture_failed":
                                 payment_status = "capture_failed"
-                            elif enforcement_result is not None and enforcement_result.outcome == "authorized":
-                                # Authorized but downstream failed; capture was skipped.
-                                payment_status = "authorized"
+                            elif mpp_capture_outcome == "voided":
+                                payment_status = "voided"
+                            elif mpp_capture_outcome == "void_failed":
+                                # Void was attempted but failed; funds remain reserved.
+                                # Logged as void_failed for ops visibility and remediation.
+                                payment_status = "void_failed"
                             else:
                                 # Enforcement disabled or pre-control-plane path.
                                 payment_status = "presented"
