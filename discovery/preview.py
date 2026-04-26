@@ -178,7 +178,7 @@ _PREVIEW_BY_PATH: dict[str, dict] = {
             "count", "limit", "start_date",
         ],
         "note": (
-            "Returns a chronological sequence of weekly market regime snapshots. "
+            "Returns a recent weekly sequence of market regime snapshots, most recent first. "
             "Each entry uses the same classification logic as /market/regime/latest. "
             "regime_score = bullish_pct - bearish_pct, range -1.0 to +1.0."
         ),
@@ -206,9 +206,11 @@ _PREVIEW_BY_PATH: dict[str, dict] = {
             "data[].prob13wk", "data[].symbol_exchange",
         ],
         "note": (
-            "Returns the latest STIM Select (Stock Trends Inference Model Select) stock list "
-            "ordered by prob13wk descending (probability of exceeding the 13-week base-period "
-            "mean return of 2.19%, assuming normal distribution). "
+            "Returns the latest st_select stock list ordered by prob13wk descending "
+            "(probability of exceeding the 13-week base-period mean return of 2.19%, "
+            "assuming normal distribution). "
+            "No threshold filter is applied. "
+            "Use /selections/published/latest for the three-horizon published STIM Select definition. "
             "Use include_data=true to add Stock Trends signal fields per symbol."
         ),
     },
@@ -221,10 +223,12 @@ _PREVIEW_BY_PATH: dict[str, dict] = {
             "data[].prob13wk", "data[].symbol_exchange",
         ],
         "note": (
-            "Returns historical STIM Select (Stock Trends Inference Model Select) records. "
+            "Returns historical st_select records. "
             "Filter by symbol, exchange, or date range. "
             "Each entry includes prob13wk — probability of exceeding the 13-week base-period "
             "mean return of 2.19%. "
+            "No threshold filter is applied unless min_prob13wk is set. "
+            "Use /selections/published/history for the three-horizon published definition. "
             "Use include_data=true to add Stock Trends signal fields per record."
         ),
     },

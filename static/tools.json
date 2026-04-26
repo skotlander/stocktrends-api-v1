@@ -1,5 +1,5 @@
 {
-  "version": "1.2",
+  "version": "1.3",
   "name": "Stock Trends API Tools",
   "provider": "Stock Trends Publications",
   "base_url": "https://api.stocktrends.com/v1",
@@ -87,10 +87,10 @@
     {
       "name": "instrument_lookup",
       "title": "Instrument Lookup",
-      "description": "Looks up a stock or ETF by symbol to retrieve exchange, type, and metadata.",
+      "description": "Looks up a stock or ETF by symbol to retrieve exchange, type, and metadata. Requires a valid API key.",
       "method": "GET",
       "path": "/instruments/lookup",
-      "auth_required": false,
+      "auth_required": true,
       "category": "instruments",
       "parameters": [
         {
@@ -130,7 +130,7 @@
     {
       "name": "stim_history",
       "title": "STIM History",
-      "description": "Returns historical ST-IM (Stock Trends Inference Model) distribution records for a symbol across 4, 13, and 40-week horizons. Chronological order when symbol+exchange specified. Fetch /v1/pricing/catalog for current STC cost.",
+      "description": "Returns historical ST-IM (Stock Trends Inference Model) distribution records for a symbol across 4, 13, and 40-week horizons. Ordering depends on query scope; broad queries return most recent records first. Fetch /v1/pricing/catalog for current STC cost.",
       "method": "GET",
       "path": "/stim/history",
       "auth_required": true,
@@ -146,8 +146,8 @@
     },
     {
       "name": "selections_latest",
-      "title": "STIM Select Latest",
-      "description": "Returns the latest STIM Select (Stock Trends Inference Model Select) stock list ranked by prob13wk descending — the probability of exceeding the 13-week base-period mean random return (2.19%), assuming a normal distribution. Use min_prob13wk to apply a threshold filter. Fetch /v1/pricing/catalog for current STC cost.",
+      "title": "Selections Latest",
+      "description": "Returns the latest st_select stock list ranked by prob13wk descending (probability of exceeding the 13-week base-period mean return of 2.19%, assuming normal distribution). No threshold filter applied. Use /selections/published/latest for the three-horizon published STIM Select definition. Fetch /v1/pricing/catalog for current STC cost.",
       "method": "GET",
       "path": "/selections/latest",
       "auth_required": true,
@@ -155,8 +155,8 @@
     },
     {
       "name": "selections_history",
-      "title": "STIM Select History",
-      "description": "Returns historical STIM Select records. Filter by symbol_exchange, symbol, exchange, or date range. Each entry includes prob13wk — probability of exceeding the 13-week base-period mean random return (2.19%), assuming a normal distribution. Fetch /v1/pricing/catalog for current STC cost.",
+      "title": "Selections History",
+      "description": "Returns historical st_select records. Filter by symbol_exchange, symbol, exchange, or date range. Each entry includes prob13wk. No threshold filter applied unless min_prob13wk is set. Use /selections/published/history for the three-horizon published definition. Fetch /v1/pricing/catalog for current STC cost.",
       "method": "GET",
       "path": "/selections/history",
       "auth_required": true,
@@ -192,7 +192,7 @@
     {
       "name": "market_regime_history",
       "title": "Market Regime History",
-      "description": "Returns a chronological sequence of weekly market regime snapshots using the same classification logic as /market/regime/latest. Useful for trend context and regime transition analysis. Fetch /v1/pricing/catalog for current STC cost.",
+      "description": "Returns a historical sequence of weekly market regime snapshots, most recent first, using the same classification logic as /market/regime/latest. Useful for regime transition analysis. Fetch /v1/pricing/catalog for current STC cost.",
       "method": "GET",
       "path": "/market/regime/history",
       "auth_required": true,
@@ -246,19 +246,19 @@
     {
       "name": "breadth_sector_latest",
       "title": "Sector Breadth Latest",
-      "description": "Returns the latest sector breadth snapshot derived from Stock Trends signal distribution across sectors.",
+      "description": "Returns the latest sector breadth snapshot derived from Stock Trends signal distribution across sectors. Requires a valid API key.",
       "method": "GET",
       "path": "/breadth/sector/latest",
-      "auth_required": false,
+      "auth_required": true,
       "category": "breadth"
     },
     {
       "name": "leadership_summary_latest",
       "title": "Leadership Summary Latest",
-      "description": "Returns the latest leadership summary dataset identifying sector and industry leaders.",
+      "description": "Returns the latest leadership summary dataset identifying sector and industry leaders. Requires a valid API key.",
       "method": "GET",
       "path": "/leadership/summary/latest",
-      "auth_required": false,
+      "auth_required": true,
       "category": "leadership"
     }
   ],

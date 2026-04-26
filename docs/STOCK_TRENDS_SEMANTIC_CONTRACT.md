@@ -308,10 +308,12 @@ random return (2.19%), assuming a normal distribution of returns.
 
 ### API Endpoints
 
-- `GET /v1/selections/latest` — latest STIM Select stock list, ordered by `prob13wk DESC`
-- `GET /v1/selections/history` — historical STIM Select records for a symbol or date range
-- `GET /v1/selections/published/latest` — published STIM Select list with all three horizon thresholds
-  applied (x4wk1, x13wk1, x40wk1) and `prob13wk >= 55%`
+**Base selection endpoints** (return all `st_select` records ranked by `prob13wk DESC`; no threshold filter applied):
+- `GET /v1/selections/latest` — latest `st_select` stock list ordered by `prob13wk DESC`
+- `GET /v1/selections/history` — historical `st_select` records for a symbol or date range
+
+**Published STIM Select endpoints** (enforce all three ST-IM lower-bound thresholds plus `prob13wk >= 55%`):
+- `GET /v1/selections/published/latest` — published STIM Select list with x4wk1 > 0%, x13wk1 > 2.19%, x40wk1 > 6.45%, and `prob13wk >= 55%`
 - `GET /v1/selections/published/history` — historical published STIM Select records
 
 ### Forbidden Terminology

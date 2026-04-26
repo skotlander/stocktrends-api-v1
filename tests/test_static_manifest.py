@@ -86,8 +86,19 @@ def test_stim_top_absent_by_path(manifest):
 
 
 # ---------------------------------------------------------------------------
-# 4. auth_required corrections
+# 4. auth_required correctness
 # ---------------------------------------------------------------------------
+
+# Paths (base-relative, matching tools.json format) confirmed public by
+# ApiKeyMiddleware.public_paths in middleware/api_key.py.
+# Every tool NOT in this set must have auth_required: true.
+_KNOWN_PUBLIC_TOOL_PATHS: frozenset[str] = frozenset({
+    "/ai/context",           # middleware.public_paths
+    "/ai/proof/market-edge", # middleware.public_paths
+    "/pricing",              # middleware.public_paths
+    "/workflows",            # middleware.public_paths
+})
+
 
 def test_pricing_metadata_auth_required_false(manifest):
     """/pricing is a public endpoint — auth_required must be false."""
@@ -103,6 +114,38 @@ def test_workflows_auth_required_false(manifest):
     assert tool is not None, "/workflows tool entry must exist in tools.json"
     assert tool.get("auth_required") is False, \
         f"/workflows must have auth_required: false, got {tool.get('auth_required')!r}"
+
+
+def test_auth_required_false_only_for_known_public_tools(manifest):
+    """auth_required: false is only valid for paths in the known-public allowlist."""
+    violations = []
+    for tool in manifest["tools"]:
+        if tool.get("auth_required") is False:
+            path = tool.get("path", "")
+            if path not in _KNOWN_PUBLIC_TOOL_PATHS:
+                violations.append(f"{tool.get('name', '<unnamed>')} (path={path!r})")
+    assert not violations, (
+        "These tools are marked auth_required: false but are NOT in the known-public allowlist "
+        "(_KNOWN_PUBLIC_TOOL_PATHS). Set auth_required: true or add the path to the allowlist "
+        "after verifying it is in ApiKeyMiddleware.public_paths:\n"
+        + "\n".join(violations)
+    )
+
+
+def test_instrument_lookup_auth_required_true(manifest):
+    """/instruments/lookup is not a public path — auth_required must be true."""
+    tool = _tool_by_path(manifest, "/instruments/lookup")
+    assert tool is not None, "/instruments/lookup must exist in tools.json"
+    assert tool.get("auth_required") is True, \
+        f"/instruments/lookup must have auth_required: true, got {tool.get('auth_required')!r}"
+
+
+def test_leadership_summary_latest_auth_required_true(manifest):
+    """/leadership/summary/latest is not a public path — auth_required must be true."""
+    tool = _tool_by_path(manifest, "/leadership/summary/latest")
+    assert tool is not None, "/leadership/summary/latest must exist in tools.json"
+    assert tool.get("auth_required") is True, \
+        f"/leadership/summary/latest must have auth_required: true, got {tool.get('auth_required')!r}"
 
 
 # ---------------------------------------------------------------------------

@@ -158,11 +158,15 @@ STIM Select identifies securities whose ST-IM lower confidence bounds (xNwk1 fie
 
 Securities are ranked by prob13wk descending — the probability of exceeding the 13-week base-period mean return (2.19%), assuming a normal distribution. The published definition applies a default prob13wk threshold of 55%.
 
+**Base selection endpoints** (return all `st_select` records ranked by `prob13wk DESC`; no threshold filter applied):
+
 * `GET /selections/latest`
-  Latest STIM Select stock list ranked by prob13wk
+  Latest st_select stock list ranked by prob13wk
 
 * `GET /selections/history`
-  Historical STIM Select records; filter by symbol, exchange, or date range
+  Historical st_select records; filter by symbol, exchange, or date range
+
+**Published STIM Select endpoints** (enforce all three ST-IM lower-bound thresholds plus `prob13wk >= 55%`):
 
 * `GET /selections/published/latest`
   Latest published STIM Select filtered to three-horizon criteria and prob13wk >= 55%

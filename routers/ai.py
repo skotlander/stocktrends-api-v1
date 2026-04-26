@@ -265,7 +265,7 @@ _TOOL_TEMPLATES = [
         "name": "market_regime_history",
         "title": "Market Regime History",
         "description": (
-            "Returns a chronological sequence of weekly market regime snapshots. "
+            "Returns a historical sequence of weekly market regime snapshots, most recent first. "
             "Each entry uses the same classification logic as /market/regime/latest. "
             "regime_score = bullish_pct - bearish_pct per week. "
             "Useful for trend context and regime transition analysis."
@@ -392,7 +392,7 @@ _TOOL_TEMPLATES = [
             "Retrieves historical ST-IM (Stock Trends Inference Model) distribution records for a symbol. "
             "Returns forward return distribution fields across 4, 13, and 40-week horizons: "
             "xNwk1 (lower CI bound), xNwk (mean), xNwk2 (upper CI bound), xNwksd (std deviation). "
-            "Results are chronological when symbol+exchange is specified."
+            "Ordering depends on query scope; broad queries return most recent records first."
         ),
         "endpoint": "/v1/stim/history",
         "method": "GET",
@@ -412,13 +412,13 @@ _TOOL_TEMPLATES = [
     # ---- Selections / STIM Select ------------------------------------------
     {
         "name": "selections_latest",
-        "title": "STIM Select Latest",
+        "title": "Selections Latest",
         "description": (
-            "Returns the latest STIM Select (Stock Trends Inference Model Select) stock list "
-            "for the most recent weekdate. "
-            "Securities are ranked by prob13wk descending — the probability of exceeding the "
+            "Returns the latest st_select stock list for the most recent weekdate, "
+            "ranked by prob13wk descending — the probability of exceeding the "
             "13-week base-period mean random return (2.19%), assuming a normal distribution. "
-            "Use min_prob13wk to apply a probability threshold filter."
+            "No threshold filter is applied; all st_select records for the week are returned. "
+            "Use /selections/published/latest for the three-horizon published STIM Select definition."
         ),
         "endpoint": "/v1/selections/latest",
         "method": "GET",
@@ -441,12 +441,14 @@ _TOOL_TEMPLATES = [
     },
     {
         "name": "selections_history",
-        "title": "STIM Select History",
+        "title": "Selections History",
         "description": (
-            "Returns historical STIM Select (Stock Trends Inference Model Select) records. "
+            "Returns historical st_select records. "
             "Filter by symbol_exchange, symbol, exchange, or date range. "
             "Each entry includes prob13wk — probability of exceeding the 13-week base-period "
-            "mean random return (2.19%), assuming a normal distribution."
+            "mean random return (2.19%), assuming a normal distribution. "
+            "No threshold filter is applied unless min_prob13wk is set. "
+            "Use /selections/published/history for the three-horizon published definition."
         ),
         "endpoint": "/v1/selections/history",
         "method": "GET",
