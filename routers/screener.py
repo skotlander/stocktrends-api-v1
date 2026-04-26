@@ -45,10 +45,12 @@ def _parse_trend_filter(trend: str | None) -> list[str] | None:
     summary="Top-ranked instruments screener",
     description=(
         "Returns a ranked list of instruments from the latest Stock Trends signal data. "
-        "Results are filtered by trend state, RSI, and trend duration, then ranked by the "
-        "selected sort field. Designed for agent-native workflows that need a scored "
+        "Filters by trend code (default: bullish states ^+, ^-, v^), RSI (relative performance "
+        "vs benchmark, baseline 100), trend persistence (trend_cnt), and trend maturity (mt_cnt). "
+        "Ranked by RSI or mt_cnt. Each result includes trend, trend_cnt, mt_cnt, rsi, rsi_updn, "
+        "vol_tag, and symbol_exchange. Designed for agent-native workflows that need a scored "
         "instrument universe without per-instrument lookup overhead. "
-        "Pricing rule: agent_screener_top (0.50 STC per call for agent-pay callers)."
+        "Fetch /v1/pricing/catalog for current STC cost."
     ),
 )
 def screener_top(

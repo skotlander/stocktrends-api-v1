@@ -248,38 +248,62 @@ _TOOL_TEMPLATES = [
     {
         "name": "market_regime_latest",
         "title": "Current Market Regime",
-        "description": "Retrieves the current market regime classification.",
+        "description": (
+            "Returns the current market regime classification derived from the distribution "
+            "of Stock Trends trend codes across all active signals. "
+            "regime_score = bullish_pct - bearish_pct, range -1.0 to +1.0. "
+            "Bullish codes: {^+, ^-, v^}. Bearish codes: {v-, v+, ^v}. "
+            "Also returns avg_rsi (universe relative performance) and avg_mt_cnt (universe trend maturity)."
+        ),
         "endpoint": "/v1/market/regime/latest",
         "method": "GET",
         "category": "market",
         "input_schema": {"type": "object", "properties": {}, "required": []},
-        "output_summary": "Current regime label, score, and classification metadata.",
+        "output_summary": "regime, confidence, regime_score, bullish_pct, bearish_pct, avg_rsi, avg_mt_cnt, signal_count, weekdate.",
     },
     {
         "name": "market_regime_history",
         "title": "Market Regime History",
-        "description": "Retrieves historical regime sequence for context.",
+        "description": (
+            "Returns a historical sequence of weekly market regime snapshots, most recent first. "
+            "Each entry uses the same classification logic as /market/regime/latest. "
+            "regime_score = bullish_pct - bearish_pct per week. "
+            "Useful for trend context and regime transition analysis."
+        ),
         "endpoint": "/v1/market/regime/history",
         "method": "GET",
         "category": "market",
         "input_schema": {"type": "object", "properties": {}, "required": []},
-        "output_summary": "Weekly regime classification history.",
+        "output_summary": "history[](weekdate, regime, confidence, regime_score, bullish_pct, bearish_pct, avg_rsi, avg_mt_cnt, signal_count), count, limit.",
     },
     {
         "name": "market_regime_forecast",
         "title": "Market Regime Forecast",
-        "description": "Retrieves probabilistic forward regime forecast.",
+        "description": (
+            "Returns a deterministic forward regime outlook derived from the direction "
+            "and consistency of recent weekly regime scores. No ML. "
+            "forecast_regime: bullish | bearish | mixed. "
+            "forecast_confidence based on regime_consistency and avg_weekly_score_delta. "
+            "Reuses the same trend classification as /market/regime/latest."
+        ),
         "endpoint": "/v1/market/regime/forecast",
         "method": "GET",
         "category": "market",
         "input_schema": {"type": "object", "properties": {}, "required": []},
-        "output_summary": "Forward regime probabilities and directional confidence.",
+        "output_summary": "forecast_regime, forecast_confidence, current_regime, current_regime_score, recent_direction, regime_consistency, projected_regime_score.",
     },
     # ---- Screener ----------------------------------------------------------
     {
         "name": "screener_top",
         "title": "Agent Screener Top",
-        "description": "Returns top qualifying tickers based on Stock Trends criteria. Ranked and ready for portfolio construction.",
+        "description": (
+            "Returns a ranked list of instruments from the latest Stock Trends signal data. "
+            "Filters by trend code (default: bullish states ^+, ^-, v^), RSI threshold "
+            "(relative performance vs S&P 500 benchmark, baseline 100), trend persistence "
+            "(trend_cnt), and trend maturity (mt_cnt). "
+            "Each result includes: trend, trend_cnt, mt_cnt, rsi, rsi_updn, vol_tag, symbol_exchange. "
+            "Recommended first premium endpoint for agent portfolio and signal workflows."
+        ),
         "endpoint": "/v1/agent/screener/top",
         "method": "GET",
         "category": "screener",
@@ -289,7 +313,7 @@ _TOOL_TEMPLATES = [
             "required": [],
             "description": "See /v1/openapi.json for full query parameter schema.",
         },
-        "output_summary": "Ranked list of qualifying tickers with trend and scoring metadata.",
+        "output_summary": "Ranked list of instruments with trend, trend_cnt, mt_cnt, rsi, rsi_updn, vol_tag fields.",
     },
     # ---- Portfolio ---------------------------------------------------------
     {
@@ -364,7 +388,12 @@ _TOOL_TEMPLATES = [
     {
         "name": "stim_history",
         "title": "STIM History",
-        "description": "Retrieves historical ST-IM distribution records for a symbol.",
+        "description": (
+            "Retrieves historical ST-IM (Stock Trends Inference Model) distribution records for a symbol. "
+            "Returns forward return distribution fields across 4, 13, and 40-week horizons: "
+            "xNwk1 (lower CI bound), xNwk (mean), xNwk2 (upper CI bound), xNwksd (std deviation). "
+            "Ordering depends on query scope; broad queries return most recent records first."
+        ),
         "endpoint": "/v1/stim/history",
         "method": "GET",
         "category": "stim",
@@ -378,7 +407,115 @@ _TOOL_TEMPLATES = [
             },
             "required": ["symbol_exchange"],
         },
-        "output_summary": "Historical ST-IM distribution records.",
+        "output_summary": "Historical ST-IM distribution records: xNwk1, xNwk, xNwk2, xNwksd across 4, 13, and 40-week horizons.",
+    },
+    # ---- Selections / STIM Select ------------------------------------------
+    {
+        "name": "selections_latest",
+        "title": "Selections Latest",
+        "description": (
+            "Returns the latest st_select stock list for the most recent weekdate, "
+            "ranked by prob13wk descending — the probability of exceeding the "
+            "13-week base-period mean random return (2.19%), assuming a normal distribution. "
+            "No threshold filter is applied; all st_select records for the week are returned. "
+            "Use /selections/published/latest for the three-horizon published STIM Select definition."
+        ),
+        "endpoint": "/v1/selections/latest",
+        "method": "GET",
+        "category": "selections",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "exchange": {
+                    "type": "string",
+                    "description": "Optional exchange filter: N, Q, A, B, T, I.",
+                },
+                "min_prob13wk": {
+                    "type": "number",
+                    "description": "Optional minimum prob13wk threshold (0.0–1.0).",
+                },
+            },
+            "required": [],
+        },
+        "output_summary": "weekdate, count, data[](weekdate, exchange, symbol, prob13wk, symbol_exchange).",
+    },
+    {
+        "name": "selections_history",
+        "title": "Selections History",
+        "description": (
+            "Returns historical st_select records. "
+            "Filter by symbol_exchange, symbol, exchange, or date range. "
+            "Each entry includes prob13wk — probability of exceeding the 13-week base-period "
+            "mean random return (2.19%), assuming a normal distribution. "
+            "No threshold filter is applied unless min_prob13wk is set. "
+            "Use /selections/published/history for the three-horizon published definition."
+        ),
+        "endpoint": "/v1/selections/history",
+        "method": "GET",
+        "category": "selections",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol_exchange": {
+                    "type": "string",
+                    "description": "Combined symbol and exchange, e.g. 'IBM-N'.",
+                },
+                "symbol": {"type": "string", "description": "Ticker symbol, e.g. 'IBM'."},
+                "exchange": {"type": "string", "description": "Exchange code, e.g. 'N'."},
+                "start": {"type": "string", "description": "Start date YYYY-MM-DD (inclusive)."},
+                "end": {"type": "string", "description": "End date YYYY-MM-DD (inclusive)."},
+                "min_prob13wk": {"type": "number", "description": "Optional minimum prob13wk threshold."},
+            },
+            "required": [],
+        },
+        "output_summary": "count, data[](weekdate, exchange, symbol, prob13wk, symbol_exchange).",
+    },
+    {
+        "name": "selections_published_latest",
+        "title": "Published STIM Select Latest",
+        "description": (
+            "Returns the latest published STIM Select list filtered to the published definition: "
+            "x4wk1 > 0% (4-week lower CI bound), x13wk1 > 2.19% (13-week), x40wk1 > 6.45% (40-week), "
+            "and prob13wk >= 55% by default. "
+            "Ranked by prob13wk descending. Includes full ST-IM distribution fields."
+        ),
+        "endpoint": "/v1/selections/published/latest",
+        "method": "GET",
+        "category": "selections",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "exchange": {"type": "string", "description": "Optional exchange filter: N, Q, A, B, T, I."},
+                "min_prob13wk": {"type": "number", "description": "Minimum prob13wk threshold (default 0.55)."},
+            },
+            "required": [],
+        },
+        "output_summary": "weekdate, count, data[](weekdate, exchange, symbol, prob13wk, x4wk1, x13wk1, x40wk1, symbol_exchange).",
+    },
+    {
+        "name": "selections_published_history",
+        "title": "Published STIM Select History",
+        "description": (
+            "Returns historical published STIM Select records filtered to the three-horizon "
+            "confidence interval criteria and prob13wk threshold. "
+            "Filter by symbol_exchange, symbol, exchange, or date range."
+        ),
+        "endpoint": "/v1/selections/published/history",
+        "method": "GET",
+        "category": "selections",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol_exchange": {"type": "string", "description": "e.g. 'IBM-N'."},
+                "symbol": {"type": "string"},
+                "exchange": {"type": "string"},
+                "start": {"type": "string", "description": "Start date YYYY-MM-DD."},
+                "end": {"type": "string", "description": "End date YYYY-MM-DD."},
+                "min_prob13wk": {"type": "number", "description": "Minimum prob13wk threshold (default 0.55)."},
+            },
+            "required": [],
+        },
+        "output_summary": "count, data[](weekdate, exchange, symbol, prob13wk, x4wk1, x13wk1, x40wk1, symbol_exchange).",
     },
 ]
 
@@ -438,7 +575,7 @@ def ai_context():
     return {
         "dataset": "Stock Trends Market Indicators",
         "provider": "Stock Trends Publications",
-        "description": "Weekly structured market intelligence dataset covering North American equities and ETFs, including Stock Trends trend classification, momentum, relative strength, unusual volume, breadth, leadership, ST-IM forward return distributions, market regime analytics, and deterministic decision/portfolio workflows.",
+        "description": "Weekly structured market intelligence dataset covering North American equities and ETFs, including Stock Trends trend classification, trend persistence, trend maturity, relative strength, unusual volume signals, breadth, leadership, ST-IM (Stock Trends Inference Model) forward return distributions, market regime analytics, and deterministic decision/portfolio workflows.",
         "discovery_entrypoints": {
             "primary_machine_readable": "/v1/ai/tools",
             "secondary_explanatory": "/v1/ai/context",
@@ -464,7 +601,7 @@ def ai_context():
             "trend": "Primary Stock Trends trend classification for the instrument.",
             "trend_cnt": "Number of consecutive weeks the current trend classification has persisted.",
             "mt_cnt": "Number of weeks the instrument has remained in its current major trend category.",
-            "rsi": "Relative strength measure versus the relevant market benchmark.",
+            "rsi": "Relative performance ratio versus the S&P 500 benchmark over 13 weeks. Baseline = 100. Values >100 indicate outperformance; <100 indicate underperformance. Not the traditional Wilder RSI oscillator.",
             "rsi_updn": "Weekly direction of relative strength versus benchmark.",
             "vol_tag": "Unusual volume classification for the current week."
         },
@@ -569,6 +706,7 @@ def ai_context():
         "usage_guidance": [
             "Start with /v1/ai/tools as the primary machine-readable manifest for agent discovery.",
             "Use /v1/ai/context as the secondary explanatory endpoint for dataset and endpoint-family context.",
+            "Before calling premium endpoints, call /v1/ai/proof/market-edge (no auth required) to inspect signal structure and confirm field schemas before purchasing access.",
             "Use /v1/docs and /v1/openapi.json for exact request and response contracts.",
             "Use /v1/pricing/catalog to discover live pricing rules before calling premium endpoints.",
             "Use subscription access for persistent developer workflows and x402 for agent-native pay-per-request access.",
@@ -833,15 +971,16 @@ _PROOF_STATIC_BODY: dict = {
             "Stock Trends delivers processed, ranked, actionable signals — not raw prices."
         ),
         "differentiators": [
-            "Proprietary momentum-based ranking across 2000+ instruments",
-            "Multi-timeframe signal scoring (daily, weekly, momentum breakdowns)",
+            "Proprietary trend classification across 2000+ North American equities and ETFs",
+            "Weekly structured signals: trend state, trend persistence (trend_cnt), trend maturity (mt_cnt), relative strength (rsi), volume context (vol_tag)",
+            "ST-IM (Stock Trends Inference Model): forward return expectations and statistical distributions across 4, 13, and 40-week horizons",
             "Sector breadth context for market regime detection",
             "Agent-optimized structured JSON with consistent scoring fields",
             "Multi-rail payments: subscription, x402 (per-request), MPP (session-based)",
         ],
         "vs_raw_price": (
-            "A raw price API returns a number. Stock Trends returns a ranked momentum score, "
-            "signal label, regime context, and a structured workflow-ready response "
+            "A raw price API returns a number. Stock Trends returns a ranked trend signal set, "
+            "regime context, and a structured workflow-ready response "
             "— all in one call."
         ),
     },
@@ -855,53 +994,53 @@ _PROOF_STATIC_BODY: dict = {
         "instruments": [
             {
                 "symbol": "SAMPLE_A1",
-                "trend": "strong_uptrend",
+                "trend": "^+",
                 "trend_cnt": 12,
                 "mt_cnt": 8,
-                "rsi": 71,
-                "rsi_updn": "up",
-                "vol_tag": "high",
+                "rsi": 118,
+                "rsi_updn": "+",
+                "vol_tag": "*",
                 "rank": 1,
             },
             {
                 "symbol": "SAMPLE_B2",
-                "trend": "uptrend",
+                "trend": "^-",
                 "trend_cnt": 7,
-                "mt_cnt": 4,
-                "rsi": 58,
-                "rsi_updn": "up",
-                "vol_tag": "normal",
+                "mt_cnt": 12,
+                "rsi": 103,
+                "rsi_updn": "+",
+                "vol_tag": "",
                 "rank": 8,
             },
             {
                 "symbol": "SAMPLE_C3",
-                "trend": "neutral",
+                "trend": "v^",
                 "trend_cnt": 2,
-                "mt_cnt": 0,
-                "rsi": 49,
-                "rsi_updn": "flat",
-                "vol_tag": "normal",
-                "rank": 143,
+                "mt_cnt": 1,
+                "rsi": 97,
+                "rsi_updn": "-",
+                "vol_tag": "",
+                "rank": 47,
             },
             {
                 "symbol": "SAMPLE_D4",
-                "trend": "downtrend",
-                "trend_cnt": -5,
-                "mt_cnt": -3,
-                "rsi": 38,
-                "rsi_updn": "down",
-                "vol_tag": "low",
-                "rank": 389,
+                "trend": "v-",
+                "trend_cnt": 5,
+                "mt_cnt": 3,
+                "rsi": 88,
+                "rsi_updn": "-",
+                "vol_tag": "",
+                "rank": 189,
             },
             {
                 "symbol": "SAMPLE_E5",
-                "trend": "strong_downtrend",
-                "trend_cnt": -11,
-                "mt_cnt": -7,
-                "rsi": 22,
-                "rsi_updn": "down",
-                "vol_tag": "low",
-                "rank": 487,
+                "trend": "v+",
+                "trend_cnt": 11,
+                "mt_cnt": 7,
+                "rsi": 72,
+                "rsi_updn": "-",
+                "vol_tag": "!!",
+                "rank": 387,
             },
         ],
         "sector_summary": {
@@ -912,12 +1051,12 @@ _PROOF_STATIC_BODY: dict = {
     },
     "signal_highlights": [
         {
-            "signal_type": "momentum_breakout",
+            "signal_type": "bullish_trend_entry",
             "description": (
-                "Illustrative: instruments with momentum_score > 85 represent "
-                "top-ranked breakout candidates in the screener."
+                "Illustrative: instruments in bullish trend states (^+, ^-) with high "
+                "RSI and persistent trend_cnt represent top-ranked candidates in the screener."
             ),
-            "note": "Live counts and scores available via /v1/agent/screener/top.",
+            "note": "Live ranked signals available via /v1/agent/screener/top.",
         },
         {
             "signal_type": "sector_rotation",
@@ -950,7 +1089,7 @@ _PROOF_STATIC_BODY: dict = {
             {
                 "step": 4,
                 "call": "GET /v1/stim/latest",
-                "purpose": "Get market regime and STIM signal",
+                "purpose": "Get ST-IM (Stock Trends Inference Model) forward return expectations and statistical distributions for a symbol",
             },
             {
                 "step": 5,

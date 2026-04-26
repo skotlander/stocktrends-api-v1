@@ -65,7 +65,7 @@ def _signal_notes(
         "Evaluates a single symbol's current trend context against the live market regime "
         "to produce a synthesized bias, confidence score, and decision_score (0–1). "
         "Fully deterministic — no ML. Uses the same regime logic as /market/regime/forecast. "
-        "Pricing rule: evaluate_symbol (0.50 STC per call)."
+        "Fetch /v1/pricing/catalog for current STC cost."
     ),
 )
 def evaluate_symbol(body: EvaluateSymbolRequest, request: Request):

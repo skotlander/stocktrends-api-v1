@@ -1,5 +1,5 @@
 {
-  "version": "1.1",
+  "version": "1.3",
   "name": "Stock Trends API Tools",
   "provider": "Stock Trends Publications",
   "base_url": "https://api.stocktrends.com/v1",
@@ -9,204 +9,274 @@
   "ai_context": "https://api.stocktrends.com/v1/ai/context",
   "llms": "https://api.stocktrends.com/llms.txt",
   "auth": {
-  "primary": {
-  "type": "api_key",
-  "in": "header",
-  "name": "X-API-Key",
-  "example": "X-API-Key: YOUR_API_KEY"
-  },
-  "alternative": {
-  "type": "http_bearer",
-  "header": "Authorization: Bearer YOUR_API_KEY"
-  }
+    "primary": {
+      "type": "api_key",
+      "in": "header",
+      "name": "X-API-Key",
+      "example": "X-API-Key: YOUR_API_KEY"
+    },
+    "alternative": {
+      "type": "http_bearer",
+      "header": "Authorization: Bearer YOUR_API_KEY"
+    }
   },
   "tools": [
-  {
-  "name": "ai_context",
-  "title": "AI Context",
-  "description": "Returns dataset structure, indicator definitions, coverage, usage guidance, and discovery links for agents.",
-  "method": "GET",
-  "path": "/ai/context",
-  "auth_required": false,
-  "category": "ai"
-  },
-  {
-  "name": "pricing_metadata",
-  "title": "Pricing Metadata",
-  "description": "Returns pricing discovery metadata for the API.",
-  "method": "GET",
-  "path": "/pricing",
-  "auth_required": true,
-  "category": "pricing"
-  },
-  {
-  "name": "pricing_catalog",
-  "title": "Pricing Catalog",
-  "description": "Returns the live pricing rule catalog.",
-  "method": "GET",
-  "path": "/pricing/catalog",
-  "auth_required": true,
-  "category": "pricing"
-  },
-  {
-  "name": "cost_estimate",
-  "title": "Cost Estimate",
-  "description": "Returns workflow cost estimates before execution.",
-  "method": "GET",
-  "path": "/cost-estimate",
-  "auth_required": true,
-  "category": "pricing"
-  },
-  {
-  "name": "evaluate_symbol",
-  "title": "Evaluate Symbol",
-  "description": "Performs symbol-level decision evaluation.",
-  "method": "POST",
-  "path": "/decision/evaluate-symbol",
-  "auth_required": true,
-  "category": "decision"
-  },
-  {
-  "name": "construct_portfolio",
-  "title": "Construct Portfolio",
-  "description": "Constructs a scored equal-weight portfolio.",
-  "method": "POST",
-  "path": "/portfolio/construct",
-  "auth_required": true,
-  "category": "portfolio"
-  },
-  {
-  "name": "evaluate_portfolio",
-  "title": "Evaluate Portfolio",
-  "description": "Evaluates a user-supplied portfolio.",
-  "method": "POST",
-  "path": "/portfolio/evaluate",
-  "auth_required": true,
-  "category": "portfolio"
-  },
-  {
-  "name": "compare_portfolios",
-  "title": "Compare Portfolios",
-  "description": "Compares two user-supplied portfolios.",
-  "method": "POST",
-  "path": "/portfolio/compare",
-  "auth_required": true,
-  "category": "portfolio"
-  },
-  {
-  "name": "market_regime_latest",
-  "title": "Market Regime Latest",
-  "description": "Returns the current market regime classification.",
-  "method": "GET",
-  "path": "/market/regime/latest",
-  "auth_required": true,
-  "category": "market"
-  },
-  {
-  "name": "breadth_sector_latest",
-  "title": "Sector Breadth Latest",
-  "description": "Returns the latest sector breadth snapshot.",
-  "method": "GET",
-  "path": "/breadth/sector/latest",
-  "auth_required": false,
-  "category": "breadth"
-  },
-  {
-  "name": "leadership_summary_latest",
-  "title": "Leadership Summary Latest",
-  "description": "Returns the latest leadership summary dataset.",
-  "method": "GET",
-  "path": "/leadership/summary/latest",
-  "auth_required": false,
-  "category": "leadership"
-  },
-  {
-  "name": "agent_screener_top",
-  "title": "Agent Screener Top",
-  "description": "Returns top-ranked instruments for agent workflows.",
-  "method": "GET",
-  "path": "/agent/screener/top",
-  "auth_required": true,
-  "category": "agent_screener"
-  },
-  {
-  "name": "workflows",
-  "title": "Workflow Registry",
-  "description": "Returns the available workflow registry.",
-  "method": "GET",
-  "path": "/workflows",
-  "auth_required": true,
-  "category": "workflows"
-  },
-  {
-  "name": "agents",
-  "title": "Agent Registry",
-  "description": "Lists agents for the authenticated customer.",
-  "method": "GET",
-  "path": "/agents",
-  "auth_required": true,
-  "category": "agents"
-  },
-  {
-  "name": "instrument_lookup",
-  "title": "Instrument Lookup",
-  "description": "Looks up a stock or ETF by symbol.",
-  "method": "GET",
-  "path": "/instruments/lookup",
-  "auth_required": false,
-  "category": "instruments",
-  "parameters": [
-  {
-  "name": "symbol",
-  "type": "string",
-  "required": true,
-  "description": "Ticker symbol, for example AAPL."
-  }
-  ]
-  },
-  {
-  "name": "stim_top",
-  "title": "Top STIM Results",
-  "description": "Returns top-ranked STIM results from the Stock Trends Inference Model.",
-  "method": "GET",
-  "path": "/stim/top",
-  "auth_required": true,
-  "category": "stim"
-  },
-  {
-  "name": "selections_latest",
-  "title": "Latest Selections",
-  "description": "Returns the latest Stock Trends selections dataset.",
-  "method": "GET",
-  "path": "/selections/latest",
-  "auth_required": true,
-  "category": "selections"
-  },
-  {
-  "name": "selections_published_latest",
-  "title": "Latest Published Selections",
-  "description": "Returns the latest published selections dataset.",
-  "method": "GET",
-  "path": "/selections-published/latest",
-  "auth_required": false,
-  "category": "selections"
-  }
+    {
+      "name": "ai_context",
+      "title": "AI Context",
+      "description": "Returns dataset structure, indicator definitions, coverage, usage guidance, and discovery links for agents. Use after /v1/ai/tools as the secondary explanatory entry point.",
+      "method": "GET",
+      "path": "/ai/context",
+      "auth_required": false,
+      "category": "ai"
+    },
+    {
+      "name": "ai_proof_market_edge",
+      "title": "Proof of Value — Market Edge",
+      "description": "Free, non-metered, no auth required. Returns a static synthetic demonstration of Stock Trends signal structure, value proposition, and field schemas. Use this before purchasing access to confirm field names, trend codes, and RSI baseline semantics. Instruments use impossible synthetic symbols — not real tickers.",
+      "method": "GET",
+      "path": "/ai/proof/market-edge",
+      "auth_required": false,
+      "category": "ai"
+    },
+    {
+      "name": "pricing_metadata",
+      "title": "Pricing Metadata",
+      "description": "Returns pricing discovery metadata: supported payment methods, endpoint families, and agent identity guidance. Public, no auth required.",
+      "method": "GET",
+      "path": "/pricing",
+      "auth_required": false,
+      "category": "pricing"
+    },
+    {
+      "name": "pricing_catalog",
+      "title": "Pricing Catalog",
+      "description": "Returns the live STC pricing rule catalog. Fetch at agent startup to build a local cost map. Requires a valid API key.",
+      "method": "GET",
+      "path": "/pricing/catalog",
+      "auth_required": true,
+      "category": "pricing"
+    },
+    {
+      "name": "cost_estimate",
+      "title": "Cost Estimate",
+      "description": "Returns deterministic STC cost estimates for a named workflow before execution. Requires a valid API key.",
+      "method": "GET",
+      "path": "/cost-estimate",
+      "auth_required": true,
+      "category": "pricing"
+    },
+    {
+      "name": "workflows",
+      "title": "Workflow Registry",
+      "description": "Returns available multi-step workflows with live per-step STC costs resolved from the pricing engine. Public, no auth required.",
+      "method": "GET",
+      "path": "/workflows",
+      "auth_required": false,
+      "category": "workflows"
+    },
+    {
+      "name": "agents",
+      "title": "Agent Registry",
+      "description": "Lists agents registered for the authenticated customer.",
+      "method": "GET",
+      "path": "/agents",
+      "auth_required": true,
+      "category": "agents"
+    },
+    {
+      "name": "instrument_lookup",
+      "title": "Instrument Lookup",
+      "description": "Looks up a stock or ETF by symbol to retrieve exchange, type, and metadata. Requires a valid API key.",
+      "method": "GET",
+      "path": "/instruments/lookup",
+      "auth_required": true,
+      "category": "instruments",
+      "parameters": [
+        {
+          "name": "symbol",
+          "type": "string",
+          "required": true,
+          "description": "Ticker symbol, for example AAPL."
+        }
+      ]
+    },
+    {
+      "name": "agent_screener_top",
+      "title": "Agent Screener Top",
+      "description": "Returns top-ranked instruments from the latest Stock Trends signal data. Filters by trend code (default: bullish states ^+, ^-, v^), RSI threshold (relative performance vs S&P 500 benchmark, baseline 100), trend persistence (trend_cnt), and trend maturity (mt_cnt). Each result includes trend, trend_cnt, mt_cnt, rsi, rsi_updn, vol_tag, symbol_exchange. Recommended first premium call for agent workflows.",
+      "method": "GET",
+      "path": "/agent/screener/top",
+      "auth_required": true,
+      "category": "agent_screener"
+    },
+    {
+      "name": "stim_latest",
+      "title": "STIM Latest",
+      "description": "Returns the latest ST-IM (Stock Trends Inference Model) forward return expectations and statistical distributions for a symbol. Covers 4, 13, and 40-week horizons. Fields: xNwk1 (lower CI bound), xNwk (mean), xNwk2 (upper CI bound), xNwksd (std deviation). Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "GET",
+      "path": "/stim/latest",
+      "auth_required": true,
+      "category": "stim",
+      "parameters": [
+        {
+          "name": "symbol_exchange",
+          "type": "string",
+          "required": true,
+          "description": "Symbol and exchange, e.g. IBM-N."
+        }
+      ]
+    },
+    {
+      "name": "stim_history",
+      "title": "STIM History",
+      "description": "Returns historical ST-IM (Stock Trends Inference Model) distribution records for a symbol across 4, 13, and 40-week horizons. Ordering depends on query scope; broad queries return most recent records first. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "GET",
+      "path": "/stim/history",
+      "auth_required": true,
+      "category": "stim",
+      "parameters": [
+        {
+          "name": "symbol_exchange",
+          "type": "string",
+          "required": true,
+          "description": "Symbol and exchange, e.g. IBM-N."
+        }
+      ]
+    },
+    {
+      "name": "selections_latest",
+      "title": "Selections Latest",
+      "description": "Returns the latest st_select stock list ranked by prob13wk descending (probability of exceeding the 13-week base-period mean return of 2.19%, assuming normal distribution). No threshold filter applied. Use /selections/published/latest for the three-horizon published STIM Select definition. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "GET",
+      "path": "/selections/latest",
+      "auth_required": true,
+      "category": "selections"
+    },
+    {
+      "name": "selections_history",
+      "title": "Selections History",
+      "description": "Returns historical st_select records. Filter by symbol_exchange, symbol, exchange, or date range. Each entry includes prob13wk. No threshold filter applied unless min_prob13wk is set. Use /selections/published/history for the three-horizon published definition. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "GET",
+      "path": "/selections/history",
+      "auth_required": true,
+      "category": "selections"
+    },
+    {
+      "name": "selections_published_latest",
+      "title": "Published STIM Select Latest",
+      "description": "Returns the latest published STIM Select list filtered to the three-horizon published definition: x4wk1 > 0% (4-week lower CI bound), x13wk1 > 2.19% (13-week), x40wk1 > 6.45% (40-week), prob13wk >= 55% by default. Ranked by prob13wk descending. Includes full ST-IM distribution fields. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "GET",
+      "path": "/selections/published/latest",
+      "auth_required": true,
+      "category": "selections"
+    },
+    {
+      "name": "selections_published_history",
+      "title": "Published STIM Select History",
+      "description": "Returns historical published STIM Select records filtered to the three-horizon criteria and prob13wk threshold. Filter by symbol_exchange, symbol, exchange, or date range. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "GET",
+      "path": "/selections/published/history",
+      "auth_required": true,
+      "category": "selections"
+    },
+    {
+      "name": "market_regime_latest",
+      "title": "Market Regime Latest",
+      "description": "Returns the current market regime classification derived from the distribution of Stock Trends trend codes across all active signals. regime_score = bullish_pct minus bearish_pct. Bullish codes: ^+, ^-, v^. Bearish codes: v-, v+, ^v. Also returns avg_rsi (universe relative performance vs S&P 500, baseline 100) and avg_mt_cnt. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "GET",
+      "path": "/market/regime/latest",
+      "auth_required": true,
+      "category": "market"
+    },
+    {
+      "name": "market_regime_history",
+      "title": "Market Regime History",
+      "description": "Returns a historical sequence of weekly market regime snapshots, most recent first, using the same classification logic as /market/regime/latest. Useful for regime transition analysis. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "GET",
+      "path": "/market/regime/history",
+      "auth_required": true,
+      "category": "market"
+    },
+    {
+      "name": "market_regime_forecast",
+      "title": "Market Regime Forecast",
+      "description": "Returns a deterministic forward regime outlook derived from the direction and consistency of recent weekly regime scores. No ML. forecast_regime: bullish | bearish | mixed. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "GET",
+      "path": "/market/regime/forecast",
+      "auth_required": true,
+      "category": "market"
+    },
+    {
+      "name": "evaluate_symbol",
+      "title": "Evaluate Symbol",
+      "description": "Evaluates a single symbol's trend context against the live market regime to produce a synthesized bias, confidence score, and decision_score (0-1). Fully deterministic — no ML. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "POST",
+      "path": "/decision/evaluate-symbol",
+      "auth_required": true,
+      "category": "decision"
+    },
+    {
+      "name": "construct_portfolio",
+      "title": "Construct Portfolio",
+      "description": "Constructs a scored portfolio from screened candidates using Stock Trends weighting logic. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "POST",
+      "path": "/portfolio/construct",
+      "auth_required": true,
+      "category": "portfolio"
+    },
+    {
+      "name": "evaluate_portfolio",
+      "title": "Evaluate Portfolio",
+      "description": "Evaluates trend alignment, regime fit, and score distribution of a user-supplied portfolio against the current market regime. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "POST",
+      "path": "/portfolio/evaluate",
+      "auth_required": true,
+      "category": "portfolio"
+    },
+    {
+      "name": "compare_portfolios",
+      "title": "Compare Portfolios",
+      "description": "Compares two user-supplied portfolios to quantify differences in score, alignment, and regime fit. Returns comparison.winner and comparison.score_delta. Fetch /v1/pricing/catalog for current STC cost.",
+      "method": "POST",
+      "path": "/portfolio/compare",
+      "auth_required": true,
+      "category": "portfolio"
+    },
+    {
+      "name": "breadth_sector_latest",
+      "title": "Sector Breadth Latest",
+      "description": "Returns the latest sector breadth snapshot derived from Stock Trends signal distribution across sectors. Free-metered and anonymously accessible.",
+      "method": "GET",
+      "path": "/breadth/sector/latest",
+      "auth_required": false,
+      "category": "breadth"
+    },
+    {
+      "name": "leadership_summary_latest",
+      "title": "Leadership Summary Latest",
+      "description": "Returns the latest leadership summary dataset identifying sector and industry leaders. Requires a valid API key.",
+      "method": "GET",
+      "path": "/leadership/summary/latest",
+      "auth_required": true,
+      "category": "leadership"
+    }
   ],
   "usage_guidance": [
-  "Start with /v1/ai/tools as the primary machine-readable discovery entrypoint.",
-  "Use /v1/ai/context for explanatory dataset context and endpoint group overviews.",
-  "Fetch /v1/pricing/catalog at agent startup to resolve live STC costs — do not hardcode.",
-  "Use /v1/pricing and /v1/cost-estimate before expensive workflows.",
-  "Use decision and portfolio endpoints for high-value actionable outputs.",
-  "Use market regime, breadth, and leadership endpoints for contextual enrichment.",
-  "Prefer structured API endpoints over scraping website pages."
+    "Start with /v1/ai/tools as the primary machine-readable discovery entrypoint.",
+    "Call /v1/ai/proof/market-edge (no auth) to preview signal field structure before purchasing access.",
+    "Use /v1/ai/context for explanatory dataset context and endpoint group overviews.",
+    "Fetch /v1/pricing/catalog at agent startup to resolve live STC costs — do not hardcode.",
+    "Use /v1/pricing and /v1/cost-estimate before expensive workflows.",
+    "Use decision and portfolio endpoints for high-value actionable outputs.",
+    "Use market regime, breadth, and leadership endpoints for contextual enrichment.",
+    "Prefer structured API endpoints over scraping website pages."
   ],
   "legal": {
-  "license": "https://stocktrends.com/stock-trends-data-license",
-  "terms": "https://stocktrends.com/terms-of-use"
+    "license": "https://stocktrends.com/stock-trends-data-license",
+    "terms": "https://stocktrends.com/terms-of-use"
   },
   "support": {
-  "email": "[api@stocktrends.com](mailto:api@stocktrends.com)"
+    "email": "api@stocktrends.com"
   }
-  }
-  
+}

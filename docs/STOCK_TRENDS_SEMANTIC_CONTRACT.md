@@ -262,6 +262,70 @@ Together, they provide a **multi-dimensional view of market behavior**.
 
 ---
 
+## STIM Select — Stock Trends Inference Model Select
+
+### Definition
+
+**STIM Select = Stock Trends Inference Model Select**
+
+STIM Select stocks are securities whose Stock Trends indicator combinations satisfy the following
+statistical criteria across all three ST-IM forward return horizons:
+
+> The lower bound of the mean return confidence interval exceeds the base-period mean random return
+> for all three horizons simultaneously.
+
+### Base-Period Mean Random Returns (Thresholds)
+
+| Horizon | Base-Period Mean Random Return |
+|---------|-------------------------------|
+| 4-week  | 0%                            |
+| 13-week | 2.19%                         |
+| 40-week | 6.45%                         |
+
+In ST-IM field terms:
+- `x4wk1 > 0.00` (lower confidence bound of 4-week expected return exceeds 0%)
+- `x13wk1 > 2.19` (lower confidence bound of 13-week expected return exceeds 2.19%)
+- `x40wk1 > 6.45` (lower confidence bound of 40-week expected return exceeds 6.45%)
+
+### Ranking
+
+STIM Select stocks are ranked in descending order of:
+
+**Primary ranking metric: `prob13wk`** — probability of exceeding the 13-week base-period mean
+random return (2.19%), assuming a normal distribution of returns.
+
+### Publication Threshold
+
+- `prob13wk >= 55%` (minimum 55% probability of exceeding the 13-week base mean)
+
+### Distribution Assumption
+
+- Normal distribution
+
+### Key Field
+
+- `prob13wk` — probability of exceeding the 13-week base-period mean return (primary ranking field)
+
+### API Endpoints
+
+**Base selection endpoints** (return all `st_select` records ranked by `prob13wk DESC`; no threshold filter applied):
+- `GET /v1/selections/latest` — latest `st_select` stock list ordered by `prob13wk DESC`
+- `GET /v1/selections/history` — historical `st_select` records for a symbol or date range
+
+**Published STIM Select endpoints** (enforce all three ST-IM lower-bound thresholds plus `prob13wk >= 55%`):
+- `GET /v1/selections/published/latest` — published STIM Select list with x4wk1 > 0%, x13wk1 > 2.19%, x40wk1 > 6.45%, and `prob13wk >= 55%`
+- `GET /v1/selections/published/history` — historical published STIM Select records
+
+### Forbidden Terminology
+
+STIM Select must NOT be described as:
+- "generic stock selections"
+- "stock picks"
+- "screener results"
+- any description that omits the ST-IM probability and confidence interval criteria
+
+---
+
 ## External References (Optional)
 
 For additional human-readable context:

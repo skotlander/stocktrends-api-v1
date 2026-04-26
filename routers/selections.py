@@ -56,7 +56,20 @@ def _mast_join(include_mast: bool) -> str:
     """
 
 
-@router.get("/latest")
+@router.get(
+    "/latest",
+    summary="Latest STIM Select stock list",
+    description=(
+        "Returns the latest STIM Select (Stock Trends Inference Model Select) stock list "
+        "from the selection database for the most recent weekdate. "
+        "Securities are ranked by prob13wk descending — the probability of exceeding the "
+        "13-week base-period mean random return (2.19%), assuming a normal distribution. "
+        "Use min_prob13wk to apply a custom probability threshold (default: no filter). "
+        "Use include_data=true to add Stock Trends signal fields (trend, rsi, vol_tag, etc.) "
+        "per symbol via a join to st_data. "
+        "Fetch /v1/pricing/catalog for current STC cost."
+    ),
+)
 def selections_latest(
     request: Request,
     exchange: str | None = Query(default=None, description="Optional exchange filter: N,Q,A,B,T,I"),
@@ -185,7 +198,18 @@ def selections_latest(
     }
 
 
-@router.get("/history")
+@router.get(
+    "/history",
+    summary="Historical STIM Select records",
+    description=(
+        "Returns historical STIM Select (Stock Trends Inference Model Select) records. "
+        "Filter by symbol_exchange, symbol, exchange, or date range. "
+        "Each entry includes prob13wk — probability of exceeding the 13-week base-period "
+        "mean random return (2.19%), assuming normal distribution. "
+        "Use include_data=true to add Stock Trends signal fields per record. "
+        "Fetch /v1/pricing/catalog for current STC cost."
+    ),
+)
 def selections_history(
     request: Request,
     symbol_exchange: str | None = Query(default=None, description="e.g., IBM-N"),

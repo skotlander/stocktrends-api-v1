@@ -277,6 +277,80 @@ def test_proof_endpoint_instruments_use_real_screener_fields(client):
 
 
 # ---------------------------------------------------------------------------
+# Semantic correctness of instrument field values
+# ---------------------------------------------------------------------------
+
+_VALID_TREND_CODES = {"^+", "^-", "v^", "v-", "v+", "^v"}
+_VALID_RSI_UPDN = {"+", "-"}
+_VALID_VOL_TAGS = {"**", "*", "!!", "!", ""}
+
+
+def test_proof_endpoint_instrument_trend_values_valid(client):
+    """All trend values must be valid Stock Trends trend codes."""
+    data = client.get("/v1/ai/proof/market-edge").json()
+    instruments = data["market_snapshot"]["instruments"]
+    for inst in instruments:
+        trend = inst.get("trend", "__MISSING__")
+        assert trend in _VALID_TREND_CODES, (
+            f"Instrument {inst['symbol']!r} has invalid trend {trend!r}. "
+            f"Must be one of {sorted(_VALID_TREND_CODES)}"
+        )
+
+
+def test_proof_endpoint_instrument_rsi_updn_values_valid(client):
+    """All rsi_updn values must be '+' or '-' (not 'up'/'down'/'flat')."""
+    data = client.get("/v1/ai/proof/market-edge").json()
+    instruments = data["market_snapshot"]["instruments"]
+    for inst in instruments:
+        rsi_updn = inst.get("rsi_updn", "__MISSING__")
+        assert rsi_updn in _VALID_RSI_UPDN, (
+            f"Instrument {inst['symbol']!r} has invalid rsi_updn {rsi_updn!r}. "
+            f"Must be one of {sorted(_VALID_RSI_UPDN)}"
+        )
+
+
+def test_proof_endpoint_instrument_vol_tag_values_valid(client):
+    """All vol_tag values must be in the valid Stock Trends set."""
+    data = client.get("/v1/ai/proof/market-edge").json()
+    instruments = data["market_snapshot"]["instruments"]
+    for inst in instruments:
+        vol_tag = inst.get("vol_tag", "__MISSING__")
+        assert vol_tag in _VALID_VOL_TAGS, (
+            f"Instrument {inst['symbol']!r} has invalid vol_tag {vol_tag!r}. "
+            f"Must be one of {_VALID_VOL_TAGS!r}"
+        )
+
+
+def test_proof_endpoint_instrument_rsi_in_baseline_range(client):
+    """RSI values must use the 100-baseline scale, not the traditional 0-100 Wilder RSI."""
+    data = client.get("/v1/ai/proof/market-edge").json()
+    instruments = data["market_snapshot"]["instruments"]
+    for inst in instruments:
+        rsi = inst.get("rsi")
+        assert rsi is not None, f"Instrument {inst['symbol']!r} missing rsi"
+        assert 50 <= rsi <= 250, (
+            f"Instrument {inst['symbol']!r} has rsi={rsi}, outside expected "
+            "100-baseline range (50-250). Stock Trends RSI is not the traditional Wilder RSI."
+        )
+
+
+def test_proof_endpoint_instrument_trend_cnt_mt_cnt_positive(client):
+    """trend_cnt and mt_cnt must be positive integers."""
+    data = client.get("/v1/ai/proof/market-edge").json()
+    instruments = data["market_snapshot"]["instruments"]
+    for inst in instruments:
+        symbol = inst["symbol"]
+        trend_cnt = inst.get("trend_cnt")
+        mt_cnt = inst.get("mt_cnt")
+        assert isinstance(trend_cnt, int) and trend_cnt > 0, (
+            f"Instrument {symbol!r} has invalid trend_cnt={trend_cnt!r} (must be a positive integer)"
+        )
+        assert isinstance(mt_cnt, int) and mt_cnt > 0, (
+            f"Instrument {symbol!r} has invalid mt_cnt={mt_cnt!r} (must be a positive integer)"
+        )
+
+
+# ---------------------------------------------------------------------------
 # 12. Regression: /v1/openapi.json still loads
 # ---------------------------------------------------------------------------
 

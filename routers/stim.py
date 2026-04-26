@@ -75,24 +75,25 @@ def _fetch_latest_weekdate_st_data(engine, symbol: str, exchange: str):
     return row["weekdate"] if row else None
 
 
-@router.get("/latest")
+@router.get(
+    "/latest",
+    summary="Latest ST-IM return distributions for a symbol",
+    description=(
+        "Returns the latest Stock Trends Inference Model (ST-IM) outputs for a given symbol: "
+        "forward return expectations and statistical distributions across 4-week, 13-week, and "
+        "40-week horizons. Fields: xNwk1 = lower percentile bound, xNwk2 = upper percentile bound, "
+        "xNwk = expected return (mean), xNwksd = standard deviation. "
+        "Includes staleness detection (is_stale, missing_reason) for weeks where insufficient "
+        "sample data prevented ST-IM estimation. "
+        "Fetch /v1/pricing/catalog for current STC cost."
+    ),
+)
 def stim_latest(
     request: Request,
     symbol_exchange: str | None = Query(default=None, description="e.g., IBM-N"),
     symbol: str | None = Query(default=None, description="e.g., IBM"),
     exchange: str | None = Query(default=None, description="Exchange code: N,Q,A,B,T,I"),
 ):
-    """
-    Latest ST-IM return distribution stats for an instrument from st_returnmeans.
-
-    Note on missing weeks:
-    - If there is no record for a given weekdate in st_returnmeans, that typically indicates
-      there were not enough forward-return observations in the sample for ST-IM to estimate
-      a valid distribution for that week.
-    - This endpoint returns the most recent *available* st_returnmeans row and includes
-      staleness fields (is_stale, latest_data_weekdate) so clients can detect missing
-      estimates for the latest market week.
-    """
     s, ex = _resolve_symbol_exchange(
         request=request,
         symbol_exchange=symbol_exchange,
@@ -163,7 +164,19 @@ def stim_latest(
     return d
 
 
-@router.get("/history")
+@router.get(
+    "/history",
+    summary="Historical ST-IM return distribution series for a symbol",
+    description=(
+        "Returns a historical series of Stock Trends Inference Model (ST-IM) forward return "
+        "distribution records for a given symbol/exchange. Each record contains expected returns "
+        "and standard deviations for 4-week, 13-week, and 40-week horizons "
+        "(xNwk, xNwksd, xNwk1, xNwk2). Rows returned ascending by weekdate. "
+        "Set include_gaps=true to identify weeks where ST-IM estimates are absent "
+        "(insufficient sample vs available st_data). "
+        "Fetch /v1/pricing/catalog for current STC cost."
+    ),
+)
 def stim_history(
     request: Request,
     symbol_exchange: str | None = Query(default=None, description="e.g., IBM-N"),
@@ -177,15 +190,6 @@ def stim_history(
         description="If true, include missing weekdates vs st_data within start/end (may be slower).",
     ),
 ):
-    """
-    ST-IM return distribution stats history for an instrument from st_returnmeans.
-    Returns rows ascending by weekdate.
-
-    include_gaps:
-    - When true, compares available st_returnmeans.weekdate values to st_data.weekdate values
-      (for the same symbol/exchange) within the requested date window and returns a list of
-      weekdates where st_data exists but st_returnmeans does not (often insufficient sample).
-    """
     s, ex = _resolve_symbol_exchange(
         request=request,
         symbol_exchange=symbol_exchange,
