@@ -37,8 +37,9 @@ _PREVIEW_BY_PATH: dict[str, dict] = {
             "latest_data_weekdate", "is_stale", "missing_reason", "missing_weekdate",
         ],
         "note": (
-            "Returns the latest ST-IM (Stock Trends Intermediate Momentum) values "
-            "across 4-week, 13-week, and 40-week windows for a given symbol/exchange."
+            "Returns Stock Trends Inference Model (ST-IM) outputs: forward return "
+            "expectations and statistical distributions across 4-week, 13-week, "
+            "and 40-week horizons for a given symbol/exchange."
         ),
     },
     "/v1/stim/history": {
