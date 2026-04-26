@@ -763,9 +763,11 @@ def ai_tools():
             ],
             "payment_methods_supported": ["subscription", "x402", "mpp"],
             "on_payment_required": (
-                "Paid endpoints return HTTP 402. The response body contains "
+                "Selected agent-pay endpoints may return HTTP 402 with an x402 challenge "
+                "when no payment has been presented. The response body contains "
                 "accepted_payment_methods, pricing, and payment_required fields. "
-                "Supported rails: subscription, x402, mpp."
+                "Subscription callers receive 401/403 on auth failure, not 402. "
+                "MPP uses session authorization rather than the x402 challenge flow."
             ),
         },
         "notes": [
@@ -817,10 +819,12 @@ _PROOF_STATIC_BODY: dict = {
             },
         ],
         "on_payment_required": (
-            "Paid endpoints return HTTP 402. Inspect the response body for "
+            "Selected agent-pay endpoints may return HTTP 402 with an x402 challenge "
+            "when no payment has been presented. Inspect the response body for "
             "accepted_payment_methods and payment_required fields. "
             "The PAYMENT-REQUIRED response header carries base64-encoded x402 requirements. "
-            "Supported rails: subscription, x402, mpp."
+            "Subscription callers receive 401/403 on auth failure, not 402. "
+            "MPP uses session authorization rather than the x402 challenge flow."
         ),
     },
     "value_proposition": {
@@ -843,44 +847,60 @@ _PROOF_STATIC_BODY: dict = {
     "market_snapshot": {
         "note": (
             "SYNTHETIC DATA ONLY — not live, not real-time, not actionable. "
-            "Symbols are fictional. Reflects real response structure."
+            "Symbols are impossible synthetic identifiers, not real tickers. "
+            "Reflects real response structure."
         ),
         "as_of": "synthetic",
         "instruments": [
             {
-                "symbol": "XTND",
-                "signal": "strong_uptrend",
-                "momentum_score": 91,
+                "symbol": "SAMPLE_A1",
+                "trend": "strong_uptrend",
+                "trend_cnt": 12,
+                "mt_cnt": 8,
+                "rsi": 71,
+                "rsi_updn": "up",
+                "vol_tag": "high",
                 "rank": 1,
-                "sector": "Technology",
             },
             {
-                "symbol": "VELO",
-                "signal": "uptrend",
-                "momentum_score": 74,
+                "symbol": "SAMPLE_B2",
+                "trend": "uptrend",
+                "trend_cnt": 7,
+                "mt_cnt": 4,
+                "rsi": 58,
+                "rsi_updn": "up",
+                "vol_tag": "normal",
                 "rank": 8,
-                "sector": "Industrials",
             },
             {
-                "symbol": "MRPH",
-                "signal": "neutral",
-                "momentum_score": 51,
+                "symbol": "SAMPLE_C3",
+                "trend": "neutral",
+                "trend_cnt": 2,
+                "mt_cnt": 0,
+                "rsi": 49,
+                "rsi_updn": "flat",
+                "vol_tag": "normal",
                 "rank": 143,
-                "sector": "Healthcare",
             },
             {
-                "symbol": "BLOX",
-                "signal": "downtrend",
-                "momentum_score": 33,
+                "symbol": "SAMPLE_D4",
+                "trend": "downtrend",
+                "trend_cnt": -5,
+                "mt_cnt": -3,
+                "rsi": 38,
+                "rsi_updn": "down",
+                "vol_tag": "low",
                 "rank": 389,
-                "sector": "Financials",
             },
             {
-                "symbol": "SOLV",
-                "signal": "strong_downtrend",
-                "momentum_score": 12,
+                "symbol": "SAMPLE_E5",
+                "trend": "strong_downtrend",
+                "trend_cnt": -11,
+                "mt_cnt": -7,
+                "rsi": 22,
+                "rsi_updn": "down",
+                "vol_tag": "low",
                 "rank": 487,
-                "sector": "Utilities",
             },
         ],
         "sector_summary": {

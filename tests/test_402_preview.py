@@ -141,12 +141,23 @@ class TestDiscoveryPreview:
     def test_unknown_path_returns_none(self):
         assert get_endpoint_preview("/v1/nonexistent/path") is None
 
-    def test_returns_copy_not_original(self):
-        """Mutating the returned dict must not affect the registry."""
+    def test_returns_deep_copy_top_level(self):
+        """Mutating the top-level returned dict must not affect the registry."""
         result = get_endpoint_preview(_KNOWN_PREVIEW_PATH)
         result["_injected"] = True
         fresh = get_endpoint_preview(_KNOWN_PREVIEW_PATH)
         assert "_injected" not in fresh
+
+    def test_returns_deep_copy_nested(self):
+        """Mutating a nested list in the returned dict must not affect the registry."""
+        result = get_endpoint_preview(_KNOWN_PREVIEW_PATH)
+        if "response_shape" in result:
+            result["response_shape"].append("__INJECTED__")
+            fresh = get_endpoint_preview(_KNOWN_PREVIEW_PATH)
+            assert "__INJECTED__" not in fresh.get("response_shape", []), (
+                "Mutating a nested list in the returned preview affected the registry — "
+                "get_endpoint_preview() must return a deep copy"
+            )
 
     def test_all_entries_have_response_shape_or_note(self):
         for path, entry in _PREVIEW_BY_PATH.items():
@@ -158,9 +169,55 @@ class TestDiscoveryPreview:
         """Preview entries must not contain live-looking numeric data."""
         for path, entry in _PREVIEW_BY_PATH.items():
             raw = json.dumps(entry)
-            # Should not contain price-like floats or date strings
             assert "amount_usd" not in raw, f"{path}: 'amount_usd' in preview"
             assert "stc_cost" not in raw, f"{path}: 'stc_cost' in preview"
+
+    def test_market_pulse_not_registered(self):
+        """/v1/market/pulse does not exist as a route — must not be in the registry."""
+        assert "/v1/market/pulse" not in _PREVIEW_BY_PATH, (
+            "/v1/market/pulse is not a real endpoint and must not appear in preview registry"
+        )
+
+    def test_screener_preview_contains_real_fields(self):
+        """Screener preview must reference actual response fields from screener.py."""
+        preview = get_endpoint_preview("/v1/agent/screener/top")
+        assert preview is not None
+        shape_str = " ".join(preview.get("response_shape", []))
+        # These fields appear in the actual screener route response
+        for field in ("trend", "trend_cnt", "mt_cnt", "rsi", "vol_tag", "weekdate"):
+            assert field in shape_str, (
+                f"Real screener field {field!r} missing from preview response_shape"
+            )
+
+    def test_stim_preview_contains_real_fields(self):
+        """STIM latest preview must reference actual response fields from stim.py."""
+        preview = get_endpoint_preview("/v1/stim/latest")
+        assert preview is not None
+        shape_str = " ".join(preview.get("response_shape", []))
+        for field in ("x4wk", "x13wk", "x40wk", "symbol_exchange", "weekdate"):
+            assert field in shape_str, (
+                f"Real STIM field {field!r} missing from stim/latest preview response_shape"
+            )
+
+    def test_decision_preview_contains_real_fields(self):
+        """Decision preview must reference actual fields from decision.py."""
+        preview = get_endpoint_preview("/v1/decision/evaluate-symbol")
+        assert preview is not None
+        shape_str = " ".join(preview.get("response_shape", []))
+        for field in ("bias", "confidence", "decision_score", "regime_context"):
+            assert field in shape_str, (
+                f"Real decision field {field!r} missing from decision preview response_shape"
+            )
+
+    def test_portfolio_preview_contains_real_fields(self):
+        """Portfolio preview must reference actual fields from portfolio.py."""
+        preview = get_endpoint_preview("/v1/portfolio/construct")
+        assert preview is not None
+        shape_str = " ".join(preview.get("response_shape", []))
+        for field in ("portfolio", "regime_context", "portfolio_score", "candidates_evaluated"):
+            assert field in shape_str, (
+                f"Real portfolio field {field!r} missing from portfolio preview response_shape"
+            )
 
 
 # ---------------------------------------------------------------------------

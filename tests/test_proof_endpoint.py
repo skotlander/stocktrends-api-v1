@@ -12,13 +12,13 @@ Coverage:
 8.  log_api_request_economics is NOT called (no billing record)
 9.  Required top-level keys present in response
 10. market_snapshot explicitly labeled as synthetic / non-live
-11. No real-looking tickers (NVDA, MSFT, JPM, SPY, etc.)
+11. All symbols match the impossible SAMPLE_XX / SYNTH_ pattern (positive check)
 12. /v1/openapi.json still loads (regression)
 """
 from __future__ import annotations
 
+import re
 from decimal import Decimal
-from unittest.mock import MagicMock, call
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,16 +29,8 @@ import middleware.api_key as api_key_module
 import middleware.metering as metering_module
 from pricing.classifier import NON_METERED_PATHS, classify_request
 
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-_REAL_TICKERS = frozenset({
-    "NVDA", "MSFT", "JPM", "SPY", "AAPL", "GOOG", "GOOGL", "AMZN",
-    "META", "TSLA", "BRK", "V", "JNJ", "WMT", "XOM", "BAC", "NFLX",
-    "QQQ", "DIA", "IWM",
-})
+# Symbols must match this pattern: clearly impossible ticker-like identifiers.
+_SYNTHETIC_SYMBOL_RE = re.compile(r"^(SAMPLE_[A-Z]\d+|SYNTH_\w+)$")
 
 
 def _stub_runtime(monkeypatch):
@@ -255,17 +247,32 @@ def test_proof_endpoint_market_snapshot_as_of_synthetic(client):
 
 
 # ---------------------------------------------------------------------------
-# 11. No real-looking tickers
+# 11. Symbols are clearly impossible synthetic identifiers
 # ---------------------------------------------------------------------------
 
-def test_proof_endpoint_no_real_tickers(client):
-    """Response must not contain any well-known real ticker symbols."""
-    import json
-    raw = json.dumps(client.get("/v1/ai/proof/market-edge").json())
-    for ticker in _REAL_TICKERS:
-        # check as a word — must not appear as a standalone quoted symbol
-        assert f'"{ticker}"' not in raw, (
-            f"Real ticker {ticker!r} found in proof endpoint response"
+def test_proof_endpoint_symbols_match_synthetic_pattern(client):
+    """Every symbol in market_snapshot.instruments must match the SAMPLE_XX pattern."""
+    data = client.get("/v1/ai/proof/market-edge").json()
+    instruments = data["market_snapshot"]["instruments"]
+    assert instruments, "market_snapshot.instruments must not be empty"
+    for inst in instruments:
+        sym = inst.get("symbol", "")
+        assert _SYNTHETIC_SYMBOL_RE.match(sym), (
+            f"Symbol {sym!r} does not match synthetic pattern SAMPLE_<letter><digit> "
+            f"or SYNTH_<word> — use clearly impossible identifiers"
+        )
+
+
+def test_proof_endpoint_instruments_use_real_screener_fields(client):
+    """Instrument rows must use the actual screener response field names."""
+    data = client.get("/v1/ai/proof/market-edge").json()
+    instruments = data["market_snapshot"]["instruments"]
+    real_fields = {"trend", "trend_cnt", "mt_cnt", "rsi", "rsi_updn", "vol_tag", "rank"}
+    for inst in instruments:
+        present = real_fields & inst.keys()
+        assert present, (
+            f"Instrument row has none of the expected screener fields {real_fields}; "
+            f"got {set(inst.keys())}"
         )
 
 
