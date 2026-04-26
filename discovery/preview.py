@@ -23,8 +23,9 @@ _PREVIEW_BY_PATH: dict[str, dict] = {
             "results[].vol_tag", "results[].weekdate",
         ],
         "note": (
-            "Returns ranked instruments with trend, momentum (mt_cnt), RSI, and "
-            "volume-tag fields per result row. "
+            "Returns ranked instruments with trend classification, trend persistence "
+            "(trend_cnt), trend maturity (mt_cnt), RSI (relative performance vs benchmark, "
+            "baseline 100), and volume-tag fields per result row. "
             "See /v1/ai/proof/market-edge for a static structural example."
         ),
     },
@@ -39,7 +40,10 @@ _PREVIEW_BY_PATH: dict[str, dict] = {
         "note": (
             "Returns Stock Trends Inference Model (ST-IM) outputs: forward return "
             "expectations and statistical distributions across 4-week, 13-week, "
-            "and 40-week horizons for a given symbol/exchange."
+            "and 40-week horizons for a given symbol/exchange. "
+            "Fields: xNwk1 = lower bound, xNwk2 = upper bound, xNwk = expected return (mean), "
+            "xNwksd = standard deviation. is_stale=true when ST-IM estimate is missing for "
+            "the latest market week (insufficient sample)."
         ),
     },
     "/v1/stim/history": {
@@ -47,7 +51,14 @@ _PREVIEW_BY_PATH: dict[str, dict] = {
             "request_id", "symbol_exchange", "start", "end",
             "count", "data", "include_gaps", "gaps",
         ],
-        "note": "Returns a historical series of ST-IM records for a given symbol/exchange.",
+        "note": (
+            "Returns a historical series of ST-IM (Stock Trends Inference Model) forward return "
+            "distribution records for a given symbol/exchange. Each record contains expected "
+            "returns and standard deviations for 4-week, 13-week, and 40-week horizons "
+            "(x4wk, x4wksd, x13wk, x13wksd, x40wk, x40wksd and percentile bounds). "
+            "Gaps are weeks where st_data exists but no ST-IM estimate was produced "
+            "(typically due to insufficient sample)."
+        ),
     },
     "/v1/decision/evaluate-symbol": {
         "response_shape": [
@@ -64,7 +75,8 @@ _PREVIEW_BY_PATH: dict[str, dict] = {
         ],
         "note": (
             "Returns a structured buy/hold/sell decision (bias) with confidence, "
-            "per-symbol signal context, and market regime context."
+            "decision_score (0–1), per-symbol Stock Trends signal context, and market "
+            "regime context. Fully deterministic — no ML."
         ),
     },
     "/v1/portfolio/construct": {
@@ -78,12 +90,142 @@ _PREVIEW_BY_PATH: dict[str, dict] = {
             "count", "candidates_evaluated", "portfolio_score",
             "bias_requested", "bias_resolved",
             "regime_context.current_regime", "regime_context.regime_score",
-            "regime_context.forecast_regime", "regime_context.forecast_confidence",
+            "regime_context.regime_confidence", "regime_context.forecast_regime",
+            "regime_context.forecast_confidence", "regime_context.recent_direction",
+            "regime_context.regime_consistency", "regime_context.weeks_analyzed",
             "construction_notes",
         ],
         "note": (
-            "Returns a constructed portfolio allocation with per-position weights, "
-            "signal fields, and market regime context."
+            "Returns a constructed equal-weight portfolio allocation with per-position weights, "
+            "Stock Trends signal fields, decision scores, and market regime context."
+        ),
+    },
+    "/v1/portfolio/evaluate": {
+        "response_shape": [
+            "request_id", "weekdate",
+            "positions[].symbol", "positions[].exchange", "positions[].symbol_exchange",
+            "positions[].weight", "positions[].trend", "positions[].trend_cnt",
+            "positions[].mt_cnt", "positions[].rsi", "positions[].bias",
+            "positions[].confidence", "positions[].decision_score",
+            "positions[].alignment", "positions[].found",
+            "positions_found", "positions_missing", "effective_weight",
+            "portfolio_score", "portfolio_bias", "portfolio_confidence",
+            "portfolio_alignment",
+            "regime_context.current_regime", "regime_context.regime_score",
+            "regime_context.regime_confidence", "regime_context.forecast_regime",
+            "regime_context.forecast_confidence", "regime_context.recent_direction",
+            "regime_context.regime_consistency", "regime_context.weeks_analyzed",
+            "evaluation_notes",
+        ],
+        "note": (
+            "Evaluates a user-supplied list of symbol-weight pairs using Stock Trends "
+            "decision scoring and market regime context. Returns position-level and "
+            "portfolio-level aggregates (portfolio_score, portfolio_bias, portfolio_alignment). "
+            "Missing symbols included with found=false, excluded from aggregates."
+        ),
+    },
+    "/v1/portfolio/compare": {
+        "response_shape": [
+            "request_id", "weekdate",
+            "left.positions[].symbol", "left.positions[].exchange",
+            "left.positions[].symbol_exchange", "left.positions[].weight",
+            "left.positions[].trend", "left.positions[].trend_cnt",
+            "left.positions[].mt_cnt", "left.positions[].rsi",
+            "left.positions[].bias", "left.positions[].confidence",
+            "left.positions[].decision_score", "left.positions[].alignment",
+            "left.positions[].found",
+            "left.positions_found", "left.positions_missing", "left.effective_weight",
+            "left.portfolio_score", "left.portfolio_bias", "left.portfolio_confidence",
+            "left.portfolio_alignment", "left.evaluation_notes",
+            "right.positions[].symbol", "right.portfolio_score",
+            "right.portfolio_bias", "right.portfolio_alignment",
+            "comparison.winner", "comparison.score_delta", "comparison.score_advantage",
+            "comparison.alignment_advantage", "comparison.confidence_advantage",
+            "comparison.effective_weight_delta", "comparison.overlap_count",
+            "comparison.overlap_symbols",
+            "regime_context.current_regime", "regime_context.regime_score",
+            "regime_context.regime_confidence", "regime_context.forecast_regime",
+            "regime_context.forecast_confidence", "regime_context.recent_direction",
+            "regime_context.regime_consistency", "regime_context.weeks_analyzed",
+            "comparison_notes",
+        ],
+        "note": (
+            "Returns per-portfolio evaluation results (left and right) in the same shape "
+            "as /portfolio/evaluate, plus a structured comparison block identifying the "
+            "winner by decision score, alignment advantage, and overlapping positions."
+        ),
+    },
+    "/v1/market/regime/latest": {
+        "response_shape": [
+            "regime", "confidence", "regime_score",
+            "bullish_pct", "bearish_pct",
+            "avg_rsi", "avg_mt_cnt",
+            "weekdate", "signal_count",
+        ],
+        "note": (
+            "Returns the current market regime classification derived from the distribution "
+            "of Stock Trends trend codes across all active signals. "
+            "regime: bullish | bearish | mixed. "
+            "regime_score = bullish_pct - bearish_pct, range -1.0 to +1.0. "
+            "Bullish codes: {^+, ^-, v^}. Bearish codes: {v-, v+, ^v}."
+        ),
+    },
+    "/v1/market/regime/history": {
+        "response_shape": [
+            "history[].weekdate", "history[].regime", "history[].confidence",
+            "history[].regime_score", "history[].bullish_pct", "history[].bearish_pct",
+            "history[].avg_rsi", "history[].avg_mt_cnt", "history[].signal_count",
+            "count", "limit", "start_date",
+        ],
+        "note": (
+            "Returns a chronological sequence of weekly market regime snapshots. "
+            "Each entry uses the same classification logic as /market/regime/latest. "
+            "regime_score = bullish_pct - bearish_pct, range -1.0 to +1.0."
+        ),
+    },
+    "/v1/market/regime/forecast": {
+        "response_shape": [
+            "forecast_regime", "forecast_confidence",
+            "current_regime", "current_regime_score",
+            "recent_direction", "regime_consistency",
+            "projected_regime_score", "avg_weekly_score_delta",
+            "recent_scores", "weeks_analyzed", "lookback", "weekdate",
+        ],
+        "note": (
+            "Returns a deterministic forward regime outlook derived from the direction "
+            "and consistency of recent weekly regime scores. No ML. "
+            "forecast_regime: bullish | bearish | mixed. "
+            "recent_direction: improving | deteriorating | stable."
+        ),
+    },
+    "/v1/selections/latest": {
+        "response_shape": [
+            "request_id", "weekdate", "exchange", "min_prob13wk",
+            "include_data", "include_mast", "cs_only", "count",
+            "data[].weekdate", "data[].exchange", "data[].symbol",
+            "data[].prob13wk", "data[].symbol_exchange",
+        ],
+        "note": (
+            "Returns the latest STIM Select (Stock Trends Inference Model Select) stock list "
+            "ordered by prob13wk descending (probability of exceeding the 13-week base-period "
+            "mean return of 2.19%, assuming normal distribution). "
+            "Use include_data=true to add Stock Trends signal fields per symbol."
+        ),
+    },
+    "/v1/selections/history": {
+        "response_shape": [
+            "request_id", "symbol", "exchange", "symbol_exchange",
+            "start", "end", "min_prob13wk",
+            "include_data", "include_mast", "cs_only", "count",
+            "data[].weekdate", "data[].exchange", "data[].symbol",
+            "data[].prob13wk", "data[].symbol_exchange",
+        ],
+        "note": (
+            "Returns historical STIM Select (Stock Trends Inference Model Select) records. "
+            "Filter by symbol, exchange, or date range. "
+            "Each entry includes prob13wk — probability of exceeding the 13-week base-period "
+            "mean return of 2.19%. "
+            "Use include_data=true to add Stock Trends signal fields per record."
         ),
     },
 }

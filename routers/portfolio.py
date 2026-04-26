@@ -116,7 +116,7 @@ def _construction_notes(
         "and selecting the top N by decision_score. Fully deterministic — no ML. "
         "Reuses the same regime and decision logic as /market/regime/forecast and "
         "/decision/evaluate-symbol. "
-        "Pricing rule: portfolio_construct (1.00 STC per call)."
+        "Fetch /v1/pricing/catalog for current STC cost."
     ),
 )
 def construct_portfolio(body: ConstructPortfolioRequest, request: Request):
@@ -485,7 +485,7 @@ def _evaluation_notes(
         "Weights must be positive and sum to 1.0 (±0.01 tolerance). "
         "Duplicates are rejected. Missing symbols are included with found=false "
         "and excluded from portfolio aggregates. "
-        "Pricing rule: portfolio_evaluate (0.75 STC per call)."
+        "Fetch /v1/pricing/catalog for current STC cost."
     ),
 )
 def evaluate_portfolio(body: EvaluatePortfolioRequest, request: Request):
@@ -1123,7 +1123,7 @@ def _build_comparison_notes(
         "and a combined symbol lookup for the union of all submitted positions. "
         "Returns per-portfolio results in the /portfolio/evaluate shape, plus a "
         "structured comparison block and comparison notes. "
-        "Pricing rule: portfolio_compare (1.25 STC per call)."
+        "Fetch /v1/pricing/catalog for current STC cost."
     ),
 )
 def compare_portfolios(body: ComparePortfolioRequest, request: Request):

@@ -18,6 +18,8 @@ It provides:
 * symbol-level decision evaluation
 * portfolio construction, evaluation, and comparison
 * market regime, breadth, and leadership intelligence
+* ST-IM (Stock Trends Inference Model) forward return expectations and statistical distributions across 4, 13, and 40-week horizons
+* STIM Select: securities whose ST-IM lower confidence bounds exceed base-period mean returns across all three horizons, ranked by prob13wk
 * pricing discovery and cost estimation
 * agent-aware usage, ledger, and control endpoints
 * structured weekly market context based on the Stock Trends indicator system
@@ -104,6 +106,9 @@ https://developer.stocktrends.com/mpp
 * `GET /ai/context`
   Secondary explanatory entrypoint. Dataset structure, indicator definitions, endpoint groups, and AI-oriented context.
 
+* `GET /ai/proof/market-edge`
+  Free, non-metered, no auth required. Returns a static synthetic demonstration of Stock Trends signal structure, field schemas, and value proposition. All instrument data is fictional. Use this to confirm field names (trend, trend_cnt, mt_cnt, rsi, rsi_updn, vol_tag) and RSI baseline semantics (baseline 100, not traditional Wilder RSI) before purchasing access.
+
 ### Pricing
 
 * `GET /pricing`
@@ -131,7 +136,39 @@ https://developer.stocktrends.com/mpp
 ### Agent Screener
 
 * `GET /agent/screener/top`
-  Top-ranked instruments screener
+  Top-ranked instruments screener. Filters by trend code (bullish default: ^+, ^-, v^), RSI (relative performance vs S&P 500 benchmark, baseline 100), trend_cnt, and mt_cnt.
+
+### ST-IM (Stock Trends Inference Model)
+
+ST-IM produces forward return expectations and statistical distributions for a symbol across three forecast horizons: 4, 13, and 40 weeks. Each horizon returns four fields: xNwk1 (lower CI bound), xNwk (mean), xNwk2 (upper CI bound), xNwksd (standard deviation). ST-IM is not a momentum indicator — it is a probabilistic return distribution model.
+
+* `GET /stim/latest`
+  Latest ST-IM distribution outputs for a symbol
+
+* `GET /stim/history`
+  Historical ST-IM distribution records for a symbol
+
+### STIM Select (Stock Trends Inference Model Select)
+
+STIM Select identifies securities whose ST-IM lower confidence bounds (xNwk1 fields) exceed base-period mean random returns across all three horizons simultaneously:
+
+* 4-week: x4wk1 > 0% (base-period mean)
+* 13-week: x13wk1 > 2.19%
+* 40-week: x40wk1 > 6.45%
+
+Securities are ranked by prob13wk descending — the probability of exceeding the 13-week base-period mean return (2.19%), assuming a normal distribution. The published definition applies a default prob13wk threshold of 55%.
+
+* `GET /selections/latest`
+  Latest STIM Select stock list ranked by prob13wk
+
+* `GET /selections/history`
+  Historical STIM Select records; filter by symbol, exchange, or date range
+
+* `GET /selections/published/latest`
+  Latest published STIM Select filtered to three-horizon criteria and prob13wk >= 55%
+
+* `GET /selections/published/history`
+  Historical published STIM Select records
 
 ### Workflows
 
@@ -147,25 +184,28 @@ Recommended order for discovery and integration:
 1. `GET /ai/tools`
    Primary machine-readable discovery. Fetch this first for the tools manifest, quickstart, recommended first call, and agent onboarding notes.
 
-2. `GET /ai/context`
+2. `GET /ai/proof/market-edge`
+   No auth required. Preview synthetic signal structure, confirm field schemas (trend codes, RSI baseline 100, vol_tag values), and understand the value proposition before purchasing access.
+
+3. `GET /ai/context`
    Secondary explanatory entrypoint. Understand dataset structure, terminology, indicator logic, and endpoint groups.
 
-3. `GET /pricing/catalog`
+4. `GET /pricing/catalog`
    Discover live pricing metadata and endpoint costs
 
-4. `GET /cost-estimate`
+5. `GET /cost-estimate`
    Estimate workflow cost before execution where appropriate
 
-5. Start with a high-value premium endpoint:
+6. Start with a high-value premium endpoint:
    * `GET /agent/screener/top`
 
-6. Expand into decision and portfolio workflows:
+7. Expand into decision and portfolio workflows:
    * `POST /decision/evaluate-symbol`
    * `POST /portfolio/construct`
    * `POST /portfolio/evaluate`
    * `POST /portfolio/compare`
 
-6. Add supporting market intelligence:
+8. Add supporting market intelligence:
    * `GET /market/regime/latest`
    * `GET /breadth/sector/latest`
    * `GET /leadership/summary/latest`
@@ -383,6 +423,9 @@ Agents should:
 
 * Prefer structured API endpoints over scraping
 * Begin with `/ai/tools` for primary machine-readable discovery; use `/ai/context` for schema grounding and dataset context
+* Call `/ai/proof/market-edge` (no auth) before purchasing access — confirms field names, trend codes, and RSI baseline semantics without cost
+* The Stock Trends RSI is a relative performance ratio vs the S&P 500 benchmark (baseline 100), not the traditional Wilder RSI oscillator
+* STIM (Stock Trends Inference Model) produces probabilistic forward return distributions — it is not a momentum indicator
 * Use pricing endpoints before expensive workflows
 * Use `/cost-estimate` when cost must be known in advance
 * Use `/agent/screener/top` as a strong first premium endpoint

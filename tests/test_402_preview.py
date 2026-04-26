@@ -219,6 +219,76 @@ class TestDiscoveryPreview:
                 f"Real portfolio field {field!r} missing from portfolio preview response_shape"
             )
 
+    def test_portfolio_evaluate_preview_contains_real_fields(self):
+        """Portfolio evaluate preview must reference actual fields from portfolio.py."""
+        preview = get_endpoint_preview("/v1/portfolio/evaluate")
+        assert preview is not None
+        shape_str = " ".join(preview.get("response_shape", []))
+        for field in ("positions_found", "portfolio_score", "portfolio_alignment"):
+            assert field in shape_str, (
+                f"Field {field!r} missing from portfolio/evaluate preview response_shape"
+            )
+
+    def test_portfolio_compare_preview_contains_real_fields(self):
+        """Portfolio compare preview must reference actual fields from portfolio.py."""
+        preview = get_endpoint_preview("/v1/portfolio/compare")
+        assert preview is not None
+        shape_str = " ".join(preview.get("response_shape", []))
+        for field in ("comparison.winner", "comparison.score_delta"):
+            assert field in shape_str, (
+                f"Field {field!r} missing from portfolio/compare preview response_shape"
+            )
+
+    def test_market_regime_latest_preview_contains_real_fields(self):
+        """Market regime latest preview must reference actual fields."""
+        preview = get_endpoint_preview("/v1/market/regime/latest")
+        assert preview is not None
+        shape_str = " ".join(preview.get("response_shape", []))
+        for field in ("regime", "regime_score", "signal_count"):
+            assert field in shape_str, (
+                f"Field {field!r} missing from market/regime/latest preview response_shape"
+            )
+
+    def test_market_regime_history_preview_contains_real_fields(self):
+        """Market regime history preview must reference actual fields."""
+        preview = get_endpoint_preview("/v1/market/regime/history")
+        assert preview is not None
+        shape_str = " ".join(preview.get("response_shape", []))
+        for field in ("history", "regime"):
+            assert field in shape_str, (
+                f"Field {field!r} missing from market/regime/history preview response_shape"
+            )
+
+    def test_market_regime_forecast_preview_contains_real_fields(self):
+        """Market regime forecast preview must reference actual fields."""
+        preview = get_endpoint_preview("/v1/market/regime/forecast")
+        assert preview is not None
+        shape_str = " ".join(preview.get("response_shape", []))
+        for field in ("forecast_regime", "forecast_confidence"):
+            assert field in shape_str, (
+                f"Field {field!r} missing from market/regime/forecast preview response_shape"
+            )
+
+    def test_selections_latest_preview_contains_real_fields(self):
+        """Selections latest preview must reference actual fields from selections.py."""
+        preview = get_endpoint_preview("/v1/selections/latest")
+        assert preview is not None
+        shape_str = " ".join(preview.get("response_shape", []))
+        for field in ("prob13wk", "symbol_exchange"):
+            assert field in shape_str, (
+                f"Field {field!r} missing from selections/latest preview response_shape"
+            )
+
+    def test_selections_history_preview_contains_real_fields(self):
+        """Selections history preview must reference actual fields from selections.py."""
+        preview = get_endpoint_preview("/v1/selections/history")
+        assert preview is not None
+        shape_str = " ".join(preview.get("response_shape", []))
+        for field in ("prob13wk", "symbol_exchange"):
+            assert field in shape_str, (
+                f"Field {field!r} missing from selections/history preview response_shape"
+            )
+
 
 # ---------------------------------------------------------------------------
 # Integration tests: x402 challenge with preview for KNOWN path

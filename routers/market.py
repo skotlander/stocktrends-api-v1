@@ -22,7 +22,7 @@ router = APIRouter(prefix="/market", tags=["market"])
         "trend codes across all active signals in the latest available week. "
         "Bullish = {^+, ^-, v^}. Bearish = {v-, v+, ^v}. "
         "regime_score = bullish_pct - bearish_pct, range -1 to +1. "
-        "Pricing rule: market_regime_latest (0.15 STC per call)."
+        "Fetch /v1/pricing/catalog for current STC cost."
     ),
 )
 def market_regime_latest(request: Request):
@@ -127,7 +127,7 @@ def market_regime_latest(request: Request):
         "of Stock Trends trend codes for each week. "
         "Same classification logic as /regime/latest. "
         "Bullish = {^+, ^-, v^}. Bearish = {v-, v+, ^v}. "
-        "Pricing rule: market_regime_history (0.25 STC per call)."
+        "Fetch /v1/pricing/catalog for current STC cost."
     ),
 )
 def market_regime_history(
@@ -273,7 +273,7 @@ def market_regime_history(
         "Returns a synthesized forward-looking regime outlook derived from the direction "
         "and consistency of recent weekly regime scores. "
         "Fully deterministic — no ML. Reuses the same trend classification as /regime/latest. "
-        "Pricing rule: market_regime_forecast (0.35 STC per call)."
+        "Fetch /v1/pricing/catalog for current STC cost."
     ),
 )
 def market_regime_forecast(

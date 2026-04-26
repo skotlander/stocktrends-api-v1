@@ -105,7 +105,22 @@ def _published_where(
     return where
 
 
-@router.get("/latest")
+@router.get(
+    "/latest",
+    summary="Latest published STIM Select list",
+    description=(
+        "Returns the latest published STIM Select (Stock Trends Inference Model Select) stock list. "
+        "Selection criteria: the lower bound of the mean return confidence interval must exceed "
+        "the base-period mean random return for all three ST-IM horizons simultaneously — "
+        "4-week: x4wk1 > 0% (default), 13-week: x13wk1 > 2.19% (default), "
+        "40-week: x40wk1 > 6.45% (default). "
+        "Default probability threshold: prob13wk >= 55% (probability of exceeding the "
+        "13-week base-period mean return, assuming normal distribution). "
+        "Results are ranked by prob13wk descending. "
+        "Each result includes full ST-IM distribution fields (x4wk, x13wk, x40wk series). "
+        "Fetch /v1/pricing/catalog for current STC cost."
+    ),
+)
 def selections_published_latest(
     request: Request,
     exchange: str | None = Query(default=None, description="Optional exchange filter: N,Q,A,B,T,I"),
@@ -275,7 +290,18 @@ def selections_published_latest(
     }
 
 
-@router.get("/history")
+@router.get(
+    "/history",
+    summary="Historical published STIM Select records",
+    description=(
+        "Returns historical published STIM Select (Stock Trends Inference Model Select) records. "
+        "Applies the same three-horizon confidence interval filter as /selections/published/latest "
+        "(x4wk1, x13wk1, x40wk1 thresholds) plus prob13wk threshold. "
+        "Filter by symbol_exchange, symbol, exchange, or date range. "
+        "Each result includes full ST-IM distribution fields (x4wk, x13wk, x40wk series). "
+        "Fetch /v1/pricing/catalog for current STC cost."
+    ),
+)
 def selections_published_history(
     request: Request,
     symbol_exchange: str | None = Query(default=None, description="e.g., IBM-N"),
