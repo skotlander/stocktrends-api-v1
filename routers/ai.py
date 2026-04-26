@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Response
 from sqlalchemy import text
 from db import get_engine
 from routers.workflows import WORKFLOW_REGISTRY
@@ -736,6 +738,38 @@ def ai_tools():
                 "X-StockTrends-Session-Id": "Optional session/workflow correlation ID.",
             },
         },
+        "agent_conversion_path": {
+            "proof_endpoint": "/v1/ai/proof/market-edge",
+            "proof_description": (
+                "Free, non-metered. Demonstrates signal structure and value proposition "
+                "without requiring payment or authentication."
+            ),
+            "conversion_steps": [
+                {
+                    "step": 1,
+                    "call": "GET /v1/ai/proof/market-edge",
+                    "note": "No auth needed. See signal structure and value proposition.",
+                },
+                {
+                    "step": 2,
+                    "call": "GET /v1/pricing/catalog",
+                    "note": "Resolve live STC costs for target endpoints.",
+                },
+                {
+                    "step": 3,
+                    "call": "GET /v1/agent/screener/top",
+                    "note": "First premium call. Supports subscription, x402, mpp.",
+                },
+            ],
+            "payment_methods_supported": ["subscription", "x402", "mpp"],
+            "on_payment_required": (
+                "Selected agent-pay endpoints may return HTTP 402 with an x402 challenge "
+                "when no payment has been presented. The response body contains "
+                "accepted_payment_methods, pricing, and payment_required fields. "
+                "Subscription callers receive 401/403 on auth failure, not 402. "
+                "MPP uses session authorization rather than the x402 challenge flow."
+            ),
+        },
         "notes": [
             "Start with /v1/ai/tools as the primary machine-readable entry point for agents.",
             "All metered endpoints price in STC. Fetch /v1/pricing/catalog at agent startup.",
@@ -744,4 +778,226 @@ def ai_tools():
             "Use /v1/ai/context as the secondary explanatory endpoint for dataset and endpoint overview.",
             "See /v1/docs and /v1/openapi.json for exact request/response contracts.",
         ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/ai/proof/market-edge — free, non-metered, public proof-of-value
+# No auth, no DB calls, no billing record.  All data is synthetic/illustrative.
+# ---------------------------------------------------------------------------
+
+_PROOF_CACHE_MAX_AGE = 3600  # seconds
+
+_PROOF_STATIC_BODY: dict = {
+    "endpoint": "/v1/ai/proof/market-edge",
+    "version": "v1",
+    "cache_policy": {
+        "max_age_seconds": _PROOF_CACHE_MAX_AGE,
+        "strategy": "static",
+        "note": "This response is static. No live or real-time market data is included.",
+    },
+    "agent_guidance": {
+        "purpose": (
+            "Demonstrates Stock Trends signal structure and value proposition "
+            "without requiring payment or authentication."
+        ),
+        "next_steps": [
+            {
+                "step": 1,
+                "call": "GET /v1/pricing/catalog",
+                "note": "Resolve live STC costs for target endpoints.",
+            },
+            {
+                "step": 2,
+                "call": "GET /v1/agent/screener/top",
+                "note": "Live premium signals. Auth or payment required.",
+            },
+            {
+                "step": 3,
+                "call": "GET /v1/workflows",
+                "note": "Discover multi-step agent workflows with per-step STC costs.",
+            },
+        ],
+        "on_payment_required": (
+            "Selected agent-pay endpoints may return HTTP 402 with an x402 challenge "
+            "when no payment has been presented. Inspect the response body for "
+            "accepted_payment_methods and payment_required fields. "
+            "The PAYMENT-REQUIRED response header carries base64-encoded x402 requirements. "
+            "Subscription callers receive 401/403 on auth failure, not 402. "
+            "MPP uses session authorization rather than the x402 challenge flow."
+        ),
+    },
+    "value_proposition": {
+        "headline": (
+            "Stock Trends delivers processed, ranked, actionable signals — not raw prices."
+        ),
+        "differentiators": [
+            "Proprietary momentum-based ranking across 2000+ instruments",
+            "Multi-timeframe signal scoring (daily, weekly, momentum breakdowns)",
+            "Sector breadth context for market regime detection",
+            "Agent-optimized structured JSON with consistent scoring fields",
+            "Multi-rail payments: subscription, x402 (per-request), MPP (session-based)",
+        ],
+        "vs_raw_price": (
+            "A raw price API returns a number. Stock Trends returns a ranked momentum score, "
+            "signal label, regime context, and a structured workflow-ready response "
+            "— all in one call."
+        ),
+    },
+    "market_snapshot": {
+        "note": (
+            "SYNTHETIC DATA ONLY — not live, not real-time, not actionable. "
+            "Symbols are impossible synthetic identifiers, not real tickers. "
+            "Reflects real response structure."
+        ),
+        "as_of": "synthetic",
+        "instruments": [
+            {
+                "symbol": "SAMPLE_A1",
+                "trend": "strong_uptrend",
+                "trend_cnt": 12,
+                "mt_cnt": 8,
+                "rsi": 71,
+                "rsi_updn": "up",
+                "vol_tag": "high",
+                "rank": 1,
+            },
+            {
+                "symbol": "SAMPLE_B2",
+                "trend": "uptrend",
+                "trend_cnt": 7,
+                "mt_cnt": 4,
+                "rsi": 58,
+                "rsi_updn": "up",
+                "vol_tag": "normal",
+                "rank": 8,
+            },
+            {
+                "symbol": "SAMPLE_C3",
+                "trend": "neutral",
+                "trend_cnt": 2,
+                "mt_cnt": 0,
+                "rsi": 49,
+                "rsi_updn": "flat",
+                "vol_tag": "normal",
+                "rank": 143,
+            },
+            {
+                "symbol": "SAMPLE_D4",
+                "trend": "downtrend",
+                "trend_cnt": -5,
+                "mt_cnt": -3,
+                "rsi": 38,
+                "rsi_updn": "down",
+                "vol_tag": "low",
+                "rank": 389,
+            },
+            {
+                "symbol": "SAMPLE_E5",
+                "trend": "strong_downtrend",
+                "trend_cnt": -11,
+                "mt_cnt": -7,
+                "rsi": 22,
+                "rsi_updn": "down",
+                "vol_tag": "low",
+                "rank": 487,
+            },
+        ],
+        "sector_summary": {
+            "top_sector": "Technology",
+            "bottom_sector": "Utilities",
+            "breadth_signal": "bullish_expansion",
+        },
+    },
+    "signal_highlights": [
+        {
+            "signal_type": "momentum_breakout",
+            "description": (
+                "Illustrative: instruments with momentum_score > 85 represent "
+                "top-ranked breakout candidates in the screener."
+            ),
+            "note": "Live counts and scores available via /v1/agent/screener/top.",
+        },
+        {
+            "signal_type": "sector_rotation",
+            "description": (
+                "Illustrative: sector breadth signals identify regime shifts "
+                "before they appear in index prices."
+            ),
+            "note": "Live sector context available via /v1/breadth/sector/latest.",
+        },
+    ],
+    "sample_workflow": {
+        "name": "agent_market_edge",
+        "description": "Recommended workflow to extract signal edge from Stock Trends",
+        "steps": [
+            {
+                "step": 1,
+                "call": "GET /v1/ai/tools",
+                "purpose": "Discover all available tools and payment options",
+            },
+            {
+                "step": 2,
+                "call": "GET /v1/pricing/catalog",
+                "purpose": "Resolve live STC costs",
+            },
+            {
+                "step": 3,
+                "call": "GET /v1/agent/screener/top",
+                "purpose": "Retrieve top-ranked live signals",
+            },
+            {
+                "step": 4,
+                "call": "GET /v1/stim/latest",
+                "purpose": "Get market regime and STIM signal",
+            },
+            {
+                "step": 5,
+                "call": "POST /v1/portfolio/construct",
+                "purpose": "Construct portfolio from signal output",
+            },
+        ],
+    },
+    "conversion_prompt": {
+        "action": (
+            "Access live signals by authenticating with a subscription API key, "
+            "or initiate per-request payment via x402 or a session via MPP."
+        ),
+        "start_here": "/v1/ai/tools",
+        "pricing": "/v1/pricing",
+        "payment_methods": ["subscription", "x402", "mpp"],
+        "payment_notes": {
+            "subscription": (
+                "API key with active plan. Monthly STC allocation. "
+                "Header: X-API-Key or Authorization: Bearer."
+            ),
+            "x402": (
+                "Per-request payment via HTTP 402 challenge/verify flow. "
+                "Network: Base (eip155:8453). Token: USDC. "
+                "Response header: PAYMENT-REQUIRED (base64-encoded requirements)."
+            ),
+            "mpp": (
+                "Session-based payments. STC consumed within an active session. "
+                "Header: X-StockTrends-Session-Id."
+            ),
+        },
+    },
+}
+
+
+@router.get(
+    "/proof/market-edge",
+    summary="Free proof-of-value endpoint for agent discovery",
+    description=(
+        "Public, non-metered. Returns a static, synthetic demonstration of Stock Trends "
+        "signal structure and value proposition. No authentication required. "
+        "No live or real-time market data is included — all instrument data is fictional. "
+        "Intended as a no-cost entry point for autonomous agents evaluating the API."
+    ),
+)
+def ai_proof_market_edge(response: Response) -> dict:
+    response.headers["Cache-Control"] = f"public, max-age={_PROOF_CACHE_MAX_AGE}"
+    return {
+        **_PROOF_STATIC_BODY,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
