@@ -70,6 +70,8 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             # Discovery endpoints — public like /v1/docs and /v1/openapi.json.
             "/v1/ai/context",
             "/v1/ai/tools",
+            # Free proof-of-value endpoint for autonomous agent discovery.
+            "/v1/ai/proof/market-edge",
         }
 
         self.public_prefixes = [

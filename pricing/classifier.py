@@ -54,6 +54,8 @@ NON_METERED_PATHS = {
     "/v1/cost-estimate",
     # MCP tools manifest: public discovery surface, no metering.
     "/v1/ai/tools",
+    # Free proof-of-value endpoint: non-metered, no billing record.
+    "/v1/ai/proof/market-edge",
 }
 
 # Path prefixes that are non-metered regardless of the full path.

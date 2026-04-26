@@ -22,6 +22,7 @@ from payments.policy_provider import (
     get_accepted_payment_methods_for_path,
     is_agent_pay_enforcement_path,
 )
+from discovery.preview import get_endpoint_preview
 from pricing.classifier import classify_request
 from payments.x402 import (
     is_x402_payment_method,
@@ -1175,6 +1176,11 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     # Shallow-copy so we don't mutate the cached enforcement result.
                     challenge_body = dict(enforcement_result.challenge_body)
                     challenge_body["accepted_payment_methods"] = accepted_methods_str.split(",")
+                    # Inject non-sensitive schema preview for known agent endpoints only.
+                    # Omitted entirely for unknown paths; never contains live data.
+                    _preview = get_endpoint_preview(path)
+                    if _preview is not None:
+                        challenge_body["stocktrends_preview"] = _preview
                     payment_required_header = enforcement_result.payment_required_header
 
                     response = JSONResponse(

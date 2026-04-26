@@ -373,6 +373,59 @@ def test_workflow_note_references_live_endpoint():
 
 
 # ---------------------------------------------------------------------------
+# agent_conversion_path block
+# ---------------------------------------------------------------------------
+
+def test_ai_tools_includes_agent_conversion_path():
+    """Response must include agent_conversion_path top-level key."""
+    result = ai_tools()
+    assert "agent_conversion_path" in result, (
+        "agent_conversion_path key missing from /v1/ai/tools response"
+    )
+
+
+def test_ai_tools_agent_conversion_path_proof_endpoint():
+    """proof_endpoint must point to the free proof-of-value endpoint."""
+    result = ai_tools()
+    acp = result["agent_conversion_path"]
+    assert acp.get("proof_endpoint") == "/v1/ai/proof/market-edge"
+
+
+def test_ai_tools_agent_conversion_path_payment_methods():
+    """payment_methods_supported must include all three active rails."""
+    result = ai_tools()
+    methods = set(result["agent_conversion_path"]["payment_methods_supported"])
+    assert methods == {"subscription", "x402", "mpp"}
+
+
+def test_ai_tools_agent_conversion_path_has_conversion_steps():
+    """conversion_steps must be a non-empty ordered list."""
+    result = ai_tools()
+    steps = result["agent_conversion_path"]["conversion_steps"]
+    assert isinstance(steps, list)
+    assert len(steps) >= 1
+
+
+def test_ai_tools_agent_conversion_path_steps_include_proof_endpoint():
+    """At least one conversion step must reference the proof endpoint."""
+    result = ai_tools()
+    steps = result["agent_conversion_path"]["conversion_steps"]
+    calls = [s.get("call", "") for s in steps]
+    assert any("/v1/ai/proof/market-edge" in c for c in calls), (
+        "No conversion step references /v1/ai/proof/market-edge"
+    )
+
+
+def test_ai_tools_agent_conversion_path_on_payment_required_present():
+    """on_payment_required must explain the 402 flow."""
+    result = ai_tools()
+    note = result["agent_conversion_path"].get("on_payment_required", "")
+    assert "402" in note or "payment" in note.lower(), (
+        "on_payment_required must describe the 402 payment flow"
+    )
+
+
+# ---------------------------------------------------------------------------
 # 6. Pricing section
 # ---------------------------------------------------------------------------
 
