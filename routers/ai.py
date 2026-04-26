@@ -342,7 +342,8 @@ _TOOL_TEMPLATES = [
         "name": "stim_latest",
         "title": "STIM Latest",
         "description": (
-            "Retrieves the latest ST-IM (Stock Trends Indicator Model) distribution for a symbol. "
+            "Retrieves the latest ST-IM (Stock Trends Inference Model) outputs: forward return "
+            "expectations and statistical distributions for a symbol. "
             "Covers forward return distributions across 4, 13, and 40-week horizons."
         ),
         "endpoint": "/v1/stim/latest",
