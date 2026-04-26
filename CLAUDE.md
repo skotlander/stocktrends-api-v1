@@ -51,6 +51,17 @@ Before making ANY changes:
 3. If unclear → ASK QUESTIONS before proceeding
 
 ---
+## Stock Trends Semantic Contract
+
+Before modifying any Stock Trends-related endpoint descriptions, AI discovery metadata, endpoint previews, tool manifests, OpenAPI descriptions, or documentation, read:
+
+`docs/STOCK_TRENDS_SEMANTIC_CONTRACT.md`
+
+Do not infer meanings for Stock Trends acronyms, indicators, fields, or statistical outputs.
+
+Use the definitions in that file as the authoritative source.
+
+---
 
 ## BIDIRECTIONAL ALIGNMENT (REQUIRED)
 
