@@ -97,6 +97,7 @@ _KNOWN_PUBLIC_TOOL_PATHS: frozenset[str] = frozenset({
     "/ai/proof/market-edge", # middleware.public_paths
     "/pricing",              # middleware.public_paths
     "/workflows",            # middleware.public_paths
+    "/breadth/sector/latest", # free-metered, anonymously accessible via runtime policy
 })
 
 

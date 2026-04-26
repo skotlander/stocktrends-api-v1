@@ -246,10 +246,10 @@
     {
       "name": "breadth_sector_latest",
       "title": "Sector Breadth Latest",
-      "description": "Returns the latest sector breadth snapshot derived from Stock Trends signal distribution across sectors. Requires a valid API key.",
+      "description": "Returns the latest sector breadth snapshot derived from Stock Trends signal distribution across sectors. Free-metered and anonymously accessible.",
       "method": "GET",
       "path": "/breadth/sector/latest",
-      "auth_required": true,
+      "auth_required": false,
       "category": "breadth"
     },
     {
