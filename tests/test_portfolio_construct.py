@@ -64,8 +64,15 @@ def _candidate(symbol: str, trend_cnt: int, rsi: int, exchange: str = "Q") -> di
     }
 
 
-def _mock_engine(candidates: list[dict]) -> MagicMock:
-    """Return a mock engine whose connection yields fixed query results in order."""
+def _mock_engine(
+    candidates: list[dict],
+    stim_rows: list[dict] | None = None,
+) -> MagicMock:
+    """Return a mock engine whose connection yields fixed query results in order.
+
+    Query order (matching routers/portfolio.py construct_portfolio):
+      1. weekdates  2. regime aggregation  3. candidates  4. ST-IM (st_returnmeans)
+    """
     def _result(rows: list[dict]) -> MagicMock:
         r = MagicMock()
         r.mappings.return_value.all.return_value = rows
@@ -76,12 +83,29 @@ def _mock_engine(candidates: list[dict]) -> MagicMock:
         _result(_WEEKDATE_ROWS),
         _result(_AGG_ROWS),
         _result(candidates),
+        _result(stim_rows if stim_rows is not None else []),
     ]
 
     engine = MagicMock()
     engine.connect.return_value.__enter__.return_value = conn
     engine.connect.return_value.__exit__.return_value = False
     return engine
+
+
+def _stim_row(
+    symbol: str,
+    x13wk: float,
+    x13wksd: float,
+    exchange: str = "Q",
+) -> dict:
+    """Build a minimal st_returnmeans row for use in stim_rows lists."""
+    return {
+        "symbol": symbol,
+        "exchange": exchange,
+        "x13wk": x13wk,
+        "x13wksd": x13wksd,
+        "weekdate": _WD,   # matches _WEEKDATE_ROWS → stim_is_stale = False
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -197,9 +221,9 @@ def test_candidate_sql_has_no_alphabetical_limit():
 
     assert resp.status_code == 200, resp.text
 
-    # text() is called exactly 3 times: weekdates, regime aggregation, candidates.
+    # text() is called exactly 4 times: weekdates, regime aggregation, candidates, ST-IM.
     sql_calls = mock_text.call_args_list
-    assert len(sql_calls) == 3, f"Expected 3 text() calls, got {len(sql_calls)}"
+    assert len(sql_calls) == 4, f"Expected 4 text() calls, got {len(sql_calls)}"
     candidate_sql: str = sql_calls[2].args[0]
 
     assert "ORDER BY symbol ASC" not in candidate_sql, (
@@ -213,7 +237,7 @@ def test_candidate_sql_has_no_alphabetical_limit():
 
     # The params dict for the 3rd conn.execute() call must not contain pool_size.
     execute_calls = conn.execute.call_args_list
-    assert len(execute_calls) == 3
+    assert len(execute_calls) == 4
     candidate_params: dict = execute_calls[2].args[1]
     assert "pool_size" not in candidate_params, (
         f"pool_size still in candidate params dict: {candidate_params}"
@@ -429,4 +453,158 @@ def test_portfolio_construct_preview_includes_transparency_fields():
         assert field in shape_str, (
             f"New transparency field '{field}' missing from /v1/portfolio/construct "
             f"x402 preview response_shape — update discovery/preview.py"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 9. ST-IM tiebreaker tests
+# ---------------------------------------------------------------------------
+
+def test_stim_breaks_decision_score_ties():
+    """
+    Two candidates with identical decision_score but different ST-IM
+    risk-adjusted 13-week returns.  Higher x13wk/x13wksd ratio must rank first,
+    overriding alphabetical order (AAAA < ZZZZ).
+    """
+    candidates = [
+        _candidate("AAAA", _HIGH_TREND_CNT, _HIGH_RSI),   # decision_score 1.00
+        _candidate("ZZZZ", _HIGH_TREND_CNT, _HIGH_RSI),   # decision_score 1.00
+    ]
+    # ZZZZ has a higher risk-adjusted return → should rank above AAAA
+    stim = [
+        _stim_row("AAAA", x13wk=5.0, x13wksd=2.0),   # ratio = 2.5  (lower)
+        _stim_row("ZZZZ", x13wk=9.0, x13wksd=2.0),   # ratio = 4.5  (higher)
+    ]
+    with patch("routers.portfolio.get_engine", return_value=_mock_engine(candidates, stim)):
+        resp = _client.post("/v1/portfolio/construct", json={"count": 2})
+
+    assert resp.status_code == 200, resp.text
+    portfolio = resp.json()["portfolio"]
+    assert portfolio[0]["symbol"] == "ZZZZ", (
+        f"ZZZZ has higher ST-IM ratio and must rank first despite alphabetical order; "
+        f"got {portfolio[0]['symbol']}"
+    )
+    assert portfolio[1]["symbol"] == "AAAA"
+
+
+def test_decision_score_dominates_stim():
+    """
+    A candidate with a higher decision_score must rank above one with a
+    better ST-IM ratio.  ST-IM must only break ties within the same
+    decision_score tier.
+    """
+    candidates = [
+        _candidate("HIGH", _HIGH_TREND_CNT, _HIGH_RSI),   # decision_score 1.00
+        _candidate("LOWW", _LOW_TREND_CNT,  _LOW_RSI),    # decision_score 0.78
+    ]
+    # LOWW has a far better ST-IM ratio — must still lose to HIGH's score
+    stim = [
+        _stim_row("HIGH", x13wk=1.0, x13wksd=2.0),   # ratio = 0.5 (low)
+        _stim_row("LOWW", x13wk=9.0, x13wksd=1.0),   # ratio = 9.0 (high)
+    ]
+    with patch("routers.portfolio.get_engine", return_value=_mock_engine(candidates, stim)):
+        resp = _client.post("/v1/portfolio/construct", json={"count": 2})
+
+    assert resp.status_code == 200, resp.text
+    portfolio = resp.json()["portfolio"]
+    assert portfolio[0]["symbol"] == "HIGH", (
+        "HIGH has a higher decision_score and must rank first regardless of ST-IM; "
+        f"got {portfolio[0]['symbol']}"
+    )
+    assert portfolio[0]["decision_score"] > portfolio[1]["decision_score"]
+
+
+def test_missing_stim_sets_covered_false():
+    """
+    A candidate with no matching row in st_returnmeans must have
+    stim_covered=False and stim_percentile_13wk=None.
+    """
+    candidates = [_candidate("AAPL", _HIGH_TREND_CNT, _HIGH_RSI)]
+    # No stim rows → AAPL is uncovered
+    with patch("routers.portfolio.get_engine", return_value=_mock_engine(candidates, [])):
+        resp = _client.post("/v1/portfolio/construct", json={"count": 1})
+
+    assert resp.status_code == 200, resp.text
+    pos = resp.json()["portfolio"][0]
+    assert pos["stim_covered"] is False, "stim_covered must be False when no ST-IM row exists"
+    assert pos["stim_percentile_13wk"] is None, "stim_percentile_13wk must be None when uncovered"
+    assert pos["stim_expected_return_13wk"] is None
+    assert pos["stim_volatility_13wk"] is None
+    assert pos["stim_risk_adjusted_13wk"] is None
+
+
+def test_zero_stim_coverage_uses_decision_score_only():
+    """
+    When no candidate has ST-IM coverage, ranking_method must be
+    'decision_score_only' and stim_covered_count must be 0.
+    """
+    candidates = [
+        _candidate("BBBB", _HIGH_TREND_CNT, _HIGH_RSI),
+        _candidate("AAAA", _LOW_TREND_CNT,  _LOW_RSI),
+    ]
+    with patch("routers.portfolio.get_engine", return_value=_mock_engine(candidates, [])):
+        resp = _client.post("/v1/portfolio/construct", json={"count": 2})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ranking_method"] == "decision_score_only", (
+        f"Expected ranking_method='decision_score_only'; got {body['ranking_method']!r}"
+    )
+    assert body["stim_covered_count"] == 0
+    assert body["stim_weekdate"] is None
+
+
+def test_construct_issues_four_db_queries():
+    """
+    /portfolio/construct must issue exactly 4 DB queries:
+      1. weekdates  2. regime aggregation  3. candidates  4. ST-IM (st_returnmeans).
+    The 4th query must reference the st_returnmeans table.
+    """
+    candidates = [_candidate("AAPL", _HIGH_TREND_CNT, _HIGH_RSI)]
+    engine = _mock_engine(candidates)
+
+    with patch("routers.portfolio.text") as mock_text:
+        with patch("routers.portfolio.get_engine", return_value=engine):
+            resp = _client.post("/v1/portfolio/construct", json={"count": 1})
+
+    assert resp.status_code == 200, resp.text
+    sql_calls = mock_text.call_args_list
+    assert len(sql_calls) == 4, (
+        f"Expected 4 text() calls (weekdates, regime, candidates, stim); "
+        f"got {len(sql_calls)}"
+    )
+    stim_sql: str = sql_calls[3].args[0]
+    assert "st_returnmeans" in stim_sql, (
+        f"4th SQL query must reference st_returnmeans; got:\n{stim_sql}"
+    )
+
+
+def test_portfolio_construct_preview_includes_stim_fields():
+    """
+    discovery/preview.py entry for /v1/portfolio/construct must include the
+    four top-level ST-IM transparency fields added by this change.
+    """
+    from discovery.preview import get_endpoint_preview
+
+    preview = get_endpoint_preview("/v1/portfolio/construct")
+    assert preview is not None, "/v1/portfolio/construct not registered in preview registry"
+
+    shape_str = " ".join(preview.get("response_shape", []))
+    for field in (
+        "stim_weekdate",
+        "stim_covered_count",
+        "stim_coverage_pct",
+        "ranking_method",
+    ):
+        assert field in shape_str, (
+            f"ST-IM field '{field}' missing from /v1/portfolio/construct "
+            f"preview response_shape — update discovery/preview.py"
+        )
+    # Per-position ST-IM fields
+    for field in (
+        "portfolio[].stim_covered",
+        "portfolio[].stim_percentile_13wk",
+    ):
+        assert field in shape_str, (
+            f"Per-position ST-IM field '{field}' missing from preview response_shape"
         )
