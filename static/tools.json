@@ -219,11 +219,46 @@
     {
       "name": "construct_portfolio",
       "title": "Construct Portfolio",
-      "description": "Constructs a scored portfolio from screened candidates using Stock Trends weighting logic. Fetch /v1/pricing/catalog for current STC cost.",
+      "description": "Evaluates the full eligible universe of Stock Trends signal candidates and returns the top N by decision_score as an equal-weight portfolio. Fully deterministic — no ML. Parameters: universe ('top' — directional trend candidates resolved from bias); count (integer 1–10, number of positions); bias ('auto' resolves from current regime, 'bullish' filters to bullish trend states ^+/^-/v^, 'bearish' filters to bearish trend states v-/v+/^v); exchange ('N' NYSE, 'Q' NASDAQ, 'A' AMEX, 'T' TSX — omitted defaults to US exchanges N/Q/A). Response includes decision_score ranking metric, portfolio_score, candidates_evaluated, candidate_selection_method, exchange_filter, bias_requested, bias_resolved, and regime_context. Fetch /v1/pricing/catalog for current STC cost.",
       "method": "POST",
       "path": "/portfolio/construct",
       "auth_required": true,
-      "category": "portfolio"
+      "category": "portfolio",
+      "parameters": [
+        {
+          "name": "universe",
+          "type": "string",
+          "required": false,
+          "default": "top",
+          "allowed_values": ["top"],
+          "description": "Candidate universe. 'top' selects securities with directional Stock Trends trend classifications resolved from bias."
+        },
+        {
+          "name": "count",
+          "type": "integer",
+          "required": false,
+          "default": 5,
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Number of equal-weight positions to return."
+        },
+        {
+          "name": "bias",
+          "type": "string",
+          "required": false,
+          "default": "auto",
+          "allowed_values": ["auto", "bullish", "bearish"],
+          "description": "Direction filter. 'auto' resolves from current regime. 'bullish' selects bullish trend states (^+, ^-, v^). 'bearish' selects bearish trend states (v-, v+, ^v). Mixed regime with 'auto' selects all directional trend states."
+        },
+        {
+          "name": "exchange",
+          "type": "string",
+          "required": false,
+          "default": null,
+          "allowed_values": ["N", "Q", "A", "T"],
+          "description": "Exchange filter. N=NYSE, Q=NASDAQ, A=AMEX, T=TSX. Omitted defaults to US exchanges N/Q/A."
+        }
+      ]
     },
     {
       "name": "evaluate_portfolio",

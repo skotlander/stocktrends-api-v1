@@ -13,7 +13,6 @@ from services import decision_service, regime_service
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 
 _FORECAST_LOOKBACK = 5
-_CANDIDATE_POOL_SIZE = 20
 _VALID_UNIVERSES = {"top"}
 _VALID_BIASES = {"auto", "bullish", "bearish"}
 _WEIGHT_SUM_TOLERANCE = 0.01
@@ -111,11 +110,34 @@ def _construction_notes(
     "/construct",
     summary="Construct a scored equal-weight portfolio",
     description=(
-        "Generates a small portfolio of symbols by running screener logic to produce "
-        "a candidate pool, evaluating each candidate through the decision scoring system, "
-        "and selecting the top N by decision_score. Fully deterministic — no ML. "
+        "Generates an equal-weight portfolio by evaluating all eligible candidates from the "
+        "latest Stock Trends weekly signal data through the decision scoring system and "
+        "selecting the top N by decision_score DESC. Fully deterministic — no ML. "
         "Reuses the same regime and decision logic as /market/regime/forecast and "
-        "/decision/evaluate-symbol. "
+        "/decision/evaluate-symbol.\n\n"
+        "Request parameters:\n"
+        "  universe (string, default='top'): Candidate universe. Allowed: 'top'. "
+        "Selects securities with directional Stock Trends trend classifications resolved "
+        "from bias.\n"
+        "  count (integer 1-10, default=5): Number of equal-weight positions returned.\n"
+        "  bias (string, default='auto'): Direction filter. Allowed: 'auto', 'bullish', "
+        "'bearish'. auto resolves from current regime — bullish regime selects bullish "
+        "trend states (^+, ^-, v^); bearish regime selects bearish trend states "
+        "(v-, v+, ^v); mixed regime selects all directional trend states. "
+        "'bullish' or 'bearish' force the trend state filter regardless of regime.\n"
+        "  exchange (string, optional): Exchange filter. Allowed: 'N' (NYSE), "
+        "'Q' (NASDAQ), 'A' (AMEX), 'T' (TSX). Omitted defaults to US exchanges N/Q/A.\n\n"
+        "Key response fields:\n"
+        "  decision_score (0-1): Ranking metric for each position.\n"
+        "  portfolio_score: Mean decision_score of selected positions.\n"
+        "  bias_requested / bias_resolved: Requested and effective bias direction.\n"
+        "  candidates_evaluated: Total candidates scored before top-N selection.\n"
+        "  candidate_selection_method: How the candidate universe was assembled.\n"
+        "  candidate_ordering: Sort key applied to rank candidates before selection.\n"
+        "  exchange_filter: Exchange codes applied during candidate selection.\n"
+        "  universe: Universe parameter used.\n"
+        "  regime_context: Current regime, confidence, and forecast.\n"
+        "  construction_notes: Human-readable construction summary.\n\n"
         "Fetch /v1/pricing/catalog for current STC cost."
     ),
 )
@@ -231,15 +253,16 @@ def construct_portfolio(body: ConstructPortfolioRequest, request: Request):
         trend_binds = {f"t{i}": code for i, code in enumerate(trend_codes)}
         trend_placeholders = ", ".join(f":t{i}" for i in range(len(trend_codes)))
 
-        # --- Query 3: Candidate pool ---
-        # Neutral ordering — let decision_score fully determine ranking
+        # --- Query 3: Full eligible candidate universe ---
+        # Fetch all eligible candidates; Python ranks by decision_score DESC.
+        # No pre-limit — alphabetical ordering must never act as a selection filter.
         candidate_params: dict = {
             "latest_wd": latest_wd,
-            "pool_size": _CANDIDATE_POOL_SIZE,
             **trend_binds,
         }
         # Exchange filter: explicit exchange overrides the US-market default.
         # Default (no exchange): restrict to US-listed exchanges (N, Q, A).
+        # Allowed exchange codes: N (NYSE), Q (NASDAQ), A (AMEX), T (TSX).
         # type = 'CS' already excludes non-tradable instrument types.
         if norm_exchange:
             exchange_clause = "AND exchange = :exchange"
@@ -265,8 +288,6 @@ def construct_portfolio(body: ConstructPortfolioRequest, request: Request):
                   AND type = 'CS'
                   AND trend IN ({trend_placeholders})
                   {exchange_clause}
-                ORDER BY symbol ASC
-                LIMIT :pool_size
                 """
             ),
             candidate_params,
@@ -365,7 +386,11 @@ def construct_portfolio(body: ConstructPortfolioRequest, request: Request):
         "weekdate": str(latest_wd),
         "portfolio": portfolio,
         "count": len(portfolio),
+        "universe": body.universe,
+        "exchange_filter": [norm_exchange] if norm_exchange else ["N", "Q", "A"],
         "candidates_evaluated": len(candidate_rows),
+        "candidate_selection_method": "full_eligible_universe",
+        "candidate_ordering": "decision_score DESC, symbol ASC",
         "portfolio_score": portfolio_score,
         "bias_requested": body.bias,
         "bias_resolved": resolved_bias,
