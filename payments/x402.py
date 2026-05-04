@@ -254,41 +254,60 @@ def build_x402_requirements(
     http_method = method.upper()
     resource_url = f"{X402_API_BASE_URL}{path}" if X402_API_BASE_URL else path
 
+    # Bazaar extension shape differs by method class.
+    # GET/HEAD/DELETE: query-param style (no body fields required).
+    # POST/PUT/PATCH:  body style — declare bodyType and an empty body schema.
+    _QUERY_METHODS = {"GET", "HEAD", "DELETE"}
+    if http_method in _QUERY_METHODS:
+        bazaar_info: dict[str, Any] = {"input": {"type": "http", "method": http_method}}
+        bazaar_schema_input_props: dict[str, Any] = {
+            "type": {"type": "string", "const": "http"},
+            "method": {"type": "string", "enum": [http_method]},
+        }
+        bazaar_schema_required = ["type", "method"]
+    else:
+        bazaar_info = {
+            "input": {"type": "http", "method": http_method, "bodyType": "json", "body": {}}
+        }
+        bazaar_schema_input_props = {
+            "type": {"type": "string", "const": "http"},
+            "method": {"type": "string", "enum": [http_method]},
+            "bodyType": {"type": "string", "enum": ["json"]},
+            "body": {},
+        }
+        bazaar_schema_required = ["type", "method", "bodyType", "body"]
+
     return {
         "x402Version": 2,
+        # V2 canonical resource identity (ResourceInfo) — separate from accepts entries.
+        "resource": {
+            "url": resource_url,
+            "description": description,
+            "mimeType": mime_type,
+        },
         "accepts": [
             {
                 "scheme": scheme,
                 "network": network,
-                "resource": resource_url,
-                "maxAmountRequired": _to_atomic_units(amount_usd, X402_DEFAULT_TOKEN_DECIMALS),
+                # x402 V2 PaymentRequirements canonical field is "amount".
+                "amount": _to_atomic_units(amount_usd, X402_DEFAULT_TOKEN_DECIMALS),
                 "asset": token,
                 "payTo": pay_to,
                 "maxTimeoutSeconds": max_timeout_seconds,
-                "mimeType": mime_type,
-                "description": description,
                 "extra": extra,
             }
         ],
         "extensions": {
             "bazaar": {
-                "info": {
-                    "input": {
-                        "type": "http",
-                        "method": http_method,
-                    }
-                },
+                "info": bazaar_info,
                 "schema": {
                     "$schema": "https://json-schema.org/draft/2020-12/schema",
                     "type": "object",
                     "properties": {
                         "input": {
                             "type": "object",
-                            "properties": {
-                                "type": {"type": "string", "const": "http"},
-                                "method": {"type": "string", "enum": [http_method]},
-                            },
-                            "required": ["type", "method"],
+                            "properties": bazaar_schema_input_props,
+                            "required": bazaar_schema_required,
                             "additionalProperties": False,
                         }
                     },
@@ -350,7 +369,7 @@ def build_x402_challenge(
         "error": "payment_required",
         "detail": "Payment is required to access this endpoint.",
         "protocol": "x402",
-        "resource": path,
+        "resource": requirements["resource"]["url"],
         "pricing": {
             "amount_usd": f"{amount_usd:.6f}",
             "unit": "request",
@@ -455,8 +474,8 @@ def _normalize_payment_requirements_input(payment_requirements: Any) -> dict[str
 
 def _extract_x402_amount_native(payload: dict[str, Any]) -> Decimal | None:
     raw_amount = (
-        payload.get("maxAmountRequired")
-        or payload.get("amount")
+        payload.get("amount")
+        or payload.get("maxAmountRequired")
         or payload.get("value")
         or payload.get("paymentAmount")
     )
