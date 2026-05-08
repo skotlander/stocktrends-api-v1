@@ -108,7 +108,7 @@ https://developer.stocktrends.com/mpp
 * `GET /leadership/definitions`
   Leadership definitions and metadata
 * `GET /leadership/summary/latest`
-  Latest leadership summary
+  Latest Stock Trends leadership summary with overall, sector, and industry-group leaders ranked by RSI and trend-category maturity filters
 * `GET /leadership/rotation/history`
   Historical leadership rotation
 

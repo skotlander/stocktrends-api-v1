@@ -522,18 +522,31 @@ _TOOL_TEMPLATES = [
 ]
 
 
+_REGISTRY_TOOL_TEMPLATE_OVERRIDES = frozenset({
+    ("/v1/agent/screener/top", "GET"),
+    ("/v1/portfolio/construct", "POST"),
+    ("/v1/portfolio/evaluate", "POST"),
+    ("/v1/portfolio/compare", "POST"),
+    ("/v1/stim/latest", "GET"),
+    ("/v1/stim/history", "GET"),
+})
+
+
 def _append_registry_tool_templates(templates: list[dict]) -> list[dict]:
-    """Add metadata-registry tools that are not already hand-authored above."""
-    existing = {(tool["endpoint"], tool["method"]) for tool in templates}
+    """Add registry tools, and let selected registry entries replace older thin templates."""
+    existing = {(tool["endpoint"], tool["method"]): idx for idx, tool in enumerate(templates)}
     result = list(templates)
     for entry in iter_endpoint_metadata():
         key = (entry["path"], entry["method"])
-        if key in existing:
-            continue
         tool_template = build_tool_template(entry["path"])
-        if tool_template is not None:
-            result.append(tool_template)
-            existing.add(key)
+        if tool_template is None:
+            continue
+        if key in existing:
+            if key in _REGISTRY_TOOL_TEMPLATE_OVERRIDES:
+                result[existing[key]] = tool_template
+            continue
+        result.append(tool_template)
+        existing[key] = len(result) - 1
     return result
 
 

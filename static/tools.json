@@ -387,7 +387,7 @@
     {
       "name": "leadership_summary_latest",
       "title": "Leadership Summary Latest",
-      "description": "Returns the latest leadership summary dataset identifying sector and industry leaders. Requires a valid API key.",
+      "description": "Returns the latest Stock Trends leadership summary identifying overall, sector, and industry-group leaders using relative performance and trend-alignment filters. Fetch /v1/pricing/catalog for current STC cost.",
       "method": "GET",
       "path": "/leadership/summary/latest",
       "auth_required": true,

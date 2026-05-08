@@ -34,6 +34,7 @@ sys.modules.setdefault("db", _DB_MOCK)
 # Now safe to import project modules
 from routers.ai import _TOOL_TEMPLATES, _MANIFEST_PUBLIC_PATHS, _build_workflow_summary, ai_context, ai_tools
 from routers.workflows import WORKFLOW_REGISTRY
+from discovery.endpoint_metadata import build_input_schema
 from pricing.classifier import NON_METERED_PATHS, classify_request
 from payments.policy_provider import (
     is_free_metered_path,
@@ -267,6 +268,30 @@ def test_stim_tools_supported_rails_match_policy():
             f"STIM tool '{tool['name']}' supported_rails={tool['supported_rails']!r} "
             f"expected {expected_rails!r} (derived from runtime policy)"
         )
+
+
+def test_registry_overrides_shadowed_tool_templates():
+    """
+    Older hand-authored templates for these endpoints were thinner than the
+    central registry. The manifest should now expose the registry input schema.
+    """
+    result = ai_tools()
+    tools_by_endpoint = {(tool["endpoint"], tool["method"]): tool for tool in result["tools"]}
+    shadowed = {
+        ("/v1/agent/screener/top", "GET"),
+        ("/v1/portfolio/construct", "POST"),
+        ("/v1/portfolio/evaluate", "POST"),
+        ("/v1/portfolio/compare", "POST"),
+        ("/v1/stim/latest", "GET"),
+        ("/v1/stim/history", "GET"),
+    }
+
+    for endpoint, method in shadowed:
+        tool = tools_by_endpoint[(endpoint, method)]
+        assert tool["input_schema"] == build_input_schema(endpoint)
+        assert tool["safe_example_request"]["path"] == endpoint
+        assert tool["workflow_role"]
+        assert "related_endpoints" in tool
 
 
 def test_non_metered_tools_have_no_pricing_rule_id():

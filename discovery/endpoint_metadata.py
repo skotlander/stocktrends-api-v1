@@ -119,6 +119,7 @@ def _metadata(
     related_endpoints: list[str] | None = None,
     next_recommended_calls: list[str] | None = None,
     tags: list[str] | None = None,
+    supported_rails: list[str] | None = None,
 ) -> dict[str, Any]:
     return {
         "path": path,
@@ -127,7 +128,7 @@ def _metadata(
         "title": title,
         "category": category,
         "pricing_rule_id": pricing_rule_id,
-        "supported_rails": list(SUPPORTED_RAILS),
+        "supported_rails": list(supported_rails or SUPPORTED_RAILS),
         "resource_description": resource_description,
         "bazaar_output": {
             "type": "json",
@@ -854,6 +855,120 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         related_endpoints=["/v1/breadth/sector/latest", "/v1/market/regime/history"],
         next_recommended_calls=["/v1/market/regime/latest", "/v1/leadership/summary/latest"],
     ),
+    "/v1/leadership/summary/latest": _metadata(
+        path="/v1/leadership/summary/latest",
+        method="GET",
+        tool_name="leadership_summary_latest",
+        title="Leadership Summary Latest",
+        category="leadership",
+        pricing_rule_id="default_subscription",
+        supported_rails=["subscription"],
+        resource_description=(
+            "Latest Stock Trends leadership summary identifying overall, sector, and "
+            "industry-group leaders using relative performance and trend-alignment filters."
+        ),
+        bazaar_output_description=(
+            "Returns leadership summary fields including weekdate, filters, overall_leaders, "
+            "sector_leaders, and industry_group_leaders with symbol, exchange, rsi, mt_cnt, "
+            "trend, trend_cnt, and taxonomy metadata."
+        ),
+        purpose="Retrieve the latest Stock Trends leadership summary across sectors and industry groups.",
+        investment_agent_value=(
+            "Helps agents identify where relative performance and bullish Stock Trends alignment "
+            "are concentrated before combining leadership context with breadth, regime, or symbol workflows."
+        ),
+        workflow_role="Leadership context enrichment.",
+        optional_inputs={
+            "exchange": copy.deepcopy(EXCHANGE_INPUT),
+            "weekdate": copy.deepcopy(END_INPUT),
+            "type": {
+                "type": "string",
+                "required": False,
+                "safe_default": "CS",
+                "example": "CS",
+                "description": "Instrument type filter. CS is the safe default for common-stock leadership scans.",
+            },
+            "min_rsi": {
+                "type": "integer",
+                "required": False,
+                "safe_default": 110,
+                "minimum": 0,
+                "maximum": 500,
+                "example": 110,
+                "description": "Minimum Stock Trends RSI threshold. RSI baseline is 100.",
+            },
+            "min_mt_cnt": {
+                "type": "integer",
+                "required": False,
+                "safe_default": 4,
+                "minimum": 0,
+                "maximum": 500,
+                "example": 4,
+                "description": "Minimum trend-category maturity filter.",
+            },
+            "limit_overall": {
+                "type": "integer",
+                "required": False,
+                "safe_default": 50,
+                "minimum": 1,
+                "maximum": 1000,
+                "example": 50,
+            },
+            "limit_bucket": {
+                "type": "integer",
+                "required": False,
+                "safe_default": 20,
+                "minimum": 1,
+                "maximum": 200,
+                "example": 20,
+            },
+        },
+        safe_example_request={
+            "method": "GET",
+            "path": "/v1/leadership/summary/latest",
+            "query": {"exchange": "N", "type": "CS", "min_rsi": 110, "min_mt_cnt": 4},
+        },
+        response_shape=[
+            "request_id", "weekdate", "exchange", "filters.type", "filters.min_rsi",
+            "filters.min_mt_cnt", "overall_leaders[].symbol", "overall_leaders[].exchange",
+            "overall_leaders[].rsi", "overall_leaders[].mt_cnt", "overall_leaders[].trend",
+            "overall_leaders[].trend_cnt", "overall_leaders[].rsi_updn",
+            "overall_leaders[].sector_name", "overall_leaders[].industry_group_name",
+            "sector_leaders[].symbol", "sector_leaders[].sector_name",
+            "industry_group_leaders[].symbol", "industry_group_leaders[].industry_group_name",
+            "note",
+        ],
+        example_object={
+            "request_id": "req_demo",
+            "weekdate": "YYYY-MM-DD",
+            "exchange": "N",
+            "filters": {"type": "CS", "min_rsi": 110, "min_mt_cnt": 4},
+            "overall_leaders": [
+                {
+                    "symbol": "SAMPLE",
+                    "exchange": "N",
+                    "rsi": 118,
+                    "mt_cnt": 10,
+                    "trend": "^+",
+                    "trend_cnt": 6,
+                    "sector_name": "Sample Sector",
+                }
+            ],
+            "sector_leaders": [],
+            "industry_group_leaders": [],
+        },
+        output_summary=(
+            "Latest leadership groups with overall, sector, and industry-group leaders ranked by "
+            "Stock Trends RSI and trend-category maturity filters."
+        ),
+        notes=[
+            "RSI baseline is 100; values above 100 indicate outperformance versus benchmark.",
+            "Use with /v1/breadth/sector/latest and /v1/market/regime/latest for context before symbol-level calls.",
+        ],
+        related_endpoints=["/v1/breadth/sector/latest", "/v1/market/regime/latest", "/v1/leadership/rotation/history"],
+        next_recommended_calls=["/v1/market/regime/latest", "/v1/indicators/latest"],
+        tags=["leadership", "breadth", "context"],
+    ),
 }
 
 
@@ -998,4 +1113,11 @@ def build_tool_template(path: str) -> dict[str, Any] | None:
         "category": entry["category"],
         "input_schema": build_input_schema(path) or {"type": "object", "properties": {}, "required": []},
         "output_summary": entry["output_summary"],
+        "workflow_role": entry["workflow_role"],
+        "investment_agent_value": entry["investment_agent_value"],
+        "required_inputs": copy.deepcopy(entry.get("required_inputs", {})),
+        "optional_inputs": copy.deepcopy(entry.get("optional_inputs", {})),
+        "safe_example_request": copy.deepcopy(entry["safe_example_request"]),
+        "related_endpoints": copy.deepcopy(entry.get("related_endpoints", [])),
+        "next_recommended_calls": copy.deepcopy(entry.get("next_recommended_calls", [])),
     }

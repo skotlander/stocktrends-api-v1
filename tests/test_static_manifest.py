@@ -188,6 +188,21 @@ def test_indicators_tools_present(manifest):
         assert "Fetch /v1/pricing/catalog" in tool.get("description", "")
 
 
+def test_all_registry_endpoints_in_static_tools(manifest):
+    from discovery.endpoint_metadata import iter_endpoint_metadata
+
+    static_paths = {tool["path"] for tool in manifest["tools"]}
+    missing = []
+    for entry in iter_endpoint_metadata():
+        expected_path = entry["path"].removeprefix("/v1")
+        if expected_path not in static_paths:
+            missing.append(f"{entry['method']} {entry['path']}")
+
+    assert not missing, (
+        "Registry endpoints missing from static/tools.json:\n" + "\n".join(missing)
+    )
+
+
 # ---------------------------------------------------------------------------
 # 7. No hardcoded STC costs
 # ---------------------------------------------------------------------------
