@@ -42,13 +42,14 @@ def test_root_guides_to_ai_tools_first(client):
     response = client.get("/")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "message": "Start with the machine-readable tools manifest for agent discovery.",
-        "start_here": "/v1/ai/tools",
-        "secondary": "/v1/ai/context",
-        "docs": "/v1/docs",
-        "openapi": "/v1/openapi.json",
-    }
+    body = response.json()
+    assert body["message"] == "Start with the machine-readable tools manifest for agent discovery."
+    assert "Autonomous portfolio intelligence API for AI agents" in body["description"]
+    assert body["start_here"] == "/v1/ai/tools"
+    assert body["secondary"] == "/v1/ai/context"
+    assert body["docs"] == "/v1/docs"
+    assert body["openapi"] == "/v1/openapi.json"
+    assert "/v1/workflows" in body["planning_helpers"]
 
 
 def test_public_not_found_guides_to_ai_tools_first(client):
@@ -100,6 +101,23 @@ def test_route_level_404_keeps_existing_detail_schema(client, monkeypatch):
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Route-level missing resource"}
+
+
+def test_cost_estimate_workflow_id_openapi_parameter_is_valid(client):
+    response = client.get("/v1/openapi.json")
+
+    assert response.status_code == 200
+    schema = response.json()
+    parameters = schema["paths"]["/cost-estimate"]["get"]["parameters"]
+    workflow_id = next(param for param in parameters if param["name"] == "workflow_id")
+
+    assert "examples" not in workflow_id
+    assert workflow_id["schema"]["enum"] == [
+        "regime_analysis",
+        "symbol_decision",
+        "portfolio_build",
+        "portfolio_compare_review",
+    ]
 
 
 def test_unauthenticated_unknown_v1_path_still_returns_401(client):
