@@ -7,6 +7,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from discovery.service_meta import SERVICE_POSITIONING
 from middleware.request_id import RequestIdMiddleware
 from middleware.api_key import ApiKeyMiddleware
 from middleware.request_logger import RequestLoggerMiddleware
@@ -36,12 +37,7 @@ logging.basicConfig(level=logging.INFO)
 
 APP_TITLE = "Stock Trends API"
 APP_VERSION = "1.0.0"
-APP_DESCRIPTION = (
-    "Autonomous portfolio intelligence API for AI agents. Provides market regime analysis, "
-    "Stock Trends signal intelligence, probabilistic forward-return modeling, stock selection, "
-    "portfolio construction, portfolio comparison, and symbol decision evaluation for 4-40 week "
-    "investment horizons. Built for agentic research workflows using x402 and MPP payment rails."
-)
+APP_DESCRIPTION = SERVICE_POSITIONING
 
 FREE_METERED_V1_PATHS = {
     "/ai/context",

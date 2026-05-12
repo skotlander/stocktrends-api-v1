@@ -1073,8 +1073,33 @@ def build_endpoint_preview(
     return preview
 
 
-def _input_location_for_method(method: str) -> str:
+def input_location_for_method(method: str) -> str:
     return "query" if method.upper() in {"GET", "HEAD", "DELETE"} else "body"
+
+
+def schema_to_parameters(schema: dict, location: str) -> list[dict[str, Any]]:
+    if not isinstance(schema, dict):
+        return []
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    required = set(schema.get("required") or [])
+    parameters = []
+    for name, prop_schema in properties.items():
+        param = {
+            "name": name,
+            "in": location,
+            "required": name in required,
+            "schema": prop_schema if isinstance(prop_schema, dict) else {},
+        }
+        if isinstance(prop_schema, dict):
+            if prop_schema.get("description"):
+                param["description"] = prop_schema["description"]
+            if "example" in prop_schema:
+                param["example"] = prop_schema["example"]
+        if location == "query":
+            param["style"] = "form"
+            param["explode"] = True
+        parameters.append(param)
+    return parameters
 
 
 def _schema_property_from_input_meta(meta: dict[str, Any]) -> dict[str, Any]:
@@ -1111,7 +1136,7 @@ def build_input_schema(path: str) -> dict[str, Any] | None:
         "type": "object",
         "properties": properties,
         "required": required,
-        "x-stocktrends-input-location": _input_location_for_method(entry["method"]),
+        "x-stocktrends-input-location": input_location_for_method(entry["method"]),
     }
     if entry.get("input_rule"):
         schema["description"] = entry["input_rule"]
@@ -1123,7 +1148,7 @@ def build_tool_parameters(path: str) -> list[dict[str, Any]] | None:
     if entry is None:
         return None
 
-    location = _input_location_for_method(entry["method"])
+    location = input_location_for_method(entry["method"])
     params: list[dict[str, Any]] = []
     for source in ("required_inputs", "optional_inputs"):
         for name, meta in entry.get(source, {}).items():
@@ -1149,7 +1174,7 @@ def build_tool_template(path: str) -> dict[str, Any] | None:
     if entry is None:
         return None
 
-    input_location = _input_location_for_method(entry["method"])
+    input_location = input_location_for_method(entry["method"])
     input_schema = build_input_schema(path) or {"type": "object", "properties": {}, "required": []}
     template = {
         "name": entry["tool_name"],

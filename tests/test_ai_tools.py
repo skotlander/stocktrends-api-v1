@@ -372,6 +372,7 @@ def test_tool_pricing_fields_are_manifest_metadata_not_hardcoded_price_usd():
 
     serialized = json.dumps(result)
     assert "price_usd" not in serialized
+    assert '"usd_cost"' not in serialized
     for tool in result["tools"]:
         assert "estimated_usd_cost" in tool
         assert tool["pricing"]["estimated_usd_cost"] == tool["estimated_usd_cost"]
@@ -904,7 +905,8 @@ def test_service_positioning_present_in_ai_surfaces():
     context = ai_context()
     expected = "Autonomous portfolio intelligence API for AI agents"
     assert expected in result["service_description"]
-    assert expected in context["description"]
+    assert expected in context["service_description"]
+    assert "Weekly structured market intelligence dataset" in context["description"]
 
 
 def test_mpp_rail_metadata_still_present_for_paid_tools():

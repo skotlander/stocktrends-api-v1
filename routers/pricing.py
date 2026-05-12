@@ -8,17 +8,12 @@ from sqlalchemy import text
 
 from db import get_metering_engine
 from discovery.endpoint_metadata import iter_endpoint_metadata
+from discovery.service_meta import SERVICE_POSITIONING
 
 router = APIRouter(prefix="/pricing", tags=["pricing"])
 
 # Catalog schema version — increment when the shape of /catalog changes.
 _PRICING_CATALOG_VERSION = "2"
-_SERVICE_POSITIONING = (
-    "Autonomous portfolio intelligence API for AI agents. Provides market regime analysis, "
-    "Stock Trends signal intelligence, probabilistic forward-return modeling, stock selection, "
-    "portfolio construction, portfolio comparison, and symbol decision evaluation for 4-40 week "
-    "investment horizons. Built for agentic research workflows using x402 and MPP payment rails."
-)
 
 
 def _rails_by_pricing_rule_id() -> dict[str, list[str]]:
@@ -42,7 +37,7 @@ def _rails_by_pricing_rule_id() -> dict[str, list[str]]:
 def get_pricing():
     return {
         "version": "2",
-        "service_description": _SERVICE_POSITIONING,
+        "service_description": SERVICE_POSITIONING,
         "planning_role": {
             "purpose": "Explain how agents should identify themselves, choose a rail, and inspect costs before paid execution.",
             "recommended_sequence": [
@@ -321,7 +316,7 @@ def get_pricing_catalog(request: Request) -> JSONResponse:
             "request_id": getattr(request.state, "request_id", None),
             "planning_role": {
                 "purpose": "Concrete endpoint price map for agent budgeting before paid execution.",
-                "service_description": _SERVICE_POSITIONING,
+                "service_description": SERVICE_POSITIONING,
                 "unit": "STC",
                 "unit_description": (
                     "Stock Trends Credits. Current operational policy treats 1 STC as approximately 1 USD, "

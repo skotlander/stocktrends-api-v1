@@ -1,11 +1,18 @@
+import time
 from decimal import Decimal
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Response
 from sqlalchemy import text
 from db import get_engine, get_metering_engine
-from routers.workflows import WORKFLOW_REGISTRY, STC_TO_USD
-from discovery.endpoint_metadata import build_tool_template, iter_endpoint_metadata
+from routers.workflows import WORKFLOW_REGISTRY, STC_TO_USD, WORKFLOW_ID_EXAMPLES
+from discovery.endpoint_metadata import (
+    build_tool_template,
+    input_location_for_method,
+    iter_endpoint_metadata,
+    schema_to_parameters,
+)
+from discovery.service_meta import DATASET_DESCRIPTION, SERVICE_POSITIONING
 from pricing.classifier import classify_request as _classify_request, NON_METERED_PATHS
 from payments.policy_provider import (
     is_free_metered_path as _is_free_metered_path,
@@ -15,20 +22,6 @@ from payments.policy_provider import (
 )
 
 router = APIRouter(prefix="/ai", tags=["ai"])
-
-SERVICE_POSITIONING = (
-    "Autonomous portfolio intelligence API for AI agents. Provides market regime analysis, "
-    "Stock Trends signal intelligence, probabilistic forward-return modeling, stock selection, "
-    "portfolio construction, portfolio comparison, and symbol decision evaluation for 4-40 week "
-    "investment horizons. Built for agentic research workflows using x402 and MPP payment rails."
-)
-
-WORKFLOW_ID_EXAMPLES = [
-    "regime_analysis",
-    "symbol_decision",
-    "portfolio_build",
-    "portfolio_compare_review",
-]
 
 # ---------------------------------------------------------------------------
 # _MANIFEST_PUBLIC_PATHS mirrors ApiKeyMiddleware.public_paths for the paths
@@ -713,37 +706,8 @@ def _append_registry_tool_templates(templates: list[dict]) -> list[dict]:
 _TOOL_TEMPLATES = _append_registry_tool_templates(_TOOL_TEMPLATES)
 
 
-def _input_location_for_method(method: str) -> str:
-    return "query" if method.upper() in {"GET", "HEAD", "DELETE"} else "body"
-
-
-def _schema_to_parameters(schema: dict, location: str) -> list[dict]:
-    if not isinstance(schema, dict):
-        return []
-    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
-    required = set(schema.get("required") or [])
-    parameters = []
-    for name, prop_schema in properties.items():
-        param = {
-            "name": name,
-            "in": location,
-            "required": name in required,
-            "schema": prop_schema if isinstance(prop_schema, dict) else {},
-        }
-        if isinstance(prop_schema, dict):
-            if prop_schema.get("description"):
-                param["description"] = prop_schema["description"]
-            if "example" in prop_schema:
-                param["example"] = prop_schema["example"]
-        if location == "query":
-            param["style"] = "form"
-            param["explode"] = True
-        parameters.append(param)
-    return parameters
-
-
 def _with_input_location_metadata(tool: dict) -> dict:
-    location = tool.get("input_location") or _input_location_for_method(tool["method"])
+    location = tool.get("input_location") or input_location_for_method(tool["method"])
     schema = tool.get("input_schema")
     if not isinstance(schema, dict):
         schema = {"type": "object", "properties": {}, "required": []}
@@ -754,14 +718,19 @@ def _with_input_location_metadata(tool: dict) -> dict:
     tool["input_schema"] = schema
 
     if location == "query":
-        tool["parameters"] = tool.get("parameters") or _schema_to_parameters(schema, location)
+        tool["parameters"] = tool.get("parameters") or schema_to_parameters(schema, location)
         tool.pop("request_body_schema", None)
     else:
         tool["request_body_schema"] = tool.get("request_body_schema") or schema
     return tool
 
 
-def _fetch_pricing_cost_map() -> dict[str, Decimal]:
+_PRICING_COST_MAP_TTL_SECONDS = 30
+_pricing_cost_map_cache: dict[str, Decimal] | None = None
+_pricing_cost_map_cached_at = 0.0
+
+
+def _load_pricing_cost_map() -> dict[str, Decimal]:
     try:
         engine = get_metering_engine()
         with engine.begin() as conn:
@@ -786,6 +755,22 @@ def _fetch_pricing_cost_map() -> dict[str, Decimal]:
             continue
         if rule_name and cost is not None:
             cost_map[rule_name] = Decimal(str(cost))
+    return cost_map
+
+
+def _fetch_pricing_cost_map() -> dict[str, Decimal]:
+    global _pricing_cost_map_cache, _pricing_cost_map_cached_at
+
+    now = time.monotonic()
+    if (
+        _pricing_cost_map_cache is not None
+        and now - _pricing_cost_map_cached_at < _PRICING_COST_MAP_TTL_SECONDS
+    ):
+        return dict(_pricing_cost_map_cache)
+
+    cost_map = _load_pricing_cost_map()
+    _pricing_cost_map_cache = dict(cost_map)
+    _pricing_cost_map_cached_at = now
     return cost_map
 
 
@@ -875,8 +860,9 @@ def ai_context():
     return {
         "dataset": "Stock Trends Market Indicators",
         "provider": "Stock Trends Publications",
-        "description": SERVICE_POSITIONING,
-        "dataset_description": "Weekly structured market intelligence dataset covering North American equities and ETFs, including Stock Trends trend classification, trend persistence, trend maturity, relative strength, unusual volume signals, breadth, leadership, ST-IM (Stock Trends Inference Model) forward return distributions, market regime analytics, and deterministic decision/portfolio workflows.",
+        "description": DATASET_DESCRIPTION,
+        "service_description": SERVICE_POSITIONING,
+        "dataset_description": DATASET_DESCRIPTION,
         "discovery_entrypoints": {
             "primary_machine_readable": "/v1/ai/tools",
             "secondary_explanatory": "/v1/ai/context",

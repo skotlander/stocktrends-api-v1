@@ -2,7 +2,7 @@
   "version": "1.3",
   "name": "Stock Trends API Tools",
   "provider": "Stock Trends Publications",
-  "service_description": "Autonomous portfolio intelligence API for AI agents. Provides market regime analysis, Stock Trends signal intelligence, probabilistic forward-return modeling, stock selection, portfolio construction, portfolio comparison, and symbol decision evaluation for 4-40 week investment horizons. Built for agentic research workflows using x402 and MPP payment rails.",
+  "service_description": "Autonomous portfolio intelligence API for AI agents. Provides market regime analysis, Stock Trends signal intelligence, probabilistic forward-return modeling, stock selection, portfolio construction, portfolio comparison, and symbol decision evaluation for 4, 13, and 40 week investment horizons. Built for agentic research workflows using x402 and MPP payment rails.",
   "base_url": "https://api.stocktrends.com/v1",
   "openapi": "https://api.stocktrends.com/v1/openapi.json",
   "docs": "https://api.stocktrends.com/v1/docs",

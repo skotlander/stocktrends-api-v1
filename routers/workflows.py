@@ -470,7 +470,6 @@ def get_cost_estimate(
             "Workflow ID. Safe executable examples: regime_analysis, symbol_decision, "
             "portfolio_build, portfolio_compare_review. See GET /v1/workflows for details."
         ),
-        examples=WORKFLOW_ID_EXAMPLES,
         json_schema_extra={"enum": WORKFLOW_ID_EXAMPLES},
     ),
     quota_remaining: Optional[int] = Query(
