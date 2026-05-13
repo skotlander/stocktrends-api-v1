@@ -206,9 +206,9 @@ _CONTROL_PLANE_PAYLOAD = {
 class TestParseConfigPayload:
     def test_endpoint_policies_parsed(self):
         # The control-plane payload covers 2 endpoints. Gap-filling merges in the
-        # remaining hardcoded defaults for uncovered endpoints (19 more = 21 total).
+        # remaining hardcoded defaults for uncovered endpoints (21 more = 23 total).
         cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD)
-        assert len(cfg.endpoint_payment_policies) == 21
+        assert len(cfg.endpoint_payment_policies) == 23
 
     def test_allowed_rails_are_strings(self):
         cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD)
@@ -434,6 +434,17 @@ class TestGetAcceptedPaymentMethodsForPath:
             method="GET",
         )
         assert result == "subscription,x402,mpp"
+
+    def test_leadership_paid_endpoints_return_normalized_methods(self, monkeypatch):
+        import payments.policy_provider as pp
+        monkeypatch.setattr(pp, "get_runtime_payment_policy_config", lambda **kw: _default_policy_config())
+
+        for path, rule_id in (
+            ("/v1/leadership/summary/latest", "leadership_summary_latest_paid"),
+            ("/v1/leadership/rotation/history", "leadership_rotation_history_paid"),
+        ):
+            result = get_accepted_payment_methods_for_path(path, rule_id, method="GET")
+            assert result == "subscription,x402,mpp"
 
     def test_agent_screener_top_no_crypto(self, monkeypatch):
         import payments.policy_provider as pp
