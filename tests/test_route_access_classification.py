@@ -101,7 +101,7 @@ def public_helper_client(monkeypatch):
     "path",
     [
         "/v1/cost-estimate?workflow_id=portfolio_build",
-        "/v1/instruments/lookup?symbol=IBM",
+        "/v1/instruments/lookup?symbol=IBM&cs_only=true",
         "/v1/instruments/resolve?symbol_exchange=IBM-N",
         "/v1/stwr/reports/catalog",
         "/v1/meta/indicators",
@@ -111,6 +111,21 @@ def public_helper_client(monkeypatch):
     ],
 )
 def test_public_planning_helpers_return_200_without_api_key(public_helper_client, path):
+    response = public_helper_client.get(path)
+
+    assert response.status_code == 200
+    assert response.headers.get("x-stocktrends-payment-required") == "false"
+    assert "payment-required" not in response.headers
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/instruments/lookup?symbol=IBM&cs_only=true",
+        "/v1/cost-estimate?workflow_id=portfolio_build",
+    ],
+)
+def test_public_helper_bypass_uses_path_without_query_string(public_helper_client, path):
     response = public_helper_client.get(path)
 
     assert response.status_code == 200

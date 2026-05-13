@@ -976,6 +976,9 @@ def test_paid_leadership_not_in_public_allowlists():
     import main as main_module
 
     source = pathlib.Path("middleware/api_key.py").read_text(encoding="utf-8")
+    assert hasattr(main_module, "FREE_METERED_V1_PATHS")
+    assert isinstance(main_module.FREE_METERED_V1_PATHS, set)
+
     paid_paths = {
         "/v1/leadership/summary/latest",
         "/v1/leadership/rotation/history",
