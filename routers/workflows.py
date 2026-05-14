@@ -49,6 +49,12 @@ STC_TO_USD = Decimal("1.00")
 #   2. Add the entry below.
 #   3. Verify GET /v1/workflows response against GET /v1/pricing/catalog.
 # ---------------------------------------------------------------------------
+# NOTE: workflow analytical_role values (e.g. "market_context_workflow") describe
+# a multi-step research goal and form a distinct taxonomy from endpoint
+# analytical_role values (e.g. "market_regime_classifier") defined in
+# discovery/endpoint_metadata.py. Workflow roles end in "_workflow" by
+# convention to distinguish them from endpoint roles at the point of consumption.
+# ---------------------------------------------------------------------------
 WORKFLOW_REGISTRY: list[dict] = [
     {
         "workflow_id": "regime_analysis",
@@ -59,6 +65,11 @@ WORKFLOW_REGISTRY: list[dict] = [
         ),
         "tags": ["agent", "research", "regime"],
         "supported_rails": ["subscription", "x402", "mpp"],
+        "analytical_role": "market_context_workflow",
+        "research_goal": (
+            "Set portfolio bias from current and recent market regime data before "
+            "any symbol selection, screening, or portfolio construction."
+        ),
         "decision_guidance": (
             "Use when the agent needs market-level context before selecting bullish, bearish, "
             "or mixed symbol and portfolio workflows."
@@ -110,6 +121,11 @@ WORKFLOW_REGISTRY: list[dict] = [
         ),
         "tags": ["agent", "research", "decision"],
         "supported_rails": ["subscription", "x402", "mpp"],
+        "analytical_role": "symbol_evaluation_workflow",
+        "research_goal": (
+            "Evaluate a single resolved symbol with deterministic Stock Trends signal "
+            "and regime context before deeper history or portfolio calls."
+        ),
         "decision_guidance": (
             "Use when the agent has a target symbol and needs deterministic Stock Trends signal "
             "and regime context before deeper history or portfolio calls."
@@ -153,6 +169,11 @@ WORKFLOW_REGISTRY: list[dict] = [
         ),
         "tags": ["agent", "research", "stim", "forecast"],
         "supported_rails": ["subscription", "x402", "mpp"],
+        "analytical_role": "probabilistic_forecast_workflow",
+        "research_goal": (
+            "Interpret ST-IM forward return distributions for a resolved symbol relative to "
+            "base-period means, using /v1/meta/stim as the required interpretation reference."
+        ),
         "decision_guidance": (
             "Use when an agent needs to interpret ST-IM expected return distributions for "
             "one resolved symbol before making a ranking, review, or portfolio decision."
@@ -245,6 +266,11 @@ WORKFLOW_REGISTRY: list[dict] = [
         ),
         "tags": ["agent", "portfolio", "research"],
         "supported_rails": ["subscription", "x402", "mpp"],
+        "analytical_role": "portfolio_construction_workflow",
+        "research_goal": (
+            "Discover candidates via screener and produce a scored equal-weight portfolio proposal "
+            "that can be evaluated and compared against an existing allocation."
+        ),
         "decision_guidance": (
             "Use when the agent wants a fresh candidate list and a bounded equal-weight portfolio proposal."
         ),
@@ -295,6 +321,11 @@ WORKFLOW_REGISTRY: list[dict] = [
         ),
         "tags": ["agent", "portfolio"],
         "supported_rails": ["subscription", "x402", "mpp"],
+        "analytical_role": "portfolio_comparison_workflow",
+        "research_goal": (
+            "Quantify whether a proposed portfolio improves Stock Trends decision score and "
+            "regime alignment versus a baseline allocation."
+        ),
         "decision_guidance": (
             "Use when the agent needs to evaluate an existing allocation, construct an alternative, "
             "and compare both under the same Stock Trends decision framework."

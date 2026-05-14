@@ -381,6 +381,150 @@ def test_all_registry_endpoints_in_static_tools(manifest):
 
 
 # ---------------------------------------------------------------------------
+# Semantic fields — analytical_role
+# ---------------------------------------------------------------------------
+
+_EXPECTED_STATIC_ANALYTICAL_ROLES: dict[str, str] = {
+    # static tool name → expected analytical_role
+    "agent_screener_top": "market_intelligence_filter",
+    "market_regime_latest": "market_regime_classifier",
+    "market_regime_history": "market_regime_classifier",
+    "market_regime_forecast": "market_regime_classifier",
+    "breadth_sector_latest": "market_breadth_context",
+    "breadth_sector_history": "market_breadth_context",
+    "leadership_summary_latest": "leadership_intelligence",
+    "leadership_rotation_history": "leadership_intelligence",
+    "stim_latest": "probabilistic_forward_inference",
+    "stim_history": "probabilistic_forward_inference",
+    "selections_latest": "probabilistic_selection_universe",
+    "selections_history": "probabilistic_selection_universe",
+    "selections_published_latest": "probabilistic_selection_list",
+    "selections_published_history": "probabilistic_selection_list",
+    "evaluate_symbol": "symbol_decision_engine",
+    "construct_portfolio": "portfolio_construction_engine",
+    "evaluate_portfolio": "portfolio_evaluation_engine",
+    "compare_portfolios": "portfolio_evaluation_engine",
+    "indicators_latest": "symbol_signal_intelligence",
+    "indicators_history": "symbol_signal_intelligence",
+    "prices_latest": "price_context",
+    "prices_history": "price_context",
+    "stwr_reports_latest": "curated_signal_report",
+    "stwr_reports_history": "curated_signal_report",
+}
+
+
+def test_static_paid_tools_have_analytical_role(manifest):
+    """Paid tools in static/tools.json must carry an analytical_role field."""
+    missing = []
+    for name in _EXPECTED_STATIC_ANALYTICAL_ROLES:
+        tool = _tool_by_name(manifest, name)
+        assert tool is not None, f"Tool '{name}' must be present in static/tools.json"
+        if "analytical_role" not in tool:
+            missing.append(name)
+    assert not missing, f"These tools are missing analytical_role in static/tools.json: {missing}"
+
+
+def test_static_analytical_role_values_correct(manifest):
+    """analytical_role values in tools.json must match canonical expected mapping."""
+    violations = []
+    for name, expected_role in _EXPECTED_STATIC_ANALYTICAL_ROLES.items():
+        static_tool = _tool_by_name(manifest, name)
+        if static_tool is None:
+            continue
+        static_role = static_tool.get("analytical_role")
+        if static_role != expected_role:
+            violations.append(
+                f"{name}: got {static_role!r}, expected {expected_role!r}"
+            )
+    assert not violations, (
+        "analytical_role values incorrect in static/tools.json:\n"
+        + "\n".join(violations)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Semantic fields — interpretation_guidance drift (static vs live)
+# ---------------------------------------------------------------------------
+
+def test_static_regime_tools_have_interpretation_guidance(manifest):
+    """market_regime_latest and market_regime_history must carry interpretation_guidance in tools.json."""
+    for name in ("market_regime_latest", "market_regime_history"):
+        tool = _tool_by_name(manifest, name)
+        assert tool is not None, f"{name} must be present in static/tools.json"
+        assert "interpretation_guidance" in tool, (
+            f"{name} must have interpretation_guidance in static/tools.json"
+        )
+        guidance = tool["interpretation_guidance"]
+        assert "regime_score_scale" in guidance
+        assert guidance["regime_score_scale"]["formula"] == "bullish_pct - bearish_pct"
+        assert "interpretation_rules" in guidance
+
+
+def test_static_published_selections_have_interpretation_guidance(manifest):
+    """Published STIM Select tools must carry interpretation_guidance with operator-structured criteria."""
+    for name in ("selections_published_latest", "selections_published_history"):
+        tool = _tool_by_name(manifest, name)
+        assert tool is not None, f"{name} must be present in static/tools.json"
+        assert "interpretation_guidance" in tool, (
+            f"{name} must have interpretation_guidance in static/tools.json"
+        )
+        guidance = tool["interpretation_guidance"]
+        assert "publication_criteria" in guidance
+        criteria = guidance["publication_criteria"]
+        assert criteria["x13wk1"]["operator"] == ">"
+        assert criteria["x13wk1"]["threshold_pct"] == 2.19
+        assert criteria["prob13wk"]["operator"] == ">="
+        assert criteria["prob13wk"]["threshold"] == 0.55
+        assert criteria["all_criteria_required"] is True
+
+
+def test_static_regime_guidance_matches_live(manifest):
+    """Static regime interpretation_guidance must match live /v1/ai/tools for key fields."""
+    from routers.ai import ai_tools
+    live_tools = {t["name"]: t for t in ai_tools()["tools"]}
+
+    for name in ("market_regime_latest", "market_regime_history"):
+        static_tool = _tool_by_name(manifest, name)
+        assert static_tool is not None
+        live_tool = live_tools.get(name)
+        assert live_tool is not None, f"Live tool '{name}' not found in /v1/ai/tools"
+
+        static_guidance = static_tool.get("interpretation_guidance", {})
+        live_guidance = live_tool.get("interpretation_guidance", {})
+
+        assert static_guidance.get("regime_score_scale") == live_guidance.get("regime_score_scale"), (
+            f"{name}: static regime_score_scale does not match live"
+        )
+        assert static_guidance.get("interpretation_rules") == live_guidance.get("interpretation_rules"), (
+            f"{name}: static interpretation_rules does not match live"
+        )
+
+
+def test_static_stim_select_guidance_matches_live(manifest):
+    """Static STIM Select interpretation_guidance must match live /v1/ai/tools for key fields."""
+    from routers.ai import ai_tools
+    live_tools = {t["name"]: t for t in ai_tools()["tools"]}
+
+    for static_name, live_name in (
+        ("selections_published_latest", "selections_published_latest"),
+        ("selections_published_history", "selections_published_history"),
+    ):
+        static_tool = _tool_by_name(manifest, static_name)
+        assert static_tool is not None
+        live_tool = live_tools.get(live_name)
+        assert live_tool is not None, f"Live tool '{live_name}' not found in /v1/ai/tools"
+
+        static_criteria = static_tool.get("interpretation_guidance", {}).get("publication_criteria", {})
+        live_criteria = live_tool.get("interpretation_guidance", {}).get("publication_criteria", {})
+
+        for field in ("x4wk1", "x13wk1", "x40wk1", "prob13wk"):
+            assert static_criteria.get(field) == live_criteria.get(field), (
+                f"{static_name}: static publication_criteria[{field!r}] does not match live"
+            )
+        assert static_criteria.get("all_criteria_required") == live_criteria.get("all_criteria_required")
+
+
+# ---------------------------------------------------------------------------
 # 7. No hardcoded STC costs
 # ---------------------------------------------------------------------------
 

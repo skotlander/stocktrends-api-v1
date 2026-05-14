@@ -11,7 +11,7 @@ The developer portal (https://developer.stocktrends.com) is for onboarding, plan
 
 ## Overview
 
-The Stock Trends API is an Autonomous portfolio intelligence API for AI agents. Provides market regime analysis, Stock Trends signal intelligence, probabilistic forward-return modeling, stock selection, portfolio construction, portfolio comparison, and symbol decision evaluation for 4, 13, and 40 week investment horizons. Built for agentic research workflows using x402 and MPP payment rails.
+The Stock Trends API is an Autonomous portfolio intelligence API for AI agents. Agent-native probabilistic market intelligence infrastructure: ST-IM (Stock Trends Inference Model) forward-return distributions, market regime analysis, sector breadth confirmation, leadership rotation analytics, STIM Select probabilistic stock lists, portfolio construction and evaluation, and symbol decision scoring across 4, 13, and 40-week investment horizons. Built for agentic research workflows using x402 and MPP payment rails. Outputs are processed, ranked, and interpretation-ready — not raw price data.
 
 It is not investment advice and does not guarantee trading outcomes. Agents should present outputs as research context, not instructions to buy or sell securities.
 

@@ -14,6 +14,26 @@ from typing import Any
 
 SUPPORTED_RAILS = ["subscription", "x402", "mpp"]
 
+# ---------------------------------------------------------------------------
+# Canonical analytical role constants.
+# Endpoint roles describe WHAT an endpoint does analytically.
+# Workflow roles (in routers/workflows.py) end in "_workflow" and describe
+# a multi-step research goal — they are a distinct taxonomy.
+# ---------------------------------------------------------------------------
+ROLE_MARKET_INTELLIGENCE_FILTER = "market_intelligence_filter"
+ROLE_MARKET_REGIME_CLASSIFIER = "market_regime_classifier"
+ROLE_MARKET_BREADTH_CONTEXT = "market_breadth_context"
+ROLE_LEADERSHIP_INTELLIGENCE = "leadership_intelligence"
+ROLE_PROBABILISTIC_FORWARD_INFERENCE = "probabilistic_forward_inference"
+ROLE_PROBABILISTIC_SELECTION_LIST = "probabilistic_selection_list"
+ROLE_PROBABILISTIC_SELECTION_UNIVERSE = "probabilistic_selection_universe"
+ROLE_SYMBOL_SIGNAL_INTELLIGENCE = "symbol_signal_intelligence"
+ROLE_SYMBOL_DECISION_ENGINE = "symbol_decision_engine"
+ROLE_PORTFOLIO_CONSTRUCTION_ENGINE = "portfolio_construction_engine"
+ROLE_PORTFOLIO_EVALUATION_ENGINE = "portfolio_evaluation_engine"
+ROLE_CURATED_SIGNAL_REPORT = "curated_signal_report"
+ROLE_PRICE_CONTEXT = "price_context"
+
 EXCHANGE_ENUM = ["N", "Q", "A", "B", "T", "I"]
 US_EXCHANGE_ENUM = ["N", "Q", "A"]
 
@@ -110,6 +130,46 @@ STIM_REQUIRED_INTERPRETATION_STEPS = [
     "Disclose stale or fallback data when is_stale=true or missing_reason is present.",
 ]
 
+REGIME_INTERPRETATION_GUIDANCE = {
+    "regime_score_scale": {
+        "range": [-1.0, 1.0],
+        "formula": "bullish_pct - bearish_pct",
+        "strong_bullish": "> 0.5",
+        "mixed": "-0.1 to 0.1",
+        "strong_bearish": "< -0.5",
+    },
+    "interpretation_rules": [
+        "regime_score = bullish_pct minus bearish_pct across all active trend signals.",
+        "Do not use regime_score as a trade entry signal; use it as a portfolio bias input.",
+        "avg_rsi > 100 indicates the average universe security outperforms the S&P 500 benchmark.",
+        "avg_mt_cnt reveals whether the current regime is early-stage or mature.",
+        "Confirm with /v1/market/regime/history before acting on a single regime reading.",
+    ],
+    "downstream_workflow": (
+        "Use regime result to set bias in /v1/agent/screener/top or /v1/portfolio/construct. "
+        "Confirm with /v1/breadth/sector/latest and /v1/leadership/summary/latest."
+    ),
+    "confirmation_endpoints": ["/v1/breadth/sector/latest", "/v1/leadership/summary/latest"],
+}
+
+STIM_SELECT_INTERPRETATION_GUIDANCE = {
+    "publication_criteria": {
+        "x4wk1":    {"operator": ">",  "threshold_pct": 0.0,  "description": "4-week ST-IM lower CI bound must exceed base-period mean of 0%."},
+        "x13wk1":   {"operator": ">",  "threshold_pct": 2.19, "description": "13-week ST-IM lower CI bound must exceed base-period mean of 2.19%."},
+        "x40wk1":   {"operator": ">",  "threshold_pct": 6.45, "description": "40-week ST-IM lower CI bound must exceed base-period mean of 6.45%."},
+        "prob13wk": {"operator": ">=", "threshold": 0.55,     "description": "Probability of exceeding 13-week base-period mean must be at least 55%."},
+        "all_criteria_required": True,
+    },
+    "interpretation_rules": [
+        "All four publication criteria must be satisfied simultaneously.",
+        "prob13wk >= 0.55 is the documented publication threshold.",
+        "Rank by prob13wk descending; higher prob13wk means stronger 13-week outperformance probability.",
+        "These are probabilistic candidates, not guaranteed outcomes — not investment advice.",
+        "Use /v1/stim/latest on individual symbols to see full distribution context.",
+    ],
+    "base_period_context_endpoint": "/v1/meta/stim",
+}
+
 
 def _symbol_lookup_inputs() -> tuple[dict[str, Any], dict[str, Any]]:
     return (
@@ -167,6 +227,7 @@ def _metadata(
     supported_rails: list[str] | None = None,
     access_type: str = "paid",
     requires_payment: bool = True,
+    analytical_role: str | None = None,
     interpretation_dependency: dict[str, Any] | None = None,
     interpretation_guidance: dict[str, Any] | None = None,
     required_interpretation_steps: list[str] | None = None,
@@ -202,6 +263,8 @@ def _metadata(
         "next_recommended_calls": next_recommended_calls or [],
         "tags": tags or [category],
     }
+    if analytical_role is not None:
+        metadata["analytical_role"] = analytical_role
     if interpretation_dependency is not None:
         metadata["interpretation_dependency"] = copy.deepcopy(interpretation_dependency)
     if interpretation_guidance is not None:
@@ -269,6 +332,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             "min_rsi": {"type": "integer", "required": False, "safe_default": 100, "description": "RSI baseline is 100."},
             "exchange": {"type": "string", "required": False, "enum": EXCHANGE_ENUM},
         },
+        analytical_role=ROLE_MARKET_INTELLIGENCE_FILTER,
         notes=[
             "RSI is relative performance versus benchmark with baseline 100.",
             "Use the free /v1/ai/proof/market-edge endpoint for a synthetic signal structure example.",
@@ -334,6 +398,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             "mt_cnt measures broader trend-category maturity.",
             "rsi baseline is 100; values above 100 indicate outperformance versus benchmark.",
         ],
+        analytical_role=ROLE_SYMBOL_SIGNAL_INTELLIGENCE,
         related_endpoints=["/v1/indicators/history", "/v1/stim/latest", "/v1/selections/history"],
         next_recommended_calls=["/v1/indicators/history", "/v1/stim/latest"],
         tags=["indicators", "symbol", "signals"],
@@ -398,6 +463,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             "Use a bounded limit for agent workflows; 52 rows is a safe one-year context window.",
             "Rows are returned in ascending order for symbol-focused history.",
         ],
+        analytical_role=ROLE_SYMBOL_SIGNAL_INTELLIGENCE,
         related_endpoints=["/v1/indicators/latest", "/v1/stim/history", "/v1/prices/history"],
         next_recommended_calls=["/v1/stim/history", "/v1/decision/evaluate-symbol"],
         tags=["indicators", "history", "signals"],
@@ -439,6 +505,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             "Compare ST-IM means to base_period_mean_returns_pct; positive raw means alone are not sufficient.",
             "If is_stale=true or missing_reason is present, disclose that the ST-IM result is a historical fallback.",
         ],
+        analytical_role=ROLE_PROBABILISTIC_FORWARD_INFERENCE,
         related_endpoints=["/v1/meta/stim", "/v1/indicators/latest", "/v1/stim/history", "/v1/selections/published/latest"],
         next_recommended_calls=["/v1/meta/stim", "/v1/decision/evaluate-symbol", "/v1/portfolio/construct"],
         interpretation_dependency=STIM_INTERPRETATION_DEPENDENCY,
@@ -473,6 +540,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             "Compare ST-IM means to base_period_mean_returns_pct; positive raw means alone are not sufficient.",
             "If is_stale=true or missing_reason is present, disclose that the ST-IM result is a historical fallback.",
         ],
+        analytical_role=ROLE_PROBABILISTIC_FORWARD_INFERENCE,
         related_endpoints=["/v1/meta/stim", "/v1/stim/latest", "/v1/indicators/history"],
         next_recommended_calls=["/v1/meta/stim", "/v1/indicators/history", "/v1/decision/evaluate-symbol"],
         interpretation_dependency=STIM_INTERPRETATION_DEPENDENCY,
@@ -498,6 +566,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "symbol_exchange", "weekdate", "exchange", "symbol", "type", "currency_code", "price", "adj_close", "pr_week_hi", "pr_week_lo", "volume", "trades", "split_fact", "pr_change"],
         example_object={"request_id": "req_demo", "symbol_exchange": "SAMPLE-N", "weekdate": "YYYY-MM-DD", "price": 0.0, "volume": 0, "pr_change": 0.0},
         output_summary="Latest weekly price, adjusted close, high/low, volume, trades, split factor, and price change.",
+        analytical_role=ROLE_PRICE_CONTEXT,
         notes=["Stock Trends is not a raw price system; use prices as context for signal interpretation."],
         related_endpoints=["/v1/indicators/latest", "/v1/prices/history"],
         next_recommended_calls=["/v1/indicators/latest", "/v1/stim/latest"],
@@ -521,6 +590,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "symbol_exchange", "cs_only", "start", "end", "count", "data[].weekdate", "data[].symbol_exchange", "data[].price", "data[].adj_close", "data[].volume", "data[].pr_change"],
         example_object={"request_id": "req_demo", "symbol_exchange": "SAMPLE-N", "count": 1, "data": [{"weekdate": "YYYY-MM-DD", "price": 0.0, "volume": 0}]},
         output_summary="Weekly price history for one symbol.",
+        analytical_role=ROLE_PRICE_CONTEXT,
         notes=["Use a bounded limit for autonomous workflows."],
         related_endpoints=["/v1/prices/latest", "/v1/indicators/history"],
         next_recommended_calls=["/v1/indicators/history"],
@@ -549,6 +619,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "weekdate", "exchange", "min_prob13wk", "include_data", "include_mast", "cs_only", "count", "data[].weekdate", "data[].exchange", "data[].symbol", "data[].prob13wk", "data[].symbol_exchange"],
         example_object={"request_id": "req_demo", "weekdate": "YYYY-MM-DD", "count": 1, "data": [{"symbol_exchange": "SAMPLE-N", "prob13wk": 0.0}]},
         output_summary="Latest base st_select list ranked by prob13wk descending.",
+        analytical_role=ROLE_PROBABILISTIC_SELECTION_UNIVERSE,
         notes=[
             "No published threshold filter is applied unless min_prob13wk is set.",
             "Use /v1/selections/published/latest for the documented three-horizon published STIM Select definition.",
@@ -584,6 +655,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "symbol", "exchange", "symbol_exchange", "start", "end", "min_prob13wk", "include_data", "include_mast", "cs_only", "count", "data[].weekdate", "data[].prob13wk", "data[].symbol_exchange"],
         example_object={"request_id": "req_demo", "symbol_exchange": "SAMPLE-N", "count": 1, "data": [{"weekdate": "YYYY-MM-DD", "symbol_exchange": "SAMPLE-N", "prob13wk": 0.0}]},
         output_summary="Historical base st_select records with prob13wk.",
+        analytical_role=ROLE_PROBABILISTIC_SELECTION_UNIVERSE,
         notes=["Use published selection endpoints for the documented three-horizon STIM Select definition."],
         related_endpoints=["/v1/selections/latest", "/v1/selections/published/history"],
         next_recommended_calls=["/v1/selections/published/history"],
@@ -619,14 +691,16 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         },
         safe_example_request={"method": "GET", "path": "/v1/selections/published/latest", "query": {"limit": 25}},
         response_shape=["request_id", "weekdate", "exchange", "min_prob13wk", "min_x4wk1", "min_x13wk1", "min_x40wk1", "count", "data[].symbol_exchange", "data[].prob13wk", "data[].x4wk1", "data[].x13wk1", "data[].x40wk1"],
-        example_object={"request_id": "req_demo", "weekdate": "YYYY-MM-DD", "count": 1, "data": [{"symbol_exchange": "SAMPLE-N", "prob13wk": 0.0, "x4wk1": 0.0, "x13wk1": 2.19, "x40wk1": 6.45}]},
+        example_object={"request_id": "req_demo", "weekdate": "YYYY-MM-DD", "count": 1, "data": [{"symbol_exchange": "SAMPLE-N", "prob13wk": 0.67, "x4wk1": 1.2, "x13wk1": 3.45, "x40wk1": 8.12}]},
         output_summary="Latest published STIM Select records satisfying three-horizon ST-IM criteria.",
+        analytical_role=ROLE_PROBABILISTIC_SELECTION_LIST,
         notes=[
             "Published STIM Select requires x4wk1 > 0%, x13wk1 > 2.19%, x40wk1 > 6.45%, and prob13wk >= 55% by default.",
             "prob13wk is the probability of exceeding the 13-week base-period mean return of 2.19%, assuming normal distribution.",
         ],
         related_endpoints=["/v1/selections/latest", "/v1/selections/published/history", "/v1/stim/latest"],
         next_recommended_calls=["/v1/indicators/latest", "/v1/stim/latest"],
+        interpretation_guidance=STIM_SELECT_INTERPRETATION_GUIDANCE,
     ),
     "/v1/selections/published/history": _metadata(
         path="/v1/selections/published/history",
@@ -657,11 +731,13 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         },
         safe_example_request={"method": "GET", "path": "/v1/selections/published/history", "query": {"symbol_exchange": "IBM-N", "limit": 52}},
         response_shape=["request_id", "symbol", "exchange", "symbol_exchange", "start", "end", "min_prob13wk", "min_x4wk1", "min_x13wk1", "min_x40wk1", "count", "data[].symbol_exchange", "data[].prob13wk", "data[].x4wk1", "data[].x13wk1", "data[].x40wk1"],
-        example_object={"request_id": "req_demo", "symbol_exchange": "SAMPLE-N", "count": 1, "data": [{"weekdate": "YYYY-MM-DD", "prob13wk": 0.0, "x13wk1": 2.19}]},
+        example_object={"request_id": "req_demo", "symbol_exchange": "SAMPLE-N", "count": 1, "data": [{"weekdate": "YYYY-MM-DD", "prob13wk": 0.67, "x13wk1": 3.45}]},
         output_summary="Historical published STIM Select records.",
+        analytical_role=ROLE_PROBABILISTIC_SELECTION_LIST,
         notes=["Use date filters and limits to keep autonomous workflows bounded."],
         related_endpoints=["/v1/selections/published/latest", "/v1/selections/history"],
         next_recommended_calls=["/v1/stim/history", "/v1/indicators/history"],
+        interpretation_guidance=STIM_SELECT_INTERPRETATION_GUIDANCE,
     ),
     "/v1/market/regime/latest": _metadata(
         path="/v1/market/regime/latest",
@@ -679,9 +755,11 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["regime", "confidence", "regime_score", "bullish_pct", "bearish_pct", "avg_rsi", "avg_mt_cnt", "weekdate", "signal_count"],
         example_object={"regime": "mixed", "confidence": 0.0, "regime_score": 0.0, "weekdate": "YYYY-MM-DD"},
         output_summary="Current regime classification and aggregate signal distribution.",
+        analytical_role=ROLE_MARKET_REGIME_CLASSIFIER,
         notes=["Bullish codes: ^+, ^-, v^. Bearish codes: v-, v+, ^v."],
         related_endpoints=["/v1/market/regime/history", "/v1/market/regime/forecast"],
         next_recommended_calls=["/v1/market/regime/forecast", "/v1/decision/evaluate-symbol"],
+        interpretation_guidance=REGIME_INTERPRETATION_GUIDANCE,
     ),
     "/v1/market/regime/history": _metadata(
         path="/v1/market/regime/history",
@@ -700,9 +778,11 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["history[].weekdate", "history[].regime", "history[].confidence", "history[].regime_score", "history[].bullish_pct", "history[].bearish_pct", "history[].avg_rsi", "history[].avg_mt_cnt", "history[].signal_count", "count", "limit", "start_date"],
         example_object={"count": 1, "history": [{"weekdate": "YYYY-MM-DD", "regime": "mixed", "regime_score": 0.0}]},
         output_summary="Recent weekly market regime sequence.",
+        analytical_role=ROLE_MARKET_REGIME_CLASSIFIER,
         notes=["Each row uses the same classification logic as /v1/market/regime/latest."],
         related_endpoints=["/v1/market/regime/latest", "/v1/market/regime/forecast"],
         next_recommended_calls=["/v1/market/regime/forecast"],
+        interpretation_guidance=REGIME_INTERPRETATION_GUIDANCE,
     ),
     "/v1/market/regime/forecast": _metadata(
         path="/v1/market/regime/forecast",
@@ -721,6 +801,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["forecast_regime", "forecast_confidence", "current_regime", "current_regime_score", "recent_direction", "regime_consistency", "projected_regime_score", "avg_weekly_score_delta", "recent_scores", "weeks_analyzed", "lookback", "weekdate"],
         example_object={"forecast_regime": "mixed", "forecast_confidence": 0.0, "recent_direction": "stable"},
         output_summary="Deterministic regime outlook and confidence fields.",
+        analytical_role=ROLE_MARKET_REGIME_CLASSIFIER,
         notes=["No ML is used; output is deterministic from recent regime scores."],
         related_endpoints=["/v1/market/regime/latest", "/v1/market/regime/history"],
         next_recommended_calls=["/v1/decision/evaluate-symbol", "/v1/portfolio/construct"],
@@ -744,6 +825,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "symbol", "exchange", "weekdate", "bias", "confidence", "decision_score", "alignment", "symbol_context.trend", "symbol_context.trend_cnt", "symbol_context.mt_cnt", "symbol_context.rsi", "symbol_context.rsi_updn", "symbol_context.vol_tag", "symbol_context.symbol_bias", "regime_context.current_regime", "regime_context.regime_score", "signal_notes"],
         example_object={"request_id": "req_demo", "symbol_exchange": "SAMPLE-N", "bias": "hold", "confidence": 0.0, "decision_score": 0.0},
         output_summary="Deterministic symbol decision with Stock Trends signal and regime context.",
+        analytical_role=ROLE_SYMBOL_DECISION_ENGINE,
         notes=["Fully deterministic; no ML."],
         related_endpoints=["/v1/market/regime/latest", "/v1/indicators/latest", "/v1/stim/latest"],
         next_recommended_calls=["/v1/portfolio/evaluate", "/v1/portfolio/construct"],
@@ -792,6 +874,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         ],
         example_object={"request_id": "req_demo", "count": 1, "portfolio": [{"rank": 1, "symbol_exchange": "SAMPLE-N", "weight": 1.0, "decision_score": 0.0}]},
         output_summary="Constructed equal-weight portfolio with signal, decision, ST-IM tiebreaker, and regime fields.",
+        analytical_role=ROLE_PORTFOLIO_CONSTRUCTION_ENGINE,
         notes=["Primary ranking is decision_score descending; ST-IM 13-week risk-adjusted return is a tiebreaker when available."],
         related_endpoints=["/v1/agent/screener/top", "/v1/portfolio/evaluate", "/v1/portfolio/compare"],
         next_recommended_calls=["/v1/portfolio/evaluate", "/v1/portfolio/compare"],
@@ -813,6 +896,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "weekdate", "positions[].symbol_exchange", "positions[].weight", "positions[].trend", "positions[].decision_score", "positions_found", "positions_missing", "effective_weight", "portfolio_score", "portfolio_bias", "portfolio_confidence", "portfolio_alignment", "regime_context.current_regime", "evaluation_notes"],
         example_object={"request_id": "req_demo", "positions_found": 1, "portfolio_score": 0.0, "positions": [{"symbol_exchange": "SAMPLE-N", "found": True}]},
         output_summary="Portfolio-level and position-level Stock Trends evaluation.",
+        analytical_role=ROLE_PORTFOLIO_EVALUATION_ENGINE,
         notes=["Missing symbols are included with found=false and excluded from aggregates."],
         related_endpoints=["/v1/portfolio/construct", "/v1/portfolio/compare"],
         next_recommended_calls=["/v1/portfolio/compare"],
@@ -847,6 +931,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "weekdate", "left.positions[].symbol_exchange", "left.portfolio_score", "right.positions[].symbol_exchange", "right.portfolio_score", "comparison.winner", "comparison.score_delta", "comparison.alignment_advantage", "comparison.overlap_count", "regime_context.current_regime", "comparison_notes"],
         example_object={"request_id": "req_demo", "comparison": {"winner": "right", "score_delta": 0.0}},
         output_summary="Side-by-side portfolio evaluations and comparison metrics.",
+        analytical_role=ROLE_PORTFOLIO_EVALUATION_ENGINE,
         notes=["Use after constructing a proposed alternative or reviewing a user-supplied allocation."],
         related_endpoints=["/v1/portfolio/evaluate", "/v1/portfolio/construct"],
         next_recommended_calls=["/v1/portfolio/evaluate"],
@@ -882,6 +967,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "rpt", "name", "exchange", "weekdate", "count", "data[].symbol_exchange", "data[].trend", "data[].trend_cnt", "data[].mt_cnt", "data[].rsi", "data[].vol_tag", "note"],
         example_object={"request_id": "req_demo", "rpt": "bullcross", "exchange": "N", "count": 1, "data": [{"symbol_exchange": "SAMPLE-N", "trend": "v^"}]},
         output_summary="Latest named STWR report rows.",
+        analytical_role=ROLE_CURATED_SIGNAL_REPORT,
         notes=["Use /v1/stwr/reports/catalog to discover valid report codes before paying for a report."],
         related_endpoints=["/v1/stwr/reports/catalog", "/v1/stwr/reports/history"],
         next_recommended_calls=["/v1/indicators/latest", "/v1/stim/latest"],
@@ -919,6 +1005,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "rpt", "name", "exchange", "start", "end", "week_count", "count", "weeks[].weekdate", "weeks[].count", "weeks[].data[].symbol_exchange", "note"],
         example_object={"request_id": "req_demo", "rpt": "bullcross", "exchange": "N", "week_count": 1, "weeks": [{"weekdate": "YYYY-MM-DD", "count": 1, "data": [{"symbol_exchange": "SAMPLE-N"}]}]},
         output_summary="Historical STWR report rows, grouped by week by default.",
+        analytical_role=ROLE_CURATED_SIGNAL_REPORT,
         notes=["Use bounded date ranges or limits for autonomous workflows."],
         related_endpoints=["/v1/stwr/reports/latest", "/v1/indicators/history"],
         next_recommended_calls=["/v1/indicators/history"],
@@ -950,6 +1037,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "group_level", "exchange", "weekdate", "cs_only", "include_unknown", "count", "data[].sector_code", "data[].sector_name", "data[].industry_group_code", "data[].industry_group_name", "data[].industry_code", "data[].industry_name", "data[].bullish_count", "data[].bearish_count", "data[].bullish_pct", "data[].bearish_pct", "data[].avg_rsi", "data[].avg_mt_cnt", "data[].net_breadth"],
         example_object={"request_id": "req_demo", "group_level": "sector", "weekdate": "YYYY-MM-DD", "count": 1, "data": [{"sector_code": "SAMPLE", "sector_name": "Sample Sector", "bullish_count": 0, "bearish_count": 0, "bullish_pct": 0.0, "bearish_pct": 0.0, "avg_rsi": 100, "net_breadth": 0}]},
         output_summary="Latest breadth groups and current signal distribution metrics.",
+        analytical_role=ROLE_MARKET_BREADTH_CONTEXT,
         notes=["Use /v1/breadth/sector/history when trend analysis over multiple weeks is needed."],
         related_endpoints=["/v1/breadth/sector/history", "/v1/market/regime/latest"],
         next_recommended_calls=["/v1/market/regime/latest", "/v1/leadership/summary/latest"],
@@ -980,6 +1068,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "group_level", "exchange", "start", "end", "cs_only", "include_unknown", "week_count", "count", "weeks[].weekdate", "weeks[].data[].bullish_count", "weeks[].data[].bearish_count", "weeks[].data[].avg_rsi", "note"],
         example_object={"request_id": "req_demo", "group_level": "sector", "week_count": 1, "weeks": [{"weekdate": "YYYY-MM-DD", "count": 1, "data": [{"group_name": "Sample Sector", "bullish_count": 0, "bearish_count": 0, "avg_rsi": 100}]}]},
         output_summary="Historical breadth groups and weekly signal distribution metrics.",
+        analytical_role=ROLE_MARKET_BREADTH_CONTEXT,
         notes=["Use /v1/breadth/sector/latest for the current breadth snapshot before requesting multi-week history."],
         related_endpoints=["/v1/breadth/sector/latest", "/v1/market/regime/history"],
         next_recommended_calls=["/v1/market/regime/latest", "/v1/leadership/summary/latest"],
@@ -1135,6 +1224,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             "Latest leadership groups with overall, sector, and industry-group leaders ranked by "
             "Stock Trends RSI and trend-category maturity filters."
         ),
+        analytical_role=ROLE_LEADERSHIP_INTELLIGENCE,
         notes=[
             "RSI baseline is 100; values above 100 indicate outperformance versus benchmark.",
             "Use with /v1/breadth/sector/latest and /v1/market/regime/latest for context before symbol-level calls.",
@@ -1241,6 +1331,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             "Historical sector leadership rotation with bullish share, average RSI, "
             "trend maturity, leadership_score, and weekly rank."
         ),
+        analytical_role=ROLE_LEADERSHIP_INTELLIGENCE,
         notes=[
             "RSI baseline is 100; values above 100 indicate outperformance versus benchmark.",
             "Use bounded date ranges for autonomous workflows.",
@@ -1342,7 +1433,7 @@ def build_endpoint_preview(
             "cost_source": "/v1/pricing/catalog",
         },
     }
-    for field in ("interpretation_dependency", "interpretation_guidance", "required_interpretation_steps"):
+    for field in ("analytical_role", "interpretation_dependency", "interpretation_guidance", "required_interpretation_steps"):
         if field in entry:
             preview[field] = copy.deepcopy(entry[field])
     return preview
@@ -1508,7 +1599,7 @@ def build_tool_template(path: str) -> dict[str, Any] | None:
         "related_endpoints": copy.deepcopy(entry.get("related_endpoints", [])),
         "next_recommended_calls": copy.deepcopy(entry.get("next_recommended_calls", [])),
     }
-    for field in ("interpretation_dependency", "interpretation_guidance", "required_interpretation_steps"):
+    for field in ("analytical_role", "interpretation_dependency", "interpretation_guidance", "required_interpretation_steps"):
         if field in entry:
             template[field] = copy.deepcopy(entry[field])
     if input_location == "query":
