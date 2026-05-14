@@ -145,6 +145,98 @@ WORKFLOW_REGISTRY: list[dict] = [
         ],
     },
     {
+        "workflow_id": "stim_forecast_review",
+        "name": "ST-IM Forecast Review",
+        "description": (
+            "Review ST-IM forward-return expectations for one symbol across the 4, 13, "
+            "and 40 week horizons, with indicator and price context."
+        ),
+        "tags": ["agent", "research", "stim", "forecast"],
+        "supported_rails": ["subscription", "x402", "mpp"],
+        "decision_guidance": (
+            "Use when an agent needs to interpret ST-IM expected return distributions for "
+            "one resolved symbol before making a ranking, review, or portfolio decision."
+        ),
+        "best_for": "Single-symbol probabilistic forward-return review.",
+        "agent_goal_examples": [
+            "Review IBM-N ST-IM expectations across 4, 13, and 40 week horizons.",
+            "Estimate whether a symbol's ST-IM mean returns exceed base-period means with adequate probability.",
+        ],
+        "symbol_selection_guidance": (
+            "Use symbol_exchange directly when known. If only a ticker is known, first call "
+            "/v1/instruments/lookup or /v1/instruments/resolve and reuse the returned symbol_exchange."
+        ),
+        "interpretation_guidance": (
+            "/v1/meta/stim must be consulted before interpreting ST-IM results. Raw "
+            "x4wk/x13wk/x40wk means are not sufficient alone; compare them to "
+            "base_period_mean_returns_pct and use x4wksd/x13wksd/x40wksd to estimate "
+            "the probability of exceeding base means. STIM Select-style logic should "
+            "emphasize 13-week probability of exceeding the base mean >= 55% and lower "
+            "confidence bounds relative to base-period means where applicable."
+        ),
+        "required_interpretation_steps": [
+            "Call GET /v1/meta/stim before interpreting ST-IM results.",
+            "Compare x4wk, x13wk, and x40wk to base_period_mean_returns_pct.",
+            "Use x4wksd, x13wksd, and x40wksd to estimate probability of exceeding base means.",
+            "Disclose stale or fallback data when is_stale=true or missing_reason is present.",
+        ],
+        "next_step_guidance": [
+            "Use /v1/decision/evaluate-symbol after interpreting ST-IM probability context.",
+            "Use /v1/portfolio/evaluate when reviewing the symbol inside an existing allocation.",
+        ],
+        "steps": [
+            {
+                "step_id": "meta_stim",
+                "endpoint": "GET /v1/meta/stim",
+                "pricing_rule_id": None,
+                "description": "Retrieve ST-IM field definitions and base-period mean returns before interpretation.",
+                "optional": False,
+            },
+            {
+                "step_id": "stim_latest",
+                "endpoint": "GET /v1/stim/latest",
+                "pricing_rule_id": "stim_latest_paid",
+                "description": "Retrieve latest ST-IM forward return distributions for IBM-N or another resolved symbol.",
+                "optional": False,
+            },
+            {
+                "step_id": "indicators_latest",
+                "endpoint": "GET /v1/indicators/latest",
+                "pricing_rule_id": "indicators_latest_paid",
+                "description": "Retrieve latest Stock Trends indicator context for the same symbol.",
+                "optional": False,
+            },
+            {
+                "step_id": "prices_latest",
+                "endpoint": "GET /v1/prices/latest",
+                "pricing_rule_id": "prices_latest_paid",
+                "description": "Retrieve latest weekly price context for the same symbol.",
+                "optional": False,
+            },
+            {
+                "step_id": "stim_history",
+                "endpoint": "GET /v1/stim/history",
+                "pricing_rule_id": "stim_history_paid",
+                "description": "Optionally retrieve bounded historical ST-IM distributions using query metadata.",
+                "optional": True,
+            },
+            {
+                "step_id": "indicators_history",
+                "endpoint": "GET /v1/indicators/history",
+                "pricing_rule_id": "indicators_history_paid",
+                "description": "Optionally retrieve bounded historical indicator context using query metadata.",
+                "optional": True,
+            },
+            {
+                "step_id": "prices_history",
+                "endpoint": "GET /v1/prices/history",
+                "pricing_rule_id": "prices_history_paid",
+                "description": "Optionally retrieve bounded historical price context using query metadata.",
+                "optional": True,
+            },
+        ],
+    },
+    {
         "workflow_id": "portfolio_build",
         "name": "Screener → Portfolio Build",
         "description": (
@@ -250,6 +342,7 @@ WORKFLOW_REGISTRY: list[dict] = [
 WORKFLOW_ID_EXAMPLES = [
     "regime_analysis",
     "symbol_decision",
+    "stim_forecast_review",
     "portfolio_build",
     "portfolio_compare_review",
 ]
@@ -272,6 +365,7 @@ def _collect_registry_rule_ids() -> set[str]:
         step["pricing_rule_id"]
         for workflow in WORKFLOW_REGISTRY
         for step in workflow["steps"]
+        if step.get("pricing_rule_id")
     }
 
 
@@ -313,12 +407,24 @@ def _resolve_workflow_costs(
     steps = []
     total = 0.0
     for step in workflow["steps"]:
-        rule_id = step["pricing_rule_id"]
-        if rule_id not in cost_map:
-            raise KeyError(rule_id)
-        stc_cost = cost_map[rule_id]
+        rule_id = step.get("pricing_rule_id")
         method, path = _split_endpoint(step["endpoint"])
         endpoint_metadata = get_endpoint_metadata(path, method) or {}
+        if rule_id:
+            if rule_id not in cost_map:
+                raise KeyError(rule_id)
+            stc_cost = cost_map[rule_id]
+            pricing_note = "STC is the source of truth; payment rails translate this STC cost."
+        else:
+            stc_cost = 0.0
+            pricing_note = "Public non-metered planning helper; no STC charge applies."
+
+        safe_example_request = endpoint_metadata.get("safe_example_request")
+        if safe_example_request is None:
+            safe_example_request = {"method": method, "path": path}
+            if method == "GET":
+                safe_example_request["query"] = {}
+
         steps.append(
             {
                 "step_id": step["step_id"],
@@ -328,14 +434,14 @@ def _resolve_workflow_costs(
                 "pricing_rule_id": rule_id,
                 "stc_cost": stc_cost,
                 "estimated_usd_cost": float(Decimal(str(stc_cost)) * STC_TO_USD),
-                "supported_rails": endpoint_metadata.get("supported_rails", workflow.get("supported_rails", [])),
-                "pricing_note": "STC is the source of truth; payment rails translate this STC cost.",
+                "supported_rails": endpoint_metadata.get("supported_rails", workflow.get("supported_rails", [])) if rule_id else [],
+                "pricing_note": pricing_note,
                 "description": step["description"],
                 "purpose": endpoint_metadata.get("purpose", step["description"]),
                 "workflow_role": endpoint_metadata.get("workflow_role"),
                 "required_inputs": endpoint_metadata.get("required_inputs", {}),
                 "optional_inputs": endpoint_metadata.get("optional_inputs", {}),
-                "safe_example_request": endpoint_metadata.get("safe_example_request"),
+                "safe_example_request": safe_example_request,
                 "output_summary": endpoint_metadata.get("output_summary"),
                 "related_endpoints": endpoint_metadata.get("related_endpoints", []),
                 "optional": step["optional"],
@@ -410,6 +516,8 @@ def get_workflows() -> JSONResponse:
             "best_for": w.get("best_for"),
             "agent_goal_examples": w.get("agent_goal_examples", []),
             "symbol_selection_guidance": w.get("symbol_selection_guidance"),
+            "interpretation_guidance": w.get("interpretation_guidance"),
+            "required_interpretation_steps": w.get("required_interpretation_steps", []),
             "next_step_guidance": w.get("next_step_guidance", []),
             "steps": steps,
         }
@@ -468,7 +576,8 @@ def get_cost_estimate(
         ...,
         description=(
             "Workflow ID. Safe executable examples: regime_analysis, symbol_decision, "
-            "portfolio_build, portfolio_compare_review. See GET /v1/workflows for details."
+            "stim_forecast_review, portfolio_build, portfolio_compare_review. "
+            "See GET /v1/workflows for details."
         ),
         json_schema_extra={"enum": WORKFLOW_ID_EXAMPLES},
     ),
@@ -539,30 +648,36 @@ def get_cost_estimate(
         )
 
     # --- Rail assignment ---
-    step_count = len(steps_base)
+    paid_step_indices = [idx for idx, step in enumerate(steps_base) if step.get("pricing_rule_id")]
+    paid_step_count = len(paid_step_indices)
     notes: list[str] = []
 
+    assigned_rails = ["none"] * len(steps_base)
     if effective_rail_pref == "subscription":
-        assigned_rails = ["subscription"] * step_count
+        for idx in paid_step_indices:
+            assigned_rails[idx] = "subscription"
 
     elif effective_rail_pref in {"x402", "mpp"}:
-        assigned_rails = [effective_rail_pref] * step_count
+        for idx in paid_step_indices:
+            assigned_rails[idx] = effective_rail_pref
         if quota_remaining is not None:
             notes.append(
                 "quota_remaining was supplied but ignored; "
-                f"all steps assigned to {effective_rail_pref} per rail_preference"
+                f"all paid steps assigned to {effective_rail_pref} per rail_preference"
             )
 
     else:  # "auto"
         if quota_remaining is not None:
-            n_sub = min(quota_remaining, step_count)
-            assigned_rails = ["subscription"] * n_sub + ["x402"] * (step_count - n_sub)
+            n_sub = min(quota_remaining, paid_step_count)
+            for paid_order, idx in enumerate(paid_step_indices):
+                assigned_rails[idx] = "subscription" if paid_order < n_sub else "x402"
             notes.append(
                 "quota_remaining is caller-supplied; subscription assignment is illustrative "
                 "and may not reflect actual quota state"
             )
         else:
-            assigned_rails = ["subscription"] * step_count
+            for idx in paid_step_indices:
+                assigned_rails[idx] = "subscription"
             notes.append(
                 "quota_remaining not supplied; subscription assignment is illustrative "
                 "and may not reflect actual quota state"
@@ -576,7 +691,10 @@ def get_cost_estimate(
 
     for step, assigned_rail in zip(steps_base, assigned_rails):
         stc_cost = Decimal(str(step["stc_cost"]))
-        if assigned_rail == "subscription":
+        if assigned_rail == "none":
+            usd_cost = Decimal("0.00")
+            quota_impact = 0
+        elif assigned_rail == "subscription":
             usd_cost = Decimal("0.00")
             quota_impact = 1
             subscription_step_count += 1
@@ -603,13 +721,15 @@ def get_cost_estimate(
         )
 
     # --- Resolve top-level rail label ---
-    rails_used = {s["assigned_rail"] for s in steps_out}
+    rails_used = {s["assigned_rail"] for s in steps_out if s["assigned_rail"] != "none"}
     if rails_used == {"subscription"}:
         resolved_rail = "subscription"
     elif rails_used == {"x402"}:
         resolved_rail = "x402"
     elif rails_used == {"mpp"}:
         resolved_rail = "mpp"
+    elif not rails_used:
+        resolved_rail = "none"
     else:
         resolved_rail = "mixed"
 
@@ -619,7 +739,7 @@ def get_cost_estimate(
     # Using subscription_step_count would collapse to 0 when quota_remaining=0
     # (all steps routed to x402), producing the wrong result 0 >= 0 = True.
     if quota_remaining is not None:
-        quota_sufficient: Optional[bool] = quota_remaining >= step_count
+        quota_sufficient: Optional[bool] = quota_remaining >= paid_step_count
     else:
         quota_sufficient = None
 

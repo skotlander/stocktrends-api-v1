@@ -115,9 +115,59 @@ def test_cost_estimate_workflow_id_openapi_parameter_is_valid(client):
     assert workflow_id["schema"]["enum"] == [
         "regime_analysis",
         "symbol_decision",
+        "stim_forecast_review",
         "portfolio_build",
         "portfolio_compare_review",
     ]
+
+
+def test_openapi_and_ai_tools_agree_on_target_get_parameter_locations(client):
+    response = client.get("/v1/openapi.json")
+    assert response.status_code == 200
+    openapi = response.json()
+
+    tools_response = client.get("/v1/ai/tools")
+    assert tools_response.status_code == 200
+    tools = {
+        (tool["endpoint"], tool["method"]): tool
+        for tool in tools_response.json()["tools"]
+    }
+
+    expected_parameters = {
+        "/v1/stim/latest": "symbol_exchange",
+        "/v1/stim/history": "symbol_exchange",
+        "/v1/indicators/latest": "symbol_exchange",
+        "/v1/indicators/history": "symbol_exchange",
+        "/v1/prices/latest": "symbol_exchange",
+        "/v1/prices/history": "symbol_exchange",
+        "/v1/stwr/reports/latest": "rpt",
+        "/v1/stwr/reports/history": "rpt",
+    }
+
+    def resolve_openapi_parameter(param: dict) -> dict:
+        if "$ref" not in param:
+            return param
+        ref = param["$ref"].removeprefix("#/")
+        resolved = openapi
+        for part in ref.split("/"):
+            resolved = resolved[part]
+        return resolved
+
+    for endpoint, param_name in expected_parameters.items():
+        openapi_path = endpoint.removeprefix("/v1")
+        openapi_params = {
+            resolved_param["name"]: resolved_param
+            for param in openapi["paths"][openapi_path]["get"]["parameters"]
+            for resolved_param in (resolve_openapi_parameter(param),)
+        }
+        tool = tools[(endpoint, "GET")]
+        tool_params = {param["name"]: param for param in tool["parameters"]}
+
+        assert openapi_params[param_name]["in"] == "query"
+        assert tool["input_location"] == "query"
+        assert tool["parameter_source"] == "query"
+        assert tool_params[param_name]["in"] == "query"
+        assert tool_params[param_name]["parameter_source"] == "query"
 
 
 def test_unauthenticated_unknown_v1_path_still_returns_401(client):

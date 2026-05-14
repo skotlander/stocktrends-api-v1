@@ -65,6 +65,51 @@ END_INPUT = {
     "description": "Inclusive end weekdate in YYYY-MM-DD format.",
 }
 
+STIM_INTERPRETATION_DEPENDENCY = {
+    "endpoint": "/v1/meta/stim",
+    "method": "GET",
+    "required_before_interpretation": True,
+    "reason": "Base-period mean returns are required to interpret ST-IM means and probabilities correctly.",
+}
+
+STIM_INTERPRETATION_GUIDANCE = {
+    "base_period_mean_returns_pct": {
+        "x4wk": "4-week baseline from /v1/meta/stim",
+        "x13wk": "13-week baseline from /v1/meta/stim",
+        "x40wk": "40-week baseline from /v1/meta/stim",
+    },
+    "mean_return_fields": ["x4wk", "x13wk", "x40wk"],
+    "standard_deviation_fields": ["x4wksd", "x13wksd", "x40wksd"],
+    "calculation": {
+        "delta_vs_base": "stim_mean - base_mean",
+        "z": "(base_mean - stim_mean) / standard_deviation",
+        "probability_outperform": "1 - normal_cdf(z)",
+    },
+    "interpretation_rules": [
+        "Call /v1/meta/stim before interpreting ST-IM results.",
+        "Raw x4wk/x13wk/x40wk means are estimated mean returns, not standalone bullish signals.",
+        "Do not interpret a positive raw mean as bullish unless it exceeds the relevant base mean or has adequate probability of exceeding it.",
+        "Use x4wksd/x13wksd/x40wksd to estimate probability of exceeding base-period means.",
+        "If is_stale=true or missing_reason is present, treat the ST-IM result as historical fallback and disclose that limitation.",
+    ],
+    "stim_select_style_logic": {
+        "prob13wk_minimum": 0.55,
+        "prob13wk_minimum_description": "13-week probability of exceeding the base-period mean should be at least 55%.",
+        "lower_confidence_bounds": "Emphasize lower confidence bounds relative to base-period means where applicable.",
+    },
+}
+
+STIM_REQUIRED_INTERPRETATION_STEPS = [
+    "Fetch GET /v1/meta/stim.",
+    "Read base_period_mean_returns_pct.x4wk, x13wk, and x40wk.",
+    "For each horizon, compare xNwk to the matching base mean.",
+    "Compute delta_vs_base = stim_mean - base_mean.",
+    "Compute z = (base_mean - stim_mean) / standard_deviation.",
+    "Compute probability_outperform = 1 - normal_cdf(z).",
+    "Review lower confidence bounds against base-period means where available.",
+    "Disclose stale or fallback data when is_stale=true or missing_reason is present.",
+]
+
 
 def _symbol_lookup_inputs() -> tuple[dict[str, Any], dict[str, Any]]:
     return (
@@ -122,8 +167,11 @@ def _metadata(
     supported_rails: list[str] | None = None,
     access_type: str = "paid",
     requires_payment: bool = True,
+    interpretation_dependency: dict[str, Any] | None = None,
+    interpretation_guidance: dict[str, Any] | None = None,
+    required_interpretation_steps: list[str] | None = None,
 ) -> dict[str, Any]:
-    return {
+    metadata = {
         "path": path,
         "method": method,
         "tool_name": tool_name,
@@ -154,6 +202,13 @@ def _metadata(
         "next_recommended_calls": next_recommended_calls or [],
         "tags": tags or [category],
     }
+    if interpretation_dependency is not None:
+        metadata["interpretation_dependency"] = copy.deepcopy(interpretation_dependency)
+    if interpretation_guidance is not None:
+        metadata["interpretation_guidance"] = copy.deepcopy(interpretation_guidance)
+    if required_interpretation_steps is not None:
+        metadata["required_interpretation_steps"] = copy.deepcopy(required_interpretation_steps)
+    return metadata
 
 
 _REQ_SYMBOL, _OPT_SYMBOL = _symbol_lookup_inputs()
@@ -380,9 +435,15 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         notes=[
             "ST-IM is Stock Trends Inference Model; it is a probabilistic forward-looking model.",
             "xNwk1 is the lower bound, xNwk is expected return, xNwk2 is the upper bound, and xNwksd is standard deviation.",
+            "Call /v1/meta/stim before interpreting ST-IM means or probabilities.",
+            "Compare ST-IM means to base_period_mean_returns_pct; positive raw means alone are not sufficient.",
+            "If is_stale=true or missing_reason is present, disclose that the ST-IM result is a historical fallback.",
         ],
-        related_endpoints=["/v1/indicators/latest", "/v1/stim/history", "/v1/selections/published/latest"],
-        next_recommended_calls=["/v1/decision/evaluate-symbol", "/v1/portfolio/construct"],
+        related_endpoints=["/v1/meta/stim", "/v1/indicators/latest", "/v1/stim/history", "/v1/selections/published/latest"],
+        next_recommended_calls=["/v1/meta/stim", "/v1/decision/evaluate-symbol", "/v1/portfolio/construct"],
+        interpretation_dependency=STIM_INTERPRETATION_DEPENDENCY,
+        interpretation_guidance=STIM_INTERPRETATION_GUIDANCE,
+        required_interpretation_steps=STIM_REQUIRED_INTERPRETATION_STEPS,
     ),
     "/v1/stim/history": _metadata(
         path="/v1/stim/history",
@@ -406,9 +467,17 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         response_shape=["request_id", "symbol_exchange", "start", "end", "count", "data", "include_gaps", "gaps"],
         example_object={"request_id": "req_demo", "symbol_exchange": "SAMPLE-N", "count": 1, "data": [{"weekdate": "YYYY-MM-DD", "x13wk": 0.0, "x13wksd": 1.0}]},
         output_summary="Historical ST-IM distributions across 4, 13, and 40 week horizons.",
-        notes=["Use include_gaps=true only when the agent needs to diagnose missing ST-IM weeks."],
-        related_endpoints=["/v1/stim/latest", "/v1/indicators/history"],
-        next_recommended_calls=["/v1/indicators/history", "/v1/decision/evaluate-symbol"],
+        notes=[
+            "Use include_gaps=true only when the agent needs to diagnose missing ST-IM weeks.",
+            "Call /v1/meta/stim before interpreting ST-IM means or probabilities.",
+            "Compare ST-IM means to base_period_mean_returns_pct; positive raw means alone are not sufficient.",
+            "If is_stale=true or missing_reason is present, disclose that the ST-IM result is a historical fallback.",
+        ],
+        related_endpoints=["/v1/meta/stim", "/v1/stim/latest", "/v1/indicators/history"],
+        next_recommended_calls=["/v1/meta/stim", "/v1/indicators/history", "/v1/decision/evaluate-symbol"],
+        interpretation_dependency=STIM_INTERPRETATION_DEPENDENCY,
+        interpretation_guidance=STIM_INTERPRETATION_GUIDANCE,
+        required_interpretation_steps=STIM_REQUIRED_INTERPRETATION_STEPS,
     ),
     "/v1/prices/latest": _metadata(
         path="/v1/prices/latest",
@@ -795,7 +864,13 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         investment_agent_value="Provides curated Stock Trends screening lists for agent research workflows.",
         workflow_role="Curated report discovery.",
         required_inputs={
-            "rpt": {"type": "string", "required": True, "example": "bullcross", "description": "Report code from /v1/stwr/reports/catalog."},
+            "rpt": {
+                "type": "string",
+                "required": True,
+                "example": "bullcross",
+                "safe_default_for_demo": "bullcross",
+                "description": "Report code from /v1/stwr/reports/catalog.",
+            },
             "exchange": copy.deepcopy(EXCHANGE_INPUT),
         },
         optional_inputs={
@@ -824,7 +899,13 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         investment_agent_value="Lets agents study persistence and recurrence of curated report membership over time.",
         workflow_role="Curated report history.",
         required_inputs={
-            "rpt": {"type": "string", "required": True, "example": "bullcross"},
+            "rpt": {
+                "type": "string",
+                "required": True,
+                "example": "bullcross",
+                "safe_default_for_demo": "bullcross",
+                "description": "Report code from /v1/stwr/reports/catalog.",
+            },
             "exchange": copy.deepcopy(EXCHANGE_INPUT),
         },
         optional_inputs={
@@ -1228,6 +1309,7 @@ def build_endpoint_preview(
         return None
 
     resolved_pricing_rule_id = pricing_rule_id or entry.get("pricing_rule_id")
+    input_location = input_location_for_method(entry["method"])
     preview = {
         "endpoint": {
             "method": entry["method"],
@@ -1241,8 +1323,10 @@ def build_endpoint_preview(
         "investment_agent_value": entry["investment_agent_value"],
         "supported_rails": list(entry["supported_rails"]),
         "input_rule": entry.get("input_rule"),
-        "required_inputs": copy.deepcopy(entry.get("required_inputs", {})),
-        "optional_inputs": copy.deepcopy(entry.get("optional_inputs", {})),
+        "input_location": input_location,
+        "parameter_source": input_location,
+        "required_inputs": _inputs_with_parameter_source(entry.get("required_inputs", {}), input_location),
+        "optional_inputs": _inputs_with_parameter_source(entry.get("optional_inputs", {}), input_location),
         "safe_example_request": copy.deepcopy(entry["safe_example_request"]),
         "response_shape": copy.deepcopy(entry["response_shape"]),
         "example_object": copy.deepcopy(entry["example_object"]),
@@ -1258,6 +1342,9 @@ def build_endpoint_preview(
             "cost_source": "/v1/pricing/catalog",
         },
     }
+    for field in ("interpretation_dependency", "interpretation_guidance", "required_interpretation_steps"):
+        if field in entry:
+            preview[field] = copy.deepcopy(entry[field])
     return preview
 
 
@@ -1275,6 +1362,8 @@ def schema_to_parameters(schema: dict, location: str) -> list[dict[str, Any]]:
         param = {
             "name": name,
             "in": location,
+            "input_location": location,
+            "parameter_source": location,
             "required": name in required,
             "schema": prop_schema if isinstance(prop_schema, dict) else {},
         }
@@ -1294,7 +1383,15 @@ def _schema_property_from_input_meta(meta: dict[str, Any]) -> dict[str, Any]:
     schema = {
         key: copy.deepcopy(value)
         for key, value in meta.items()
-        if key not in {"required", "safe_default", "safe_default_for_demo", "example", "description"}
+        if key not in {
+            "required",
+            "safe_default",
+            "safe_default_for_demo",
+            "example",
+            "description",
+            "input_location",
+            "parameter_source",
+        }
     }
     if "description" in meta:
         schema["description"] = meta["description"]
@@ -1304,7 +1401,21 @@ def _schema_property_from_input_meta(meta: dict[str, Any]) -> dict[str, Any]:
         schema["default"] = meta["safe_default"]
     if "safe_default_for_demo" in meta:
         schema["safe_default_for_demo"] = meta["safe_default_for_demo"]
+    if "input_location" in meta:
+        schema["x-stocktrends-input-location"] = meta["input_location"]
+    if "parameter_source" in meta:
+        schema["x-stocktrends-parameter-source"] = meta["parameter_source"]
     return schema
+
+
+def _inputs_with_parameter_source(inputs: dict[str, Any], location: str) -> dict[str, Any]:
+    enriched: dict[str, Any] = {}
+    for name, meta in inputs.items():
+        item = copy.deepcopy(meta)
+        item.setdefault("input_location", location)
+        item.setdefault("parameter_source", location)
+        enriched[name] = item
+    return enriched
 
 
 def build_input_schema(path: str) -> dict[str, Any] | None:
@@ -1312,11 +1423,15 @@ def build_input_schema(path: str) -> dict[str, Any] | None:
     if entry is None:
         return None
 
+    location = input_location_for_method(entry["method"])
     properties: dict[str, Any] = {}
     required: list[str] = []
     for source in ("required_inputs", "optional_inputs"):
         for name, meta in entry.get(source, {}).items():
-            properties[name] = _schema_property_from_input_meta(meta)
+            property_schema = _schema_property_from_input_meta(meta)
+            property_schema.setdefault("x-stocktrends-input-location", location)
+            property_schema.setdefault("x-stocktrends-parameter-source", location)
+            properties[name] = property_schema
             if meta.get("required") is True:
                 required.append(name)
 
@@ -1324,7 +1439,8 @@ def build_input_schema(path: str) -> dict[str, Any] | None:
         "type": "object",
         "properties": properties,
         "required": required,
-        "x-stocktrends-input-location": input_location_for_method(entry["method"]),
+        "x-stocktrends-input-location": location,
+        "x-stocktrends-parameter-source": location,
     }
     if entry.get("input_rule"):
         schema["description"] = entry["input_rule"]
@@ -1343,8 +1459,12 @@ def build_tool_parameters(path: str) -> list[dict[str, Any]] | None:
             param: dict[str, Any] = {
                 "name": name,
                 "in": location,
+                "input_location": location,
+                "parameter_source": location,
                 "required": bool(meta.get("required")),
-                "schema": _schema_property_from_input_meta(meta),
+                "schema": _schema_property_from_input_meta(
+                    {**meta, "input_location": location, "parameter_source": location}
+                ),
             }
             if "description" in meta:
                 param["description"] = meta["description"]
@@ -1377,16 +1497,20 @@ def build_tool_template(path: str) -> dict[str, Any] | None:
         "access_type": entry.get("access_type", "paid"),
         "requires_payment": bool(entry.get("requires_payment", True)),
         "input_location": input_location,
+        "parameter_source": input_location,
         "input_schema": input_schema,
         "output_summary": entry["output_summary"],
         "workflow_role": entry["workflow_role"],
         "investment_agent_value": entry["investment_agent_value"],
-        "required_inputs": copy.deepcopy(entry.get("required_inputs", {})),
-        "optional_inputs": copy.deepcopy(entry.get("optional_inputs", {})),
+        "required_inputs": _inputs_with_parameter_source(entry.get("required_inputs", {}), input_location),
+        "optional_inputs": _inputs_with_parameter_source(entry.get("optional_inputs", {}), input_location),
         "safe_example_request": copy.deepcopy(entry["safe_example_request"]),
         "related_endpoints": copy.deepcopy(entry.get("related_endpoints", [])),
         "next_recommended_calls": copy.deepcopy(entry.get("next_recommended_calls", [])),
     }
+    for field in ("interpretation_dependency", "interpretation_guidance", "required_interpretation_steps"):
+        if field in entry:
+            template[field] = copy.deepcopy(entry[field])
     if input_location == "query":
         template["parameters"] = build_tool_parameters(path) or []
     else:

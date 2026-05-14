@@ -47,6 +47,7 @@ def _workflow_rule_rows(cost: Decimal = Decimal("0.25")) -> list[dict]:
         step["pricing_rule_id"]
         for workflow in WORKFLOW_REGISTRY
         for step in workflow["steps"]
+        if step.get("pricing_rule_id")
     }
     return [
         {
@@ -149,6 +150,31 @@ def test_workflows_expose_machine_plannable_steps(monkeypatch):
                 assert field in step, f"{workflow['workflow_id']} step missing {field}"
             assert step["safe_example_request"]["method"] == step["method"]
             assert step["safe_example_request"]["path"] == step["path"]
+
+
+def test_stim_forecast_review_workflow_has_meta_before_paid_stim(monkeypatch):
+    monkeypatch.setattr(
+        workflows_router,
+        "get_metering_engine",
+        lambda: _Engine(_workflow_rule_rows(Decimal("0.25"))),
+    )
+
+    response = workflows_router.get_workflows()
+    body = json.loads(response.body)
+    workflow = next(
+        workflow for workflow in body["workflows"] if workflow["workflow_id"] == "stim_forecast_review"
+    )
+    paths = [step["path"] for step in workflow["steps"]]
+
+    assert paths.index("/v1/meta/stim") < paths.index("/v1/stim/latest")
+    assert workflow["interpretation_guidance"]
+    assert "base_period_mean_returns_pct" in workflow["interpretation_guidance"]
+    assert workflow["required_interpretation_steps"]
+
+    meta_step = workflow["steps"][0]
+    assert meta_step["path"] == "/v1/meta/stim"
+    assert meta_step["pricing_rule_id"] is None
+    assert meta_step["stc_cost"] == 0.0
 
 
 def test_portfolio_workflow_post_steps_include_schema_examples(monkeypatch):

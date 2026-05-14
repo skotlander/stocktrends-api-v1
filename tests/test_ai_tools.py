@@ -175,6 +175,7 @@ REQUIRED_TOOL_FIELDS = {
     "category", "auth_required", "metered", "pricing_rule_id", "access_type",
     "requires_payment",
     "supported_rails", "input_schema", "input_location", "output_summary",
+    "parameter_source",
     "stc_cost", "estimated_usd_cost", "pricing_note", "pricing",
 }
 
@@ -319,12 +320,42 @@ def test_get_tools_expose_query_parameters_not_body_parameters():
     for endpoint in endpoints:
         tool = tools_by_endpoint[(endpoint, "GET")]
         assert tool["input_location"] == "query"
+        assert tool["parameter_source"] == "query"
         assert tool["input_schema"]["x-stocktrends-input-location"] == "query"
+        assert tool["input_schema"]["x-stocktrends-parameter-source"] == "query"
         assert "request_body_schema" not in tool
         assert "json" not in tool["safe_example_request"]
         assert "query" in tool["safe_example_request"]
+        for inputs_field in ("required_inputs", "optional_inputs"):
+            for name, meta in tool.get(inputs_field, {}).items():
+                assert meta["input_location"] == "query", f"{endpoint} {name} input_location is not query"
+                assert meta["parameter_source"] == "query", f"{endpoint} {name} parameter_source is not query"
         for param in tool.get("parameters", []):
             assert param["in"] == "query", f"{endpoint} parameter {param['name']} is not query"
+            assert param["input_location"] == "query", f"{endpoint} parameter {param['name']} missing input_location=query"
+            assert param["parameter_source"] == "query", f"{endpoint} parameter {param['name']} missing parameter_source=query"
+
+
+def test_target_get_tools_expose_expected_query_parameter_names():
+    result = ai_tools()
+    tools_by_endpoint = {(tool["endpoint"], tool["method"]): tool for tool in result["tools"]}
+    expected = {
+        "/v1/stim/latest": "symbol_exchange",
+        "/v1/stim/history": "symbol_exchange",
+        "/v1/indicators/latest": "symbol_exchange",
+        "/v1/indicators/history": "symbol_exchange",
+        "/v1/prices/latest": "symbol_exchange",
+        "/v1/prices/history": "symbol_exchange",
+        "/v1/stwr/reports/latest": "rpt",
+        "/v1/stwr/reports/history": "rpt",
+    }
+
+    for endpoint, parameter_name in expected.items():
+        tool = tools_by_endpoint[(endpoint, "GET")]
+        params = {param["name"]: param for param in tool["parameters"]}
+        assert parameter_name in params
+        assert params[parameter_name]["in"] == "query"
+        assert params[parameter_name]["parameter_source"] == "query"
 
 
 def test_portfolio_compare_safe_example_matches_api_shape():
@@ -445,7 +476,7 @@ def test_workflow_pricing_rule_ids_accurate():
         registry_wf = next(
             w for w in WORKFLOW_REGISTRY if w["workflow_id"] == manifest_wf["workflow_id"]
         )
-        expected = [s["pricing_rule_id"] for s in registry_wf["steps"]]
+        expected = [s["pricing_rule_id"] for s in registry_wf["steps"] if s.get("pricing_rule_id")]
         assert manifest_wf["pricing_rule_ids"] == expected
 
 
@@ -542,12 +573,47 @@ def test_cost_estimate_tool_exposes_workflow_id_examples():
     expected = {
         "regime_analysis",
         "symbol_decision",
+        "stim_forecast_review",
         "portfolio_build",
         "portfolio_compare_review",
     }
     assert set(workflow_id_schema["enum"]) == expected
     assert workflow_id_schema["example"] == "portfolio_build"
     assert tool["safe_example_request"]["query"]["workflow_id"] == "portfolio_build"
+
+
+def test_stim_forecast_review_workflow_exposes_interpretation_sequence():
+    result = ai_tools()
+    workflow = next(w for w in result["workflows"] if w["workflow_id"] == "stim_forecast_review")
+
+    assert workflow["interpretation_guidance"]
+    assert "/v1/meta/stim" in workflow["interpretation_guidance"]
+    assert "base_period_mean_returns_pct" in workflow["interpretation_guidance"]
+    assert workflow["required_interpretation_steps"]
+
+    registry_workflow = next(w for w in WORKFLOW_REGISTRY if w["workflow_id"] == "stim_forecast_review")
+    endpoints = [step["endpoint"] for step in registry_workflow["steps"]]
+    assert endpoints.index("GET /v1/meta/stim") < endpoints.index("GET /v1/stim/latest")
+
+
+def test_stim_tools_expose_machine_readable_interpretation_guidance():
+    result = ai_tools()
+    tools = {tool["endpoint"]: tool for tool in result["tools"]}
+
+    for endpoint in ("/v1/stim/latest", "/v1/stim/history"):
+        tool = tools[endpoint]
+        dependency = tool["interpretation_dependency"]
+        guidance = tool["interpretation_guidance"]
+        steps = tool["required_interpretation_steps"]
+
+        assert dependency["endpoint"] == "/v1/meta/stim"
+        assert dependency["required_before_interpretation"] is True
+        assert "base_period_mean_returns_pct" in guidance
+        assert guidance["calculation"]["delta_vs_base"] == "stim_mean - base_mean"
+        assert guidance["calculation"]["probability_outperform"] == "1 - normal_cdf(z)"
+        assert guidance["stim_select_style_logic"]["prob13wk_minimum"] == 0.55
+        assert any("/v1/meta/stim" in step for step in steps)
+        assert "is_stale" in " ".join(guidance["interpretation_rules"])
 
 
 def test_paid_tools_include_manifest_pricing_fields(monkeypatch):

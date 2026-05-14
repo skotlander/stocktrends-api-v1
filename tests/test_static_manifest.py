@@ -207,11 +207,107 @@ def test_indicators_tools_present(manifest):
 
 
 def test_static_get_parameters_have_query_location(manifest):
-    for name in ("instrument_lookup", "indicators_latest", "indicators_history", "stim_latest", "stim_history"):
+    for name in (
+        "instrument_lookup",
+        "indicators_latest",
+        "indicators_history",
+        "prices_latest",
+        "prices_history",
+        "stim_latest",
+        "stim_history",
+        "stwr_reports_latest",
+        "stwr_reports_history",
+    ):
         tool = _tool_by_name(manifest, name)
         assert tool is not None
         for param in tool.get("parameters", []):
             assert param.get("in") == "query", f"{name} parameter {param.get('name')} missing query location"
+            assert param.get("parameter_source") == "query", f"{name} parameter {param.get('name')} missing parameter_source=query"
+
+
+def test_static_target_get_tools_expose_expected_query_parameter_names(manifest):
+    expected = {
+        "indicators_latest": "symbol_exchange",
+        "indicators_history": "symbol_exchange",
+        "prices_latest": "symbol_exchange",
+        "prices_history": "symbol_exchange",
+        "stim_latest": "symbol_exchange",
+        "stim_history": "symbol_exchange",
+        "stwr_reports_latest": "rpt",
+        "stwr_reports_history": "rpt",
+    }
+    for name, param_name in expected.items():
+        tool = _tool_by_name(manifest, name)
+        assert tool is not None
+        params = {param["name"]: param for param in tool.get("parameters", [])}
+        assert param_name in params
+        assert params[param_name]["in"] == "query"
+        assert params[param_name]["parameter_source"] == "query"
+
+
+def test_static_cost_estimate_lists_safe_workflow_examples(manifest):
+    tool = _tool_by_name(manifest, "cost_estimate")
+    assert tool is not None
+    workflow_id = next(param for param in tool["parameters"] if param["name"] == "workflow_id")
+    expected = {
+        "portfolio_build",
+        "symbol_decision",
+        "regime_analysis",
+        "portfolio_compare_review",
+        "stim_forecast_review",
+    }
+    assert expected.issubset(set(workflow_id["allowed_values"]))
+    assert workflow_id["example"] == "portfolio_build"
+    assert tool["safe_example_request"]["query"]["workflow_id"] == "portfolio_build"
+
+
+def test_static_stim_tools_expose_interpretation_guidance(manifest):
+    for name in ("stim_latest", "stim_history"):
+        tool = _tool_by_name(manifest, name)
+        assert tool is not None
+        assert tool["interpretation_dependency"]["endpoint"] == "/v1/meta/stim"
+        assert tool["interpretation_dependency"]["required_before_interpretation"] is True
+        assert "base_period_mean_returns_pct" in tool["interpretation_guidance"]
+        assert tool["interpretation_guidance"]["mean_return_fields"] == ["x4wk", "x13wk", "x40wk"]
+        assert tool["interpretation_guidance"]["standard_deviation_fields"] == [
+            "x4wksd",
+            "x13wksd",
+            "x40wksd",
+        ]
+        assert tool["interpretation_guidance"]["calculation"]["probability_outperform"] == "1 - normal_cdf(z)"
+        assert tool["interpretation_guidance"]["stim_select_style_logic"]["prob13wk_minimum"] == 0.55
+        assert "prob13wk_minimum_description" in tool["interpretation_guidance"]["stim_select_style_logic"]
+
+
+def test_static_stim_guidance_matches_live_ai_tools_for_key_fields(manifest):
+    from routers.ai import ai_tools
+
+    live_tools = {
+        tool["name"]: tool
+        for tool in ai_tools()["tools"]
+        if tool["name"] in {"stim_latest", "stim_history"}
+    }
+    key_fields = (
+        "mean_return_fields",
+        "standard_deviation_fields",
+        "interpretation_rules",
+    )
+
+    for name in ("stim_latest", "stim_history"):
+        static_tool = _tool_by_name(manifest, name)
+        assert static_tool is not None
+        live_tool = live_tools[name]
+        static_guidance = static_tool["interpretation_guidance"]
+        live_guidance = live_tool["interpretation_guidance"]
+
+        for field in key_fields:
+            assert static_guidance[field] == live_guidance[field]
+
+        static_logic = static_guidance["stim_select_style_logic"]
+        live_logic = live_guidance["stim_select_style_logic"]
+        for key in live_logic:
+            assert key in static_logic
+            assert static_logic[key] == live_logic[key]
 
 
 def test_static_planning_helpers_present(manifest):

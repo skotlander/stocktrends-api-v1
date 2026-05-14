@@ -1,5 +1,5 @@
 {
-  "version": "1.4",
+  "version": "1.5",
   "name": "Stock Trends API Tools",
   "provider": "Stock Trends Publications",
   "service_description": "Autonomous portfolio intelligence API for AI agents. Provides market regime analysis, Stock Trends signal intelligence, probabilistic forward-return modeling, stock selection, portfolio construction, portfolio comparison, and symbol decision evaluation for 4, 13, and 40 week investment horizons. Built for agentic research workflows using x402 and MPP payment rails.",
@@ -80,21 +80,30 @@
         {
           "name": "workflow_id",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "string",
           "required": true,
-          "allowed_values": ["regime_analysis", "symbol_decision", "portfolio_build", "portfolio_compare_review"],
+          "allowed_values": ["regime_analysis", "symbol_decision", "stim_forecast_review", "portfolio_build", "portfolio_compare_review"],
           "example": "portfolio_build",
           "description": "Workflow ID from /v1/workflows."
         },
         {
           "name": "rail_preference",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "string",
           "required": false,
           "allowed_values": ["subscription", "x402", "mpp", "auto"],
           "default": "auto"
         }
-      ]
+      ],
+      "safe_example_request": {
+        "method": "GET",
+        "path": "/v1/cost-estimate",
+        "query": {"workflow_id": "portfolio_build", "rail_preference": "auto"}
+      }
     },
     {
       "name": "workflows",
@@ -127,11 +136,18 @@
         {
           "name": "symbol",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "string",
           "required": true,
           "description": "Ticker symbol, for example AAPL."
         }
-      ]
+      ],
+      "safe_example_request": {
+        "method": "GET",
+        "path": "/v1/instruments/lookup",
+        "query": {"symbol": "IBM"}
+      }
     },
     {
       "name": "instrument_resolve",
@@ -146,6 +162,8 @@
         {
           "name": "symbol_exchange",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "string",
           "required": false,
           "example": "IBM-N"
@@ -153,6 +171,8 @@
         {
           "name": "symbol",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "string",
           "required": false,
           "example": "IBM"
@@ -160,11 +180,18 @@
         {
           "name": "exchange",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "string",
           "required": false,
           "allowed_values": ["N", "Q", "A", "B", "T", "I"]
         }
-      ]
+      ],
+      "safe_example_request": {
+        "method": "GET",
+        "path": "/v1/instruments/resolve",
+        "query": {"symbol_exchange": "IBM-N"}
+      }
     },
     {
       "name": "stwr_reports_catalog",
@@ -233,10 +260,14 @@
       "estimated_usd_cost": null,
       "supported_rails": ["subscription", "x402", "mpp"],
       "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost.",
+      "input_location": "query",
+      "parameter_source": "query",
       "parameters": [
         {
           "name": "symbol_exchange",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "string",
           "required": true,
           "example": "IBM-N",
@@ -245,12 +276,19 @@
         {
           "name": "cs_only",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "boolean",
           "required": false,
           "default": true,
           "description": "Filter to Common Stocks only."
         }
-      ]
+      ],
+      "safe_example_request": {
+        "method": "GET",
+        "path": "/v1/indicators/latest",
+        "query": {"symbol_exchange": "IBM-N", "cs_only": true}
+      }
     },
     {
       "name": "indicators_history",
@@ -265,10 +303,14 @@
       "estimated_usd_cost": null,
       "supported_rails": ["subscription", "x402", "mpp"],
       "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost.",
+      "input_location": "query",
+      "parameter_source": "query",
       "parameters": [
         {
           "name": "symbol_exchange",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "string",
           "required": true,
           "example": "IBM-N",
@@ -277,14 +319,31 @@
         {
           "name": "limit",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "integer",
           "required": false,
           "default": 260,
           "minimum": 1,
           "maximum": 2600,
           "description": "Maximum number of weekly rows."
+        },
+        {
+          "name": "cs_only",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "description": "Filter to Common Stocks only."
         }
-      ]
+      ],
+      "safe_example_request": {
+        "method": "GET",
+        "path": "/v1/indicators/history",
+        "query": {"symbol_exchange": "IBM-N", "limit": 52, "cs_only": true}
+      }
     },
     {
       "name": "prices_latest",
@@ -298,7 +357,36 @@
       "stc_cost": null,
       "estimated_usd_cost": null,
       "supported_rails": ["subscription", "x402", "mpp"],
-      "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost."
+      "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost.",
+      "input_location": "query",
+      "parameter_source": "query",
+      "parameters": [
+        {
+          "name": "symbol_exchange",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "string",
+          "required": true,
+          "example": "IBM-N",
+          "description": "Stock Trends symbol plus exchange suffix."
+        },
+        {
+          "name": "cs_only",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "description": "Filter to Common Stocks only."
+        }
+      ],
+      "safe_example_request": {
+        "method": "GET",
+        "path": "/v1/prices/latest",
+        "query": {"symbol_exchange": "IBM-N", "cs_only": true}
+      }
     },
     {
       "name": "prices_history",
@@ -312,7 +400,48 @@
       "stc_cost": null,
       "estimated_usd_cost": null,
       "supported_rails": ["subscription", "x402", "mpp"],
-      "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost."
+      "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost.",
+      "input_location": "query",
+      "parameter_source": "query",
+      "parameters": [
+        {
+          "name": "symbol_exchange",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "string",
+          "required": true,
+          "example": "IBM-N",
+          "description": "Stock Trends symbol plus exchange suffix."
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "integer",
+          "required": false,
+          "default": 52,
+          "minimum": 1,
+          "maximum": 2600,
+          "description": "Maximum number of weekly rows."
+        },
+        {
+          "name": "cs_only",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "boolean",
+          "required": false,
+          "default": true,
+          "description": "Filter to Common Stocks only."
+        }
+      ],
+      "safe_example_request": {
+        "method": "GET",
+        "path": "/v1/prices/history",
+        "query": {"symbol_exchange": "IBM-N", "limit": 52, "cs_only": true}
+      }
     },
     {
       "name": "stim_latest",
@@ -327,15 +456,63 @@
       "estimated_usd_cost": null,
       "supported_rails": ["subscription", "x402", "mpp"],
       "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost.",
+      "input_location": "query",
+      "parameter_source": "query",
+      "interpretation_dependency": {
+        "endpoint": "/v1/meta/stim",
+        "method": "GET",
+        "required_before_interpretation": true,
+        "reason": "Base-period mean returns are required to interpret ST-IM means and probabilities correctly."
+      },
+      "interpretation_guidance": {
+        "base_period_mean_returns_pct": {
+          "x4wk": "4-week baseline from /v1/meta/stim",
+          "x13wk": "13-week baseline from /v1/meta/stim",
+          "x40wk": "40-week baseline from /v1/meta/stim"
+        },
+        "mean_return_fields": ["x4wk", "x13wk", "x40wk"],
+        "standard_deviation_fields": ["x4wksd", "x13wksd", "x40wksd"],
+        "calculation": {
+          "delta_vs_base": "stim_mean - base_mean",
+          "z": "(base_mean - stim_mean) / standard_deviation",
+          "probability_outperform": "1 - normal_cdf(z)"
+        },
+        "interpretation_rules": [
+          "Call /v1/meta/stim before interpreting ST-IM results.",
+          "Raw x4wk/x13wk/x40wk means are estimated mean returns, not standalone bullish signals.",
+          "Do not interpret a positive raw mean as bullish unless it exceeds the relevant base mean or has adequate probability of exceeding it.",
+          "Use x4wksd/x13wksd/x40wksd to estimate probability of exceeding base-period means.",
+          "If is_stale=true or missing_reason is present, treat the ST-IM result as historical fallback and disclose that limitation."
+        ],
+        "stim_select_style_logic": {
+          "prob13wk_minimum": 0.55,
+          "prob13wk_minimum_description": "13-week probability of exceeding the base-period mean should be at least 55%.",
+          "lower_confidence_bounds": "Emphasize lower confidence bounds relative to base-period means where applicable."
+        }
+      },
+      "required_interpretation_steps": [
+        "Fetch GET /v1/meta/stim.",
+        "Compare x4wk, x13wk, and x40wk to base_period_mean_returns_pct.",
+        "Use x4wksd, x13wksd, and x40wksd to estimate probability of exceeding base means.",
+        "Disclose stale or fallback data when is_stale=true or missing_reason is present."
+      ],
       "parameters": [
         {
           "name": "symbol_exchange",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "string",
           "required": true,
+          "example": "IBM-N",
           "description": "Symbol and exchange, e.g. IBM-N."
         }
-      ]
+      ],
+      "safe_example_request": {
+        "method": "GET",
+        "path": "/v1/stim/latest",
+        "query": {"symbol_exchange": "IBM-N"}
+      }
     },
     {
       "name": "stim_history",
@@ -350,15 +527,75 @@
       "estimated_usd_cost": null,
       "supported_rails": ["subscription", "x402", "mpp"],
       "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost.",
+      "input_location": "query",
+      "parameter_source": "query",
+      "interpretation_dependency": {
+        "endpoint": "/v1/meta/stim",
+        "method": "GET",
+        "required_before_interpretation": true,
+        "reason": "Base-period mean returns are required to interpret ST-IM means and probabilities correctly."
+      },
+      "interpretation_guidance": {
+        "base_period_mean_returns_pct": {
+          "x4wk": "4-week baseline from /v1/meta/stim",
+          "x13wk": "13-week baseline from /v1/meta/stim",
+          "x40wk": "40-week baseline from /v1/meta/stim"
+        },
+        "mean_return_fields": ["x4wk", "x13wk", "x40wk"],
+        "standard_deviation_fields": ["x4wksd", "x13wksd", "x40wksd"],
+        "calculation": {
+          "delta_vs_base": "stim_mean - base_mean",
+          "z": "(base_mean - stim_mean) / standard_deviation",
+          "probability_outperform": "1 - normal_cdf(z)"
+        },
+        "interpretation_rules": [
+          "Call /v1/meta/stim before interpreting ST-IM results.",
+          "Raw x4wk/x13wk/x40wk means are estimated mean returns, not standalone bullish signals.",
+          "Do not interpret a positive raw mean as bullish unless it exceeds the relevant base mean or has adequate probability of exceeding it.",
+          "Use x4wksd/x13wksd/x40wksd to estimate probability of exceeding base-period means.",
+          "If is_stale=true or missing_reason is present, treat the ST-IM result as historical fallback and disclose that limitation."
+        ],
+        "stim_select_style_logic": {
+          "prob13wk_minimum": 0.55,
+          "prob13wk_minimum_description": "13-week probability of exceeding the base-period mean should be at least 55%.",
+          "lower_confidence_bounds": "Emphasize lower confidence bounds relative to base-period means where applicable."
+        }
+      },
+      "required_interpretation_steps": [
+        "Fetch GET /v1/meta/stim.",
+        "Compare x4wk, x13wk, and x40wk to base_period_mean_returns_pct.",
+        "Use x4wksd, x13wksd, and x40wksd to estimate probability of exceeding base means.",
+        "Disclose stale or fallback data when is_stale=true or missing_reason is present."
+      ],
       "parameters": [
         {
           "name": "symbol_exchange",
           "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
           "type": "string",
           "required": true,
+          "example": "IBM-N",
           "description": "Symbol and exchange, e.g. IBM-N."
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "integer",
+          "required": false,
+          "default": 52,
+          "minimum": 1,
+          "maximum": 2600,
+          "description": "Maximum number of weekly rows."
         }
-      ]
+      ],
+      "safe_example_request": {
+        "method": "GET",
+        "path": "/v1/stim/history",
+        "query": {"symbol_exchange": "IBM-N", "limit": 52}
+      }
     },
     {
       "name": "selections_latest",
@@ -428,7 +665,48 @@
       "stc_cost": null,
       "estimated_usd_cost": null,
       "supported_rails": ["subscription", "x402", "mpp"],
-      "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost."
+      "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost.",
+      "input_location": "query",
+      "parameter_source": "query",
+      "parameters": [
+        {
+          "name": "rpt",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "string",
+          "required": true,
+          "example": "bullcross",
+          "description": "Report code from /v1/stwr/reports/catalog."
+        },
+        {
+          "name": "exchange",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "string",
+          "required": true,
+          "allowed_values": ["N", "Q", "A", "B", "T", "I"],
+          "example": "N",
+          "description": "Stock Trends exchange suffix."
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "integer",
+          "required": false,
+          "default": 25,
+          "minimum": 1,
+          "maximum": 50000
+        }
+      ],
+      "safe_example_request": {
+        "method": "GET",
+        "path": "/v1/stwr/reports/latest",
+        "query": {"rpt": "bullcross", "exchange": "N", "limit": 25}
+      }
     },
     {
       "name": "stwr_reports_history",
@@ -442,7 +720,48 @@
       "stc_cost": null,
       "estimated_usd_cost": null,
       "supported_rails": ["subscription", "x402", "mpp"],
-      "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost."
+      "pricing_note": "STC is the source of truth; fetch /v1/pricing/catalog for current cost.",
+      "input_location": "query",
+      "parameter_source": "query",
+      "parameters": [
+        {
+          "name": "rpt",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "string",
+          "required": true,
+          "example": "bullcross",
+          "description": "Report code from /v1/stwr/reports/catalog."
+        },
+        {
+          "name": "exchange",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "string",
+          "required": true,
+          "allowed_values": ["N", "Q", "A", "B", "T", "I"],
+          "example": "N",
+          "description": "Stock Trends exchange suffix."
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "input_location": "query",
+          "parameter_source": "query",
+          "type": "integer",
+          "required": false,
+          "default": 500,
+          "minimum": 1,
+          "maximum": 500000
+        }
+      ],
+      "safe_example_request": {
+        "method": "GET",
+        "path": "/v1/stwr/reports/history",
+        "query": {"rpt": "bullcross", "exchange": "N", "limit": 500}
+      }
     },
     {
       "name": "market_regime_latest",
