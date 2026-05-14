@@ -207,11 +207,69 @@ def test_indicators_tools_present(manifest):
 
 
 def test_static_get_parameters_have_query_location(manifest):
-    for name in ("instrument_lookup", "indicators_latest", "indicators_history", "stim_latest", "stim_history"):
+    for name in (
+        "instrument_lookup",
+        "indicators_latest",
+        "indicators_history",
+        "prices_latest",
+        "prices_history",
+        "stim_latest",
+        "stim_history",
+        "stwr_reports_latest",
+        "stwr_reports_history",
+    ):
         tool = _tool_by_name(manifest, name)
         assert tool is not None
         for param in tool.get("parameters", []):
             assert param.get("in") == "query", f"{name} parameter {param.get('name')} missing query location"
+            assert param.get("parameter_source") == "query", f"{name} parameter {param.get('name')} missing parameter_source=query"
+
+
+def test_static_target_get_tools_expose_expected_query_parameter_names(manifest):
+    expected = {
+        "indicators_latest": "symbol_exchange",
+        "indicators_history": "symbol_exchange",
+        "prices_latest": "symbol_exchange",
+        "prices_history": "symbol_exchange",
+        "stim_latest": "symbol_exchange",
+        "stim_history": "symbol_exchange",
+        "stwr_reports_latest": "rpt",
+        "stwr_reports_history": "rpt",
+    }
+    for name, param_name in expected.items():
+        tool = _tool_by_name(manifest, name)
+        assert tool is not None
+        params = {param["name"]: param for param in tool.get("parameters", [])}
+        assert param_name in params
+        assert params[param_name]["in"] == "query"
+        assert params[param_name]["parameter_source"] == "query"
+
+
+def test_static_cost_estimate_lists_safe_workflow_examples(manifest):
+    tool = _tool_by_name(manifest, "cost_estimate")
+    assert tool is not None
+    workflow_id = next(param for param in tool["parameters"] if param["name"] == "workflow_id")
+    expected = {
+        "portfolio_build",
+        "symbol_decision",
+        "regime_analysis",
+        "portfolio_compare_review",
+        "stim_forecast_review",
+    }
+    assert expected.issubset(set(workflow_id["allowed_values"]))
+    assert workflow_id["example"] == "portfolio_build"
+    assert tool["safe_example_request"]["query"]["workflow_id"] == "portfolio_build"
+
+
+def test_static_stim_tools_expose_interpretation_guidance(manifest):
+    for name in ("stim_latest", "stim_history"):
+        tool = _tool_by_name(manifest, name)
+        assert tool is not None
+        assert tool["interpretation_dependency"]["endpoint"] == "/v1/meta/stim"
+        assert tool["interpretation_dependency"]["required_before_interpretation"] is True
+        assert "base_period_mean_returns_pct" in tool["interpretation_guidance"]
+        assert tool["interpretation_guidance"]["calculation"]["probability_outperform"] == "1 - normal_cdf(z)"
+        assert tool["interpretation_guidance"]["stim_select_style_logic"]["prob13wk_minimum"] == 0.55
 
 
 def test_static_planning_helpers_present(manifest):

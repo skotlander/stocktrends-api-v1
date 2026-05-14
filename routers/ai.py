@@ -698,6 +698,12 @@ _TOOL_TEMPLATES = [
 
 _REGISTRY_TOOL_TEMPLATE_OVERRIDES = frozenset({
     ("/v1/agent/screener/top", "GET"),
+    ("/v1/indicators/latest", "GET"),
+    ("/v1/indicators/history", "GET"),
+    ("/v1/prices/latest", "GET"),
+    ("/v1/prices/history", "GET"),
+    ("/v1/stwr/reports/latest", "GET"),
+    ("/v1/stwr/reports/history", "GET"),
     ("/v1/portfolio/construct", "POST"),
     ("/v1/portfolio/evaluate", "POST"),
     ("/v1/portfolio/compare", "POST"),
@@ -735,8 +741,29 @@ def _with_input_location_metadata(tool: dict) -> dict:
 
     schema = dict(schema)
     schema.setdefault("x-stocktrends-input-location", location)
+    schema.setdefault("x-stocktrends-parameter-source", location)
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for prop_schema in properties.values():
+            if isinstance(prop_schema, dict):
+                prop_schema.setdefault("x-stocktrends-input-location", location)
+                prop_schema.setdefault("x-stocktrends-parameter-source", location)
     tool["input_location"] = location
+    tool["parameter_source"] = location
     tool["input_schema"] = schema
+    for inputs_field in ("required_inputs", "optional_inputs"):
+        inputs = tool.get(inputs_field)
+        if isinstance(inputs, dict):
+            enriched_inputs = {}
+            for name, meta in inputs.items():
+                if isinstance(meta, dict):
+                    item = dict(meta)
+                    item.setdefault("input_location", location)
+                    item.setdefault("parameter_source", location)
+                    enriched_inputs[name] = item
+                else:
+                    enriched_inputs[name] = meta
+            tool[inputs_field] = enriched_inputs
 
     if location == "query":
         tool["parameters"] = tool.get("parameters") or schema_to_parameters(schema, location)
@@ -848,10 +875,16 @@ def _build_workflow_summary(workflow: dict) -> dict:
         "tags": workflow["tags"],
         "supported_rails": workflow["supported_rails"],
         "step_count": len(workflow["steps"]),
-        "pricing_rule_ids": [step["pricing_rule_id"] for step in workflow["steps"]],
+        "pricing_rule_ids": [
+            step["pricing_rule_id"]
+            for step in workflow["steps"]
+            if step.get("pricing_rule_id")
+        ],
         "best_for": workflow.get("best_for"),
         "agent_goal_examples": workflow.get("agent_goal_examples", []),
         "symbol_selection_guidance": workflow.get("symbol_selection_guidance"),
+        "interpretation_guidance": workflow.get("interpretation_guidance"),
+        "required_interpretation_steps": workflow.get("required_interpretation_steps", []),
         "next_step_guidance": workflow.get("next_step_guidance", []),
         "note": "Use GET /v1/workflows for live per-step STC costs.",
     }
