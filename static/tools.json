@@ -637,6 +637,23 @@
     {
       "name": "selections_published_latest",
       "analytical_role": "probabilistic_selection_list",
+      "interpretation_guidance": {
+        "publication_criteria": {
+          "x4wk1":    {"operator": ">",  "threshold_pct": 0.0,  "description": "4-week ST-IM lower CI bound must exceed base-period mean of 0%."},
+          "x13wk1":   {"operator": ">",  "threshold_pct": 2.19, "description": "13-week ST-IM lower CI bound must exceed base-period mean of 2.19%."},
+          "x40wk1":   {"operator": ">",  "threshold_pct": 6.45, "description": "40-week ST-IM lower CI bound must exceed base-period mean of 6.45%."},
+          "prob13wk": {"operator": ">=", "threshold": 0.55,     "description": "Probability of exceeding 13-week base-period mean must be at least 55%."},
+          "all_criteria_required": true
+        },
+        "interpretation_rules": [
+          "All four publication criteria must be satisfied simultaneously.",
+          "prob13wk >= 0.55 is the documented publication threshold.",
+          "Rank by prob13wk descending; higher prob13wk means stronger 13-week outperformance probability.",
+          "These are probabilistic candidates, not guaranteed outcomes — not investment advice.",
+          "Use /v1/stim/latest on individual symbols to see full distribution context."
+        ],
+        "base_period_context_endpoint": "/v1/meta/stim"
+      },
       "title": "Published STIM Select Latest",
       "description": "Returns the latest published STIM Select list filtered to the three-horizon published definition: x4wk1 > 0% (4-week lower CI bound), x13wk1 > 2.19% (13-week), x40wk1 > 6.45% (40-week), prob13wk >= 55% by default. Ranked by prob13wk descending. Includes full ST-IM distribution fields. Fetch /v1/pricing/catalog for current STC cost.",
       "method": "GET",
@@ -652,6 +669,23 @@
     {
       "name": "selections_published_history",
       "analytical_role": "probabilistic_selection_list",
+      "interpretation_guidance": {
+        "publication_criteria": {
+          "x4wk1":    {"operator": ">",  "threshold_pct": 0.0,  "description": "4-week ST-IM lower CI bound must exceed base-period mean of 0%."},
+          "x13wk1":   {"operator": ">",  "threshold_pct": 2.19, "description": "13-week ST-IM lower CI bound must exceed base-period mean of 2.19%."},
+          "x40wk1":   {"operator": ">",  "threshold_pct": 6.45, "description": "40-week ST-IM lower CI bound must exceed base-period mean of 6.45%."},
+          "prob13wk": {"operator": ">=", "threshold": 0.55,     "description": "Probability of exceeding 13-week base-period mean must be at least 55%."},
+          "all_criteria_required": true
+        },
+        "interpretation_rules": [
+          "All four publication criteria must be satisfied simultaneously.",
+          "prob13wk >= 0.55 is the documented publication threshold.",
+          "Rank by prob13wk descending; higher prob13wk means stronger 13-week outperformance probability.",
+          "These are probabilistic candidates, not guaranteed outcomes — not investment advice.",
+          "Use /v1/stim/latest on individual symbols to see full distribution context."
+        ],
+        "base_period_context_endpoint": "/v1/meta/stim"
+      },
       "title": "Published STIM Select History",
       "description": "Returns historical published STIM Select records filtered to the three-horizon criteria and prob13wk threshold. Filter by symbol_exchange, symbol, exchange, or date range. Fetch /v1/pricing/catalog for current STC cost.",
       "method": "GET",
@@ -779,6 +813,24 @@
     {
       "name": "market_regime_latest",
       "analytical_role": "market_regime_classifier",
+      "interpretation_guidance": {
+        "regime_score_scale": {
+          "range": [-1.0, 1.0],
+          "formula": "bullish_pct - bearish_pct",
+          "strong_bullish": "> 0.5",
+          "mixed": "-0.1 to 0.1",
+          "strong_bearish": "< -0.5"
+        },
+        "interpretation_rules": [
+          "regime_score = bullish_pct minus bearish_pct across all active trend signals.",
+          "Do not use regime_score as a trade entry signal; use it as a portfolio bias input.",
+          "avg_rsi > 100 indicates the average universe security outperforms the S&P 500 benchmark.",
+          "avg_mt_cnt reveals whether the current regime is early-stage or mature.",
+          "Confirm with /v1/market/regime/history before acting on a single regime reading."
+        ],
+        "downstream_workflow": "Use regime result to set bias in /v1/agent/screener/top or /v1/portfolio/construct. Confirm with /v1/breadth/sector/latest and /v1/leadership/summary/latest.",
+        "confirmation_endpoints": ["/v1/breadth/sector/latest", "/v1/leadership/summary/latest"]
+      },
       "title": "Market Regime Latest",
       "description": "Returns the current market regime classification derived from the distribution of Stock Trends trend codes across all active signals. regime_score = bullish_pct minus bearish_pct. Bullish codes: ^+, ^-, v^. Bearish codes: v-, v+, ^v. Also returns avg_rsi (universe relative performance vs S&P 500, baseline 100) and avg_mt_cnt. Fetch /v1/pricing/catalog for current STC cost.",
       "method": "GET",
@@ -794,6 +846,24 @@
     {
       "name": "market_regime_history",
       "analytical_role": "market_regime_classifier",
+      "interpretation_guidance": {
+        "regime_score_scale": {
+          "range": [-1.0, 1.0],
+          "formula": "bullish_pct - bearish_pct",
+          "strong_bullish": "> 0.5",
+          "mixed": "-0.1 to 0.1",
+          "strong_bearish": "< -0.5"
+        },
+        "interpretation_rules": [
+          "regime_score = bullish_pct minus bearish_pct across all active trend signals.",
+          "Do not use regime_score as a trade entry signal; use it as a portfolio bias input.",
+          "avg_rsi > 100 indicates the average universe security outperforms the S&P 500 benchmark.",
+          "avg_mt_cnt reveals whether the current regime is early-stage or mature.",
+          "Confirm with /v1/market/regime/history before acting on a single regime reading."
+        ],
+        "downstream_workflow": "Use regime result to set bias in /v1/agent/screener/top or /v1/portfolio/construct. Confirm with /v1/breadth/sector/latest and /v1/leadership/summary/latest.",
+        "confirmation_endpoints": ["/v1/breadth/sector/latest", "/v1/leadership/summary/latest"]
+      },
       "title": "Market Regime History",
       "description": "Returns a historical sequence of weekly market regime snapshots, most recent first, using the same classification logic as /market/regime/latest. Useful for regime transition analysis. Fetch /v1/pricing/catalog for current STC cost.",
       "method": "GET",

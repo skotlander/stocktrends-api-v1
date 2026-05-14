@@ -443,6 +443,88 @@ def test_static_analytical_role_values_correct(manifest):
 
 
 # ---------------------------------------------------------------------------
+# Semantic fields — interpretation_guidance drift (static vs live)
+# ---------------------------------------------------------------------------
+
+def test_static_regime_tools_have_interpretation_guidance(manifest):
+    """market_regime_latest and market_regime_history must carry interpretation_guidance in tools.json."""
+    for name in ("market_regime_latest", "market_regime_history"):
+        tool = _tool_by_name(manifest, name)
+        assert tool is not None, f"{name} must be present in static/tools.json"
+        assert "interpretation_guidance" in tool, (
+            f"{name} must have interpretation_guidance in static/tools.json"
+        )
+        guidance = tool["interpretation_guidance"]
+        assert "regime_score_scale" in guidance
+        assert guidance["regime_score_scale"]["formula"] == "bullish_pct - bearish_pct"
+        assert "interpretation_rules" in guidance
+
+
+def test_static_published_selections_have_interpretation_guidance(manifest):
+    """Published STIM Select tools must carry interpretation_guidance with operator-structured criteria."""
+    for name in ("selections_published_latest", "selections_published_history"):
+        tool = _tool_by_name(manifest, name)
+        assert tool is not None, f"{name} must be present in static/tools.json"
+        assert "interpretation_guidance" in tool, (
+            f"{name} must have interpretation_guidance in static/tools.json"
+        )
+        guidance = tool["interpretation_guidance"]
+        assert "publication_criteria" in guidance
+        criteria = guidance["publication_criteria"]
+        assert criteria["x13wk1"]["operator"] == ">"
+        assert criteria["x13wk1"]["threshold_pct"] == 2.19
+        assert criteria["prob13wk"]["operator"] == ">="
+        assert criteria["prob13wk"]["threshold"] == 0.55
+        assert criteria["all_criteria_required"] is True
+
+
+def test_static_regime_guidance_matches_live(manifest):
+    """Static regime interpretation_guidance must match live /v1/ai/tools for key fields."""
+    from routers.ai import ai_tools
+    live_tools = {t["name"]: t for t in ai_tools()["tools"]}
+
+    for name in ("market_regime_latest", "market_regime_history"):
+        static_tool = _tool_by_name(manifest, name)
+        assert static_tool is not None
+        live_tool = live_tools.get(name)
+        assert live_tool is not None, f"Live tool '{name}' not found in /v1/ai/tools"
+
+        static_guidance = static_tool.get("interpretation_guidance", {})
+        live_guidance = live_tool.get("interpretation_guidance", {})
+
+        assert static_guidance.get("regime_score_scale") == live_guidance.get("regime_score_scale"), (
+            f"{name}: static regime_score_scale does not match live"
+        )
+        assert static_guidance.get("interpretation_rules") == live_guidance.get("interpretation_rules"), (
+            f"{name}: static interpretation_rules does not match live"
+        )
+
+
+def test_static_stim_select_guidance_matches_live(manifest):
+    """Static STIM Select interpretation_guidance must match live /v1/ai/tools for key fields."""
+    from routers.ai import ai_tools
+    live_tools = {t["name"]: t for t in ai_tools()["tools"]}
+
+    for static_name, live_name in (
+        ("selections_published_latest", "selections_published_latest"),
+        ("selections_published_history", "selections_published_history"),
+    ):
+        static_tool = _tool_by_name(manifest, static_name)
+        assert static_tool is not None
+        live_tool = live_tools.get(live_name)
+        assert live_tool is not None, f"Live tool '{live_name}' not found in /v1/ai/tools"
+
+        static_criteria = static_tool.get("interpretation_guidance", {}).get("publication_criteria", {})
+        live_criteria = live_tool.get("interpretation_guidance", {}).get("publication_criteria", {})
+
+        for field in ("x4wk1", "x13wk1", "x40wk1", "prob13wk"):
+            assert static_criteria.get(field) == live_criteria.get(field), (
+                f"{static_name}: static publication_criteria[{field!r}] does not match live"
+            )
+        assert static_criteria.get("all_criteria_required") == live_criteria.get("all_criteria_required")
+
+
+# ---------------------------------------------------------------------------
 # 7. No hardcoded STC costs
 # ---------------------------------------------------------------------------
 

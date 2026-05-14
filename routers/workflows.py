@@ -49,6 +49,12 @@ STC_TO_USD = Decimal("1.00")
 #   2. Add the entry below.
 #   3. Verify GET /v1/workflows response against GET /v1/pricing/catalog.
 # ---------------------------------------------------------------------------
+# NOTE: workflow analytical_role values (e.g. "market_context_workflow") describe
+# a multi-step research goal and form a distinct taxonomy from endpoint
+# analytical_role values (e.g. "market_regime_classifier") defined in
+# discovery/endpoint_metadata.py. Workflow roles end in "_workflow" by
+# convention to distinguish them from endpoint roles at the point of consumption.
+# ---------------------------------------------------------------------------
 WORKFLOW_REGISTRY: list[dict] = [
     {
         "workflow_id": "regime_analysis",

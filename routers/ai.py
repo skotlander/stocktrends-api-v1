@@ -1026,7 +1026,7 @@ def ai_context():
                     "step": 8,
                     "role": "portfolio_evaluation_engine",
                     "endpoint": "/v1/portfolio/compare",
-                    "purpose": "Compare proposed vs existing portfolio; confirm improvement.",
+                    "purpose": "Compare proposed vs existing portfolio; assess whether the proposal improves signal score and regime alignment.",
                 },
             ],
         },
@@ -1053,12 +1053,12 @@ def ai_context():
                 ),
             },
             "stim_select": {
-                "description": "Securities satisfying all three ST-IM lower-bound thresholds plus prob13wk publication threshold.",
-                "thresholds": {
-                    "x4wk1": "> 0.0%",
-                    "x13wk1": "> 2.19%",
-                    "x40wk1": "> 6.45%",
-                    "prob13wk": ">= 55%",
+                "description": "Securities satisfying all four publication criteria simultaneously.",
+                "criteria": {
+                    "x4wk1":    {"operator": ">",  "threshold_pct": 0.0,  "description": "4-week lower CI bound > base-period mean of 0%"},
+                    "x13wk1":   {"operator": ">",  "threshold_pct": 2.19, "description": "13-week lower CI bound > base-period mean of 2.19%"},
+                    "x40wk1":   {"operator": ">",  "threshold_pct": 6.45, "description": "40-week lower CI bound > base-period mean of 6.45%"},
+                    "prob13wk": {"operator": ">=", "threshold": 0.55,     "description": "Probability of exceeding 13-week base-period mean >= 55%"},
                 },
                 "ranking": "prob13wk descending",
                 "note": "Probabilistic candidates — not investment advice. Not guaranteed outcomes.",

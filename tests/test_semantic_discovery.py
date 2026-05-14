@@ -132,9 +132,13 @@ def test_selections_published_have_interpretation_guidance(live_tools_by_name):
         )
         guidance = tool["interpretation_guidance"]
         assert "publication_criteria" in guidance
-        assert guidance["publication_criteria"]["prob13wk_minimum"] == 0.55
-        assert guidance["publication_criteria"]["x13wk1_threshold_pct"] == 2.19
-        assert guidance["publication_criteria"]["all_criteria_required"] is True
+        criteria = guidance["publication_criteria"]
+        # Criteria must be operator-structured
+        assert criteria["x13wk1"]["operator"] == ">"
+        assert criteria["x13wk1"]["threshold_pct"] == 2.19
+        assert criteria["prob13wk"]["operator"] == ">="
+        assert criteria["prob13wk"]["threshold"] == 0.55
+        assert criteria["all_criteria_required"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +194,8 @@ def test_ai_context_has_probabilistic_semantics(ai_context_response):
 
     assert "stim_select" in semantics
     sel = semantics["stim_select"]
-    assert ">= 55%" in sel["thresholds"]["prob13wk"]
+    assert sel["criteria"]["prob13wk"]["operator"] == ">="
+    assert sel["criteria"]["prob13wk"]["threshold"] == 0.55
     assert "not investment advice" in sel["note"].lower()
 
     assert "regime_score" in semantics
