@@ -268,8 +268,46 @@ def test_static_stim_tools_expose_interpretation_guidance(manifest):
         assert tool["interpretation_dependency"]["endpoint"] == "/v1/meta/stim"
         assert tool["interpretation_dependency"]["required_before_interpretation"] is True
         assert "base_period_mean_returns_pct" in tool["interpretation_guidance"]
+        assert tool["interpretation_guidance"]["mean_return_fields"] == ["x4wk", "x13wk", "x40wk"]
+        assert tool["interpretation_guidance"]["standard_deviation_fields"] == [
+            "x4wksd",
+            "x13wksd",
+            "x40wksd",
+        ]
         assert tool["interpretation_guidance"]["calculation"]["probability_outperform"] == "1 - normal_cdf(z)"
         assert tool["interpretation_guidance"]["stim_select_style_logic"]["prob13wk_minimum"] == 0.55
+        assert "prob13wk_minimum_description" in tool["interpretation_guidance"]["stim_select_style_logic"]
+
+
+def test_static_stim_guidance_matches_live_ai_tools_for_key_fields(manifest):
+    from routers.ai import ai_tools
+
+    live_tools = {
+        tool["name"]: tool
+        for tool in ai_tools()["tools"]
+        if tool["name"] in {"stim_latest", "stim_history"}
+    }
+    key_fields = (
+        "mean_return_fields",
+        "standard_deviation_fields",
+        "interpretation_rules",
+    )
+
+    for name in ("stim_latest", "stim_history"):
+        static_tool = _tool_by_name(manifest, name)
+        assert static_tool is not None
+        live_tool = live_tools[name]
+        static_guidance = static_tool["interpretation_guidance"]
+        live_guidance = live_tool["interpretation_guidance"]
+
+        for field in key_fields:
+            assert static_guidance[field] == live_guidance[field]
+
+        static_logic = static_guidance["stim_select_style_logic"]
+        live_logic = live_guidance["stim_select_style_logic"]
+        for key in live_logic:
+            assert key in static_logic
+            assert static_logic[key] == live_logic[key]
 
 
 def test_static_planning_helpers_present(manifest):

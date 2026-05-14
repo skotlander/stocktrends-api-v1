@@ -470,6 +470,8 @@
           "x13wk": "13-week baseline from /v1/meta/stim",
           "x40wk": "40-week baseline from /v1/meta/stim"
         },
+        "mean_return_fields": ["x4wk", "x13wk", "x40wk"],
+        "standard_deviation_fields": ["x4wksd", "x13wksd", "x40wksd"],
         "calculation": {
           "delta_vs_base": "stim_mean - base_mean",
           "z": "(base_mean - stim_mean) / standard_deviation",
@@ -477,11 +479,14 @@
         },
         "interpretation_rules": [
           "Call /v1/meta/stim before interpreting ST-IM results.",
+          "Raw x4wk/x13wk/x40wk means are estimated mean returns, not standalone bullish signals.",
           "Do not interpret a positive raw mean as bullish unless it exceeds the relevant base mean or has adequate probability of exceeding it.",
+          "Use x4wksd/x13wksd/x40wksd to estimate probability of exceeding base-period means.",
           "If is_stale=true or missing_reason is present, treat the ST-IM result as historical fallback and disclose that limitation."
         ],
         "stim_select_style_logic": {
           "prob13wk_minimum": 0.55,
+          "prob13wk_minimum_description": "13-week probability of exceeding the base-period mean should be at least 55%.",
           "lower_confidence_bounds": "Emphasize lower confidence bounds relative to base-period means where applicable."
         }
       },
@@ -536,6 +541,8 @@
           "x13wk": "13-week baseline from /v1/meta/stim",
           "x40wk": "40-week baseline from /v1/meta/stim"
         },
+        "mean_return_fields": ["x4wk", "x13wk", "x40wk"],
+        "standard_deviation_fields": ["x4wksd", "x13wksd", "x40wksd"],
         "calculation": {
           "delta_vs_base": "stim_mean - base_mean",
           "z": "(base_mean - stim_mean) / standard_deviation",
@@ -543,11 +550,14 @@
         },
         "interpretation_rules": [
           "Call /v1/meta/stim before interpreting ST-IM results.",
+          "Raw x4wk/x13wk/x40wk means are estimated mean returns, not standalone bullish signals.",
           "Do not interpret a positive raw mean as bullish unless it exceeds the relevant base mean or has adequate probability of exceeding it.",
+          "Use x4wksd/x13wksd/x40wksd to estimate probability of exceeding base-period means.",
           "If is_stale=true or missing_reason is present, treat the ST-IM result as historical fallback and disclose that limitation."
         ],
         "stim_select_style_logic": {
           "prob13wk_minimum": 0.55,
+          "prob13wk_minimum_description": "13-week probability of exceeding the base-period mean should be at least 55%.",
           "lower_confidence_bounds": "Emphasize lower confidence bounds relative to base-period means where applicable."
         }
       },
