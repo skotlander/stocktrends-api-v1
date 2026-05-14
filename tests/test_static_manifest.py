@@ -381,6 +381,68 @@ def test_all_registry_endpoints_in_static_tools(manifest):
 
 
 # ---------------------------------------------------------------------------
+# Semantic fields — analytical_role
+# ---------------------------------------------------------------------------
+
+_EXPECTED_STATIC_ANALYTICAL_ROLES: dict[str, str] = {
+    # static tool name → expected analytical_role
+    "agent_screener_top": "market_intelligence_filter",
+    "market_regime_latest": "market_regime_classifier",
+    "market_regime_history": "market_regime_classifier",
+    "market_regime_forecast": "market_regime_classifier",
+    "breadth_sector_latest": "market_breadth_context",
+    "breadth_sector_history": "market_breadth_context",
+    "leadership_summary_latest": "leadership_intelligence",
+    "leadership_rotation_history": "leadership_intelligence",
+    "stim_latest": "probabilistic_forward_inference",
+    "stim_history": "probabilistic_forward_inference",
+    "selections_latest": "probabilistic_selection_universe",
+    "selections_history": "probabilistic_selection_universe",
+    "selections_published_latest": "probabilistic_selection_list",
+    "selections_published_history": "probabilistic_selection_list",
+    "evaluate_symbol": "symbol_decision_engine",
+    "construct_portfolio": "portfolio_construction_engine",
+    "evaluate_portfolio": "portfolio_evaluation_engine",
+    "compare_portfolios": "portfolio_evaluation_engine",
+    "indicators_latest": "symbol_signal_intelligence",
+    "indicators_history": "symbol_signal_intelligence",
+    "prices_latest": "price_context",
+    "prices_history": "price_context",
+    "stwr_reports_latest": "curated_signal_report",
+    "stwr_reports_history": "curated_signal_report",
+}
+
+
+def test_static_paid_tools_have_analytical_role(manifest):
+    """Paid tools in static/tools.json must carry an analytical_role field."""
+    missing = []
+    for name in _EXPECTED_STATIC_ANALYTICAL_ROLES:
+        tool = _tool_by_name(manifest, name)
+        assert tool is not None, f"Tool '{name}' must be present in static/tools.json"
+        if "analytical_role" not in tool:
+            missing.append(name)
+    assert not missing, f"These tools are missing analytical_role in static/tools.json: {missing}"
+
+
+def test_static_analytical_role_values_correct(manifest):
+    """analytical_role values in tools.json must match canonical expected mapping."""
+    violations = []
+    for name, expected_role in _EXPECTED_STATIC_ANALYTICAL_ROLES.items():
+        static_tool = _tool_by_name(manifest, name)
+        if static_tool is None:
+            continue
+        static_role = static_tool.get("analytical_role")
+        if static_role != expected_role:
+            violations.append(
+                f"{name}: got {static_role!r}, expected {expected_role!r}"
+            )
+    assert not violations, (
+        "analytical_role values incorrect in static/tools.json:\n"
+        + "\n".join(violations)
+    )
+
+
+# ---------------------------------------------------------------------------
 # 7. No hardcoded STC costs
 # ---------------------------------------------------------------------------
 

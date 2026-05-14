@@ -724,6 +724,11 @@ def _append_registry_tool_templates(templates: list[dict]) -> list[dict]:
         if key in existing:
             if key in _REGISTRY_TOOL_TEMPLATE_OVERRIDES:
                 result[existing[key]] = tool_template
+            else:
+                # Inject semantic fields from registry into hand-authored templates.
+                for field in ("analytical_role", "interpretation_dependency", "interpretation_guidance", "required_interpretation_steps"):
+                    if field in tool_template and field not in result[existing[key]]:
+                        result[existing[key]][field] = tool_template[field]
             continue
         result.append(tool_template)
         existing[key] = len(result) - 1
@@ -881,6 +886,8 @@ def _build_workflow_summary(workflow: dict) -> dict:
             if step.get("pricing_rule_id")
         ],
         "best_for": workflow.get("best_for"),
+        "analytical_role": workflow.get("analytical_role"),
+        "research_goal": workflow.get("research_goal"),
         "agent_goal_examples": workflow.get("agent_goal_examples", []),
         "symbol_selection_guidance": workflow.get("symbol_selection_guidance"),
         "interpretation_guidance": workflow.get("interpretation_guidance"),
@@ -947,6 +954,121 @@ def ai_context():
             "rsi": "Relative performance ratio versus the S&P 500 benchmark over 13 weeks. Baseline = 100. Values >100 indicate outperformance; <100 indicate underperformance. Not the traditional Wilder RSI oscillator.",
             "rsi_updn": "Weekly direction of relative strength versus benchmark.",
             "vol_tag": "Unusual volume classification for the current week."
+        },
+        "analytical_framework": {
+            "positioning": (
+                "Not a raw price data or screener service. "
+                "Outputs are processed, ranked, and interpretation-ready. "
+                "Each endpoint family serves a distinct analytical role in a research chain."
+            ),
+            "endpoint_roles": {
+                "market_regime_classifier": "Classifies current market regime from trend distribution. Sets portfolio bias input.",
+                "market_breadth_context": "Measures sector/industry signal participation. Confirms or contradicts regime reading.",
+                "leadership_intelligence": "Identifies where RSI outperformance and bullish trend alignment are concentrated.",
+                "market_intelligence_filter": "Ranks candidate securities by signal quality before deeper analysis.",
+                "probabilistic_forward_inference": "ST-IM forward return distributions. Not momentum — requires base-period mean comparison.",
+                "probabilistic_selection_list": "STIM Select: securities satisfying all three ST-IM lower-bound thresholds plus prob13wk >= 55%.",
+                "probabilistic_selection_universe": "Base st_select universe without the published three-horizon threshold filter.",
+                "symbol_signal_intelligence": "Current and historical Stock Trends indicator fields for a symbol.",
+                "symbol_decision_engine": "Deterministic buy/hold/sell bias combining signal and regime context.",
+                "portfolio_construction_engine": "Builds a ranked equal-weight portfolio from eligible signal candidates.",
+                "portfolio_evaluation_engine": "Evaluates or compares portfolios against current signal and regime context.",
+                "curated_signal_report": "Named STWR screening reports: Stock Trends editorial signal lists.",
+                "price_context": "Weekly price rows as supporting context for signal interpretation.",
+            },
+        },
+        "analytical_chain": {
+            "description": "Recommended research sequence for a full probabilistic market intelligence workflow.",
+            "steps": [
+                {
+                    "step": 1,
+                    "role": "market_regime_classifier",
+                    "endpoint": "/v1/market/regime/latest",
+                    "purpose": "Classify current regime and set portfolio bias direction.",
+                },
+                {
+                    "step": 2,
+                    "role": "market_breadth_context",
+                    "endpoint": "/v1/breadth/sector/latest",
+                    "purpose": "Confirm regime reading with sector-level signal participation.",
+                },
+                {
+                    "step": 3,
+                    "role": "leadership_intelligence",
+                    "endpoint": "/v1/leadership/summary/latest",
+                    "purpose": "Identify sectors and stocks with concentrated RSI outperformance.",
+                },
+                {
+                    "step": 4,
+                    "role": "market_intelligence_filter",
+                    "endpoint": "/v1/agent/screener/top",
+                    "purpose": "Discover ranked signal candidates before deeper analysis.",
+                },
+                {
+                    "step": 5,
+                    "role": "probabilistic_forward_inference",
+                    "endpoint": "/v1/stim/latest",
+                    "purpose": "Enrich candidates with forward return distributions. Requires /v1/meta/stim for interpretation.",
+                },
+                {
+                    "step": 6,
+                    "role": "symbol_decision_engine",
+                    "endpoint": "/v1/decision/evaluate-symbol",
+                    "purpose": "Evaluate candidate for buy/hold/sell bias in regime context.",
+                },
+                {
+                    "step": 7,
+                    "role": "portfolio_construction_engine",
+                    "endpoint": "/v1/portfolio/construct",
+                    "purpose": "Build equal-weight portfolio from scored candidates.",
+                },
+                {
+                    "step": 8,
+                    "role": "portfolio_evaluation_engine",
+                    "endpoint": "/v1/portfolio/compare",
+                    "purpose": "Compare proposed vs existing portfolio; confirm improvement.",
+                },
+            ],
+        },
+        "probabilistic_semantics": {
+            "stim_model": {
+                "full_name": "Stock Trends Inference Model",
+                "output_type": "probabilistic forward return distribution",
+                "not_momentum": True,
+                "horizons_weeks": [4, 13, 40],
+                "fields_per_horizon": {
+                    "xNwk": "expected mean return",
+                    "xNwk1": "lower confidence bound",
+                    "xNwk2": "upper confidence bound",
+                    "xNwksd": "standard deviation",
+                },
+                "base_period_means_pct": {
+                    "x4wk": 0.0,
+                    "x13wk": 2.19,
+                    "x40wk": 6.45,
+                },
+                "interpretation_requirement": (
+                    "Always fetch /v1/meta/stim before interpreting ST-IM outputs. "
+                    "A positive raw mean is not bullish unless it exceeds the relevant base-period mean."
+                ),
+            },
+            "stim_select": {
+                "description": "Securities satisfying all three ST-IM lower-bound thresholds plus prob13wk publication threshold.",
+                "thresholds": {
+                    "x4wk1": "> 0.0%",
+                    "x13wk1": "> 2.19%",
+                    "x40wk1": "> 6.45%",
+                    "prob13wk": ">= 55%",
+                },
+                "ranking": "prob13wk descending",
+                "note": "Probabilistic candidates — not investment advice. Not guaranteed outcomes.",
+            },
+            "regime_score": {
+                "formula": "bullish_pct - bearish_pct",
+                "range": [-1.0, 1.0],
+                "interpretation": "Portfolio bias input, not a trade entry signal.",
+                "confirmation_required": "Compare with /v1/breadth/sector/latest and /v1/leadership/summary/latest.",
+            },
         },
         "trend_categories": {
             "^+": "bullish",
