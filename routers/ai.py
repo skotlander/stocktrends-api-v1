@@ -944,6 +944,7 @@ def ai_context():
                 "generic_screener_api",
                 "trade_execution_system",
                 "investment_adviser",
+                "investment_advice",
             ],
             "core_methodology": [
                 "Stock Trends trend classification",
@@ -997,6 +998,8 @@ def ai_context():
                 "baseline": 100,
                 "meaning": "relative performance versus benchmark; >100 outperformance, <100 underperformance",
                 "not": "traditional Wilder RSI oscillator",
+                "primary_definition": "/v1/meta/indicators",
+                "see_also": "interpretation_dependencies.rsi",
             },
             "market_structure_context": [
                 "market_regime",
@@ -1005,7 +1008,7 @@ def ai_context():
                 "leadership_rotation",
             ],
             "endpoint_roles": {
-                "market_regime_classifier": "Classifies current market regime from trend distribution. Sets portfolio bias input.",
+                "market_regime_classifier": "Classifies current market regime from trend distribution. Sets portfolio analysis context.",
                 "market_breadth_context": "Measures sector/industry signal participation. Confirms or contradicts regime reading.",
                 "leadership_intelligence": "Identifies where RSI outperformance and bullish trend alignment are concentrated.",
                 "market_intelligence_filter": "Ranks candidate securities by signal quality before deeper analysis.",
@@ -1013,8 +1016,8 @@ def ai_context():
                 "probabilistic_selection_list": "STIM Select: securities satisfying all three ST-IM lower-bound thresholds plus prob13wk >= 55%.",
                 "probabilistic_selection_universe": "Base st_select universe without the published three-horizon threshold filter.",
                 "symbol_signal_intelligence": "Current and historical Stock Trends indicator fields for a symbol.",
-                "symbol_decision_engine": "Deterministic buy/hold/sell bias combining signal and regime context.",
-                "portfolio_construction_engine": "Builds a ranked equal-weight portfolio from eligible signal candidates.",
+                "symbol_decision_engine": "Deterministic decision-support context combining symbol signals and regime context.",
+                "portfolio_construction_engine": "Produces ranked equal-weight portfolio construction analysis from eligible signal candidates.",
                 "portfolio_evaluation_engine": "Evaluates or compares portfolios against current signal and regime context.",
                 "curated_signal_report": "Named STWR screening reports: Stock Trends editorial signal lists.",
                 "price_context": "Weekly price rows as supporting context for signal interpretation.",
@@ -1046,7 +1049,7 @@ def ai_context():
                     "step": 4,
                     "role": "market_regime_classifier",
                     "endpoint": "/v1/market/regime/latest",
-                    "purpose": "Classify current regime and set portfolio bias direction.",
+                    "purpose": "Classify current regime and set portfolio analysis context.",
                 },
                 {
                     "step": 5,
@@ -1076,19 +1079,19 @@ def ai_context():
                     "step": 9,
                     "role": "symbol_decision_engine",
                     "endpoint": "/v1/decision/evaluate-symbol",
-                    "purpose": "Evaluate candidate for buy/hold/sell bias in regime context.",
+                    "purpose": "Evaluate candidate with deterministic decision-support context in the current regime.",
                 },
                 {
                     "step": 10,
                     "role": "portfolio_construction_engine",
                     "endpoint": "/v1/portfolio/construct",
-                    "purpose": "Build equal-weight portfolio from scored candidates.",
+                    "purpose": "Run equal-weight portfolio construction analysis from scored candidates.",
                 },
                 {
                     "step": 11,
                     "role": "portfolio_evaluation_engine",
                     "endpoint": "/v1/portfolio/compare",
-                    "purpose": "Compare proposed vs existing portfolio; assess whether the proposal improves signal score and regime alignment.",
+                    "purpose": "Compare portfolio alternatives; assess signal score and regime alignment differences.",
                 },
             ],
         },
@@ -1120,6 +1123,8 @@ def ai_context():
             },
             "stim_select": {
                 "description": "Securities satisfying all four publication criteria simultaneously.",
+                "thresholds_source": "/v1/meta/stim",
+                "criteria_context": "Current explanatory STIM Select methodology; use /v1/meta/stim for authoritative base-period threshold context.",
                 "criteria": {
                     "x4wk1":    {"operator": ">",  "threshold_pct": 0.0,  "description": "4-week lower CI bound > base-period mean of 0%"},
                     "x13wk1":   {"operator": ">",  "threshold_pct": 2.19, "description": "13-week lower CI bound > base-period mean of 2.19%"},
@@ -1132,7 +1137,7 @@ def ai_context():
             "regime_score": {
                 "formula": "bullish_pct - bearish_pct",
                 "range": [-1.0, 1.0],
-                "interpretation": "Portfolio bias input, not a trade entry signal.",
+                "interpretation": "Portfolio analysis input, not a trade entry signal.",
                 "confirmation_required": "Compare with /v1/breadth/sector/latest and /v1/leadership/summary/latest.",
             },
         },
@@ -1152,7 +1157,9 @@ def ai_context():
             "selections_published": {
                 "endpoints": ["/v1/selections/published/latest", "/v1/selections/published/history"],
                 "use_when": "strict STIM Select-style candidates",
-                "semantics": "all three ST-IM lower-bound thresholds plus prob13wk >= 55%",
+                "semantics": "current STIM Select methodology using three-horizon lower-bound thresholds plus prob13wk publication criteria",
+                "thresholds_source": "/v1/meta/stim",
+                "authoritative_threshold_context": "/v1/meta/stim",
                 "interpret_with": ["/v1/meta/stim"],
             },
             "stim": {
@@ -1193,8 +1200,8 @@ def ai_context():
             },
             "portfolio": {
                 "endpoints": ["/v1/portfolio/construct", "/v1/portfolio/evaluate", "/v1/portfolio/compare"],
-                "use_when": "portfolio synthesis",
-                "semantics": "candidate evidence, regime context, and signal structure synthesized into portfolio scores",
+                "use_when": "portfolio analysis and comparison",
+                "semantics": "candidate evidence, regime context, and signal structure synthesized into portfolio analysis scores",
                 "depends_on": ["/v1/market/regime/latest", "/v1/agent/screener/top", "/v1/stim/latest"],
             },
         },
@@ -1217,12 +1224,12 @@ def ai_context():
                 "success_condition": "Separate broad participation from narrow leadership concentration before selecting candidates.",
             },
             "portfolio_build": {
-                "mission": "Discover candidates and construct a bounded Stock Trends-informed portfolio proposal.",
+                "mission": "Discover candidates and run bounded Stock Trends-informed portfolio construction analysis.",
                 "core_path": ["/v1/agent/screener/top", "/v1/portfolio/construct", "/v1/portfolio/evaluate"],
-                "success_condition": "Portfolio output includes candidate evidence, resolved bias, regime context, and score structure.",
+                "success_condition": "Portfolio analysis output includes candidate evidence, resolved context, regime context, and score structure.",
             },
             "portfolio_compare_review": {
-                "mission": "Compare an existing allocation with a proposed Stock Trends-informed alternative.",
+                "mission": "Compare an existing allocation with a Stock Trends-informed analytical alternative.",
                 "core_path": ["/v1/portfolio/evaluate", "/v1/portfolio/construct", "/v1/portfolio/compare"],
                 "success_condition": "Explain score_delta, winner, alignment advantage, and regime fit without presenting advice.",
             },
@@ -1230,7 +1237,7 @@ def ai_context():
                 "mission": "Evaluate a known symbol in current regime context.",
                 "start_with": ["/v1/instruments/resolve", "/v1/market/regime/latest"],
                 "core_path": ["/v1/decision/evaluate-symbol", "/v1/indicators/latest", "/v1/stim/latest"],
-                "success_condition": "Report deterministic bias, confidence, signal notes, and ST-IM context when requested.",
+                "success_condition": "Report deterministic decision-support context, confidence, signal notes, and ST-IM context when requested.",
             },
             "full_research_sweep": {
                 "workflow_id_available": False,
@@ -1256,7 +1263,8 @@ def ai_context():
                 "raw_market_data_api",
                 "generic_screener_api",
                 "trade_execution_system",
-                "investment_advice_service",
+                "investment_adviser",
+                "investment_advice",
             ],
             "stim_is_not": ["momentum_indicator", "simple_price_change_signal"],
             "regime_breadth_leadership": "market-structure context; do not treat as standalone trade instructions",
@@ -1266,7 +1274,12 @@ def ai_context():
         "interpretation_dependencies": {
             "stim": {
                 "required_endpoint": "/v1/meta/stim",
-                "required_before": ["/v1/stim/latest", "/v1/stim/history", "/v1/selections/published/latest"],
+                "required_before": [
+                    "/v1/stim/latest",
+                    "/v1/stim/history",
+                    "/v1/selections/latest",
+                    "/v1/selections/published/latest",
+                ],
                 "dependency": "base-period mean returns for 4, 13, and 40-week horizons",
             },
             "indicators": {
@@ -1279,6 +1292,8 @@ def ai_context():
                 "above_baseline": "outperformance",
                 "below_baseline": "underperformance",
                 "not": "traditional Wilder RSI oscillator",
+                "primary_definition": "/v1/meta/indicators",
+                "see_also": "analytical_framework.rsi_benchmark_baseline",
             },
             "leadership": {
                 "recommended_endpoint": "/v1/leadership/definitions",
@@ -1487,7 +1502,7 @@ def ai_context():
             "Use /v1/ai/context as the secondary explanatory endpoint for dataset and endpoint-family context.",
             "Before calling premium endpoints, call /v1/ai/proof/market-edge (no auth required) to inspect signal structure and confirm field schemas before purchasing access.",
             "Use /v1/docs and /v1/openapi.json for exact request and response contracts.",
-            "Use /v1/workflows to select an investment-research strategy and recommended endpoint sequence.",
+            "Use /v1/workflows to select a market-research strategy and endpoint sequence.",
             "Use planning helpers (/v1/cost-estimate, /v1/instruments/lookup, /v1/instruments/resolve, /v1/stwr/reports/catalog, /v1/meta/indicators, /v1/meta/stim, /v1/meta/stwr, /v1/leadership/definitions) to resolve symbols, estimate costs, and understand metadata before paid calls.",
             "Use /v1/pricing/catalog to discover live pricing rules before calling premium endpoints.",
             "Use /v1/pricing to understand payment identity, agent identity, accepted headers, and supported rails.",

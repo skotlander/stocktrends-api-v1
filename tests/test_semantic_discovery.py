@@ -229,9 +229,14 @@ def test_ai_context_has_mt4_semantic_sections(ai_context_response):
 
 def test_ai_context_service_identity_prevents_flattening(ai_context_response):
     identity = ai_context_response["service_identity"]
+    boundaries = ai_context_response["decision_boundaries"]
     assert identity["primary_category"] == "agent_native_probabilistic_market_intelligence_infrastructure"
     assert "raw_market_data_api" in identity["is_not"]
     assert "generic_screener_api" in identity["is_not"]
+    assert "investment_adviser" in identity["is_not"]
+    assert "investment_advice" in identity["is_not"]
+    assert "investment_advice_service" not in identity["is_not"]
+    assert boundaries["stock_trends_is_not"] == identity["is_not"]
     assert identity["forecast_horizons_weeks"] == [4, 13, 40]
 
     dominant = identity["dominant_description"].lower()
@@ -248,11 +253,29 @@ def test_ai_context_stim_semantics_require_base_period_comparison(ai_context_res
     assert "momentum_indicator" in stim["not"]
     assert stim["comparison_required"] is True
     assert "base-period mean" in stim["comparison_rule"]
+    assert stim["primary_probability_field"] == "prob13wk"
     assert stim["base_period_means_pct"] == {
         "x4wk": 0.0,
         "x13wk": 2.19,
         "x40wk": 6.45,
     }
+
+
+def test_ai_context_stim_dependencies_include_base_and_published_selections(ai_context_response):
+    dependency = ai_context_response["interpretation_dependencies"]["stim"]
+    required_before = dependency["required_before"]
+    assert dependency["required_endpoint"] == "/v1/meta/stim"
+    assert "/v1/selections/latest" in required_before
+    assert "/v1/selections/published/latest" in required_before
+
+    stim_select = ai_context_response["probabilistic_semantics"]["stim_select"]
+    assert stim_select["thresholds_source"] == "/v1/meta/stim"
+    assert "Current explanatory" in stim_select["criteria_context"]
+    assert "authoritative" in stim_select["criteria_context"]
+
+    published = ai_context_response["endpoint_family_relationships"]["selections_published"]
+    assert published["thresholds_source"] == "/v1/meta/stim"
+    assert published["authoritative_threshold_context"] == "/v1/meta/stim"
 
 
 def test_ai_context_rsi_benchmark_relative_semantics(ai_context_response):
@@ -265,6 +288,9 @@ def test_ai_context_rsi_benchmark_relative_semantics(ai_context_response):
     framework_rsi = ai_context_response["analytical_framework"]["rsi_benchmark_baseline"]
     assert framework_rsi["baseline"] == 100
     assert "relative performance" in framework_rsi["meaning"]
+    assert framework_rsi["primary_definition"] == "/v1/meta/indicators"
+    assert framework_rsi["see_also"] == "interpretation_dependencies.rsi"
+    assert rsi["see_also"] == "analytical_framework.rsi_benchmark_baseline"
 
 
 def test_ai_context_post_execution_semantics(ai_context_response):
@@ -320,7 +346,7 @@ def test_ai_context_endpoint_family_when_to_use_what(ai_context_response):
     assert families["indicators"]["use_when"] == "Stock Trends signal context for a symbol"
     assert families["breadth"]["use_when"] == "participation and confirmation"
     assert families["leadership"]["use_when"] == "concentration and rotation analysis"
-    assert families["portfolio"]["use_when"] == "portfolio synthesis"
+    assert families["portfolio"]["use_when"] == "portfolio analysis and comparison"
 
 
 def test_ai_context_workflow_guidance_covers_agent_missions(ai_context_response):
