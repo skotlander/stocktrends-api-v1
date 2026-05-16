@@ -46,9 +46,12 @@ _FULL_URL = f"{_BASE_URL}{_PATH}"
 _RICH_HEADER_PATHS = [
     "/v1/breadth/sector/latest",
     "/v1/leadership/summary/latest",
+    "/v1/leadership/rotation/history",
+    "/v1/breadth/sector/history",
     "/v1/stim/history",
     "/v1/selections/published/latest",
 ]
+_UNDICI_SAFE_HEADER_THRESHOLD_BYTES = 8192
 
 
 def _decode_header(header_b64: str) -> dict:
@@ -560,7 +563,45 @@ class TestCompactChallengeMode:
             challenge_mode="compact",
         )
 
-        assert len(compact_header) < 8192
+        assert len(compact_header) < _UNDICI_SAFE_HEADER_THRESHOLD_BYTES
+
+    @pytest.mark.parametrize("path", _RICH_HEADER_PATHS)
+    def test_full_rich_headers_document_compact_mode_need(self, monkeypatch, path):
+        """Default rich discovery headers are intentionally large; compact is opt-in."""
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        _, default_header = build_x402_challenge(
+            path=path,
+            amount_usd=_AMOUNT,
+            method="GET",
+        )
+        _, explicit_full_header = build_x402_challenge(
+            path=path,
+            amount_usd=_AMOUNT,
+            method="GET",
+            challenge_mode="full",
+        )
+        _, compact_header = build_x402_challenge(
+            path=path,
+            amount_usd=_AMOUNT,
+            method="GET",
+            challenge_mode="compact",
+        )
+
+        assert default_header == explicit_full_header
+        assert len(default_header) > _UNDICI_SAFE_HEADER_THRESHOLD_BYTES
+        assert len(compact_header) < _UNDICI_SAFE_HEADER_THRESHOLD_BYTES
+        assert len(compact_header) < len(default_header)
+
+        default_bazaar = _decode_header(default_header)["extensions"]["bazaar"]
+        compact_bazaar = _decode_header(compact_header)["extensions"]["bazaar"]
+        assert "parameters" in default_bazaar["info"]["input"]
+        assert "schema" in default_bazaar["info"]["input"]
+        assert "response_shape" in default_bazaar["info"]["output"]
+        assert "example" in default_bazaar["info"]["output"]
+        assert "parameters" not in compact_bazaar["info"]["input"]
+        assert "schema" not in compact_bazaar["info"]["input"]
+        assert "response_shape" not in compact_bazaar["info"]["output"]
+        assert "example" not in compact_bazaar["info"]["output"]
 
     def test_compact_header_preserves_x402_resource_accepts_and_pricing(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
