@@ -45,11 +45,15 @@ def test_root_guides_to_ai_tools_first(client):
     body = response.json()
     assert body["message"] == "Start with the machine-readable tools manifest for agent discovery."
     assert "Autonomous portfolio intelligence API for AI agents" in body["description"]
-    assert body["start_here"] == "/v1/ai/tools"
-    assert body["secondary"] == "/v1/ai/context"
-    assert body["docs"] == "/v1/docs"
-    assert body["openapi"] == "/v1/openapi.json"
-    assert "/v1/workflows" in body["planning_helpers"]
+    assert body["developer_portal"] == "https://developer.stocktrends.com/"
+    assert body["start_here"] == "https://api.stocktrends.com/v1/ai/tools"
+    assert body["secondary_context"] == "https://api.stocktrends.com/v1/ai/context"
+    assert body["secondary"] == "https://api.stocktrends.com/v1/ai/context"
+    assert body["workflows"] == "https://api.stocktrends.com/v1/workflows"
+    assert body["pricing_catalog"] == "https://api.stocktrends.com/v1/pricing/catalog"
+    assert body["docs"] == "https://api.stocktrends.com/v1/docs"
+    assert body["openapi"] == "https://api.stocktrends.com/v1/openapi.json"
+    assert "https://api.stocktrends.com/v1/workflows" in body["planning_helpers"]
 
 
 def test_public_not_found_guides_to_ai_tools_first(client):
