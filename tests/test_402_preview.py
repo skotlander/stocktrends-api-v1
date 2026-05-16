@@ -390,6 +390,40 @@ def test_x402_challenge_includes_stocktrends_preview(client_x402_challenge_known
     )
 
 
+def test_default_x402_challenge_preview_remains_rich(client_x402_challenge_known):
+    """Default challenge mode keeps the rich first-discovery body preview."""
+    response = client_x402_challenge_known.get(
+        _KNOWN_PREVIEW_PATH,
+        headers={"X-StockTrends-Payment-Method": "x402"},
+    )
+    assert response.status_code == 402
+    preview = response.json()["stocktrends_preview"]
+
+    assert "required_inputs" in preview
+    assert "response_shape" in preview
+    assert "example_object" in preview
+
+
+def test_compact_x402_challenge_preview_uses_compact_body(client_x402_challenge_known):
+    """Compact mode avoids returning large preview arrays in the 402 body."""
+    response = client_x402_challenge_known.get(
+        _KNOWN_PREVIEW_PATH,
+        headers={
+            "X-StockTrends-Payment-Method": "x402",
+            "X-StockTrends-Challenge-Mode": "compact",
+        },
+    )
+    assert response.status_code == 402
+    preview = response.json()["stocktrends_preview"]
+
+    assert "response_shape" not in preview
+    assert "example_object" not in preview
+    assert "required_inputs" not in preview
+    assert preview["discovery"]["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+    assert preview["not_investment_advice"] is True
+    assert preview["not_investment_adviser"] is True
+
+
 def test_x402_challenge_preview_is_schema_only(client_x402_challenge_known):
     """stocktrends_preview must not contain paid response values."""
     body = client_x402_challenge_known.get(

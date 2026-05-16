@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any
 
 
@@ -21,6 +22,7 @@ AI_CONTEXT_URL = "https://api.stocktrends.com/v1/ai/context"
 TOOLS_MANIFEST_URL = "https://api.stocktrends.com/v1/ai/tools"
 WORKFLOWS_URL = "https://api.stocktrends.com/v1/workflows"
 PRICING_CATALOG_URL = "https://api.stocktrends.com/v1/pricing/catalog"
+COMPACT_SAFE_EXAMPLE_MAX_BYTES = 384
 
 # ---------------------------------------------------------------------------
 # Canonical analytical role constants.
@@ -1540,6 +1542,59 @@ def build_endpoint_preview(
     return preview
 
 
+def build_compact_endpoint_preview(
+    path: str,
+    *,
+    pricing_rule_id: str | None = None,
+    stc_cost: str | None = None,
+    effective_price_usd: str | None = None,
+) -> dict[str, Any] | None:
+    entry = _ENDPOINT_METADATA_BY_PATH.get(path)
+    if entry is None:
+        return None
+
+    resolved_pricing_rule_id = pricing_rule_id or entry.get("pricing_rule_id")
+    input_location = input_location_for_method(entry["method"])
+    preview: dict[str, Any] = {
+        "endpoint": {
+            "method": entry["method"],
+            "path": entry["path"],
+            "purpose": entry["purpose"],
+            "category": entry["category"],
+            "access_type": entry.get("access_type", "paid"),
+            "requires_payment": bool(entry.get("requires_payment", True)),
+        },
+        "supported_rails": list(entry["supported_rails"]),
+        "input_location": input_location,
+        "parameter_source": input_location,
+        "input_summary": _compact_input_summary(input_location),
+        "parameter_source_summary": _compact_parameter_source_summary(input_location),
+        "output_summary": entry["output_summary"],
+        "not_investment_advice": True,
+        "not_investment_adviser": True,
+        "discovery": {
+            "tools_manifest": TOOLS_MANIFEST_URL,
+            "ai_context": AI_CONTEXT_URL,
+            "workflows": WORKFLOWS_URL,
+            "pricing_catalog": PRICING_CATALOG_URL,
+            "developer_portal": DEVELOPER_PORTAL_URL,
+        },
+        "pricing": {
+            "pricing_rule_id": resolved_pricing_rule_id,
+            "stc_cost": stc_cost,
+            "effective_price_usd": effective_price_usd,
+            "unit": "request",
+            "cost_source": "/v1/pricing/catalog",
+        },
+    }
+    safe_example_request = _small_safe_example_request(entry)
+    if safe_example_request is not None:
+        preview["safe_example_request"] = safe_example_request
+    if entry.get("analytical_role"):
+        preview["analytical_role"] = entry["analytical_role"]
+    return preview
+
+
 def input_location_for_method(method: str) -> str:
     return "query" if method.upper() in {"GET", "HEAD", "DELETE"} else "body"
 
@@ -1771,6 +1826,28 @@ def _bazaar_endpoint_description(entry: dict[str, Any] | None, path: str) -> str
     )
 
 
+def _compact_input_summary(location: str) -> str:
+    if location == "query":
+        return "Supply endpoint parameters as query parameters; fetch tools_manifest for the full schema."
+    return "Supply endpoint parameters as a JSON request body; fetch tools_manifest for the full schema."
+
+
+def _compact_parameter_source_summary(location: str) -> str:
+    return f"Parameter source is {location}; full names, defaults, and limits are in tools_manifest."
+
+
+def _small_safe_example_request(entry: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not entry:
+        return None
+    example = copy.deepcopy(entry.get("safe_example_request"))
+    if not isinstance(example, dict):
+        return None
+    encoded = json.dumps(example, separators=(",", ":"), ensure_ascii=False)
+    if len(encoded.encode("utf-8")) > COMPACT_SAFE_EXAMPLE_MAX_BYTES:
+        return None
+    return example
+
+
 def build_bazaar_extension(path: str, method: str | None = None) -> dict[str, Any]:
     """
     Build Coinbase/x402 Bazaar v2 discovery metadata for a Payment Required response.
@@ -1879,6 +1956,76 @@ def build_bazaar_extension(path: str, method: str | None = None) -> dict[str, An
                     "output": output_schema,
                 },
                 "required": ["input", "output"],
+            },
+        }
+    }
+
+
+def build_compact_bazaar_extension(path: str, method: str | None = None) -> dict[str, Any]:
+    """
+    Build compact Bazaar metadata for clients that opt into smaller x402 headers.
+
+    This intentionally omits full input/output schemas, parameter arrays,
+    response_shape arrays, and large examples. The full builder above remains
+    the default Seller Tools discovery surface.
+    """
+    entry = _ENDPOINT_METADATA_BY_PATH.get(path)
+    http_method = (method or (entry or {}).get("method") or "GET").upper()
+    location = input_location_for_method(http_method)
+
+    info: dict[str, Any] = {
+        "service_name": SERVICE_NAME,
+        "title": str((entry or {}).get("title") or path),
+        "analytical_role": (entry or {}).get("analytical_role"),
+        "endpoint_family": (entry or {}).get("category"),
+        "research_goal": (entry or {}).get("purpose"),
+        "safe_for_autonomous_execution_with_budget_controls": True,
+        "state_mutation": False,
+        "not_investment_advice": True,
+        "not_investment_adviser": True,
+        "input_location": {
+            "location": location,
+            "summary": _compact_input_summary(location),
+        },
+        "parameter_source": {
+            "source": location,
+            "summary": _compact_parameter_source_summary(location),
+        },
+        "input": {
+            "type": "http",
+            "method": http_method,
+            "location": location,
+            "summary": _compact_input_summary(location),
+        },
+        "output": {
+            "type": "json",
+            "summary": str(
+                (entry or {}).get("output_summary")
+                or get_bazaar_output(path).get("description")
+                or "JSON response returned after successful payment."
+            ),
+        },
+        "tools_manifest": TOOLS_MANIFEST_URL,
+        "ai_context": AI_CONTEXT_URL,
+        "workflows": WORKFLOWS_URL,
+        "pricing_catalog": PRICING_CATALOG_URL,
+        "developer_portal": DEVELOPER_PORTAL_URL,
+    }
+
+    safe_example_request = _small_safe_example_request(entry)
+    if safe_example_request is not None:
+        info["safe_example_request"] = safe_example_request
+
+    return {
+        "bazaar": {
+            "info": info,
+            "schema": {
+                "type": "object",
+                "description": (
+                    "Compact Bazaar metadata. Fetch tools_manifest for full "
+                    "input/output schemas and examples."
+                ),
+                "additionalProperties": True,
             },
         }
     }
