@@ -30,9 +30,11 @@ from decimal import Decimal
 import pytest
 
 import payments.x402 as x402_module
+from payments.enforcement import enforce_x402_payment
 from payments.x402 import (
     build_x402_requirements,
     build_x402_challenge,
+    normalize_challenge_mode,
     _extract_single_requirement,
 )
 
@@ -41,6 +43,16 @@ _PATH = "/v1/market/regime/latest"
 _AMOUNT = Decimal("0.0005")
 _BASE_URL = "https://api.stocktrends.com"
 _FULL_URL = f"{_BASE_URL}{_PATH}"
+_RICH_HEADER_PATHS = [
+    "/v1/breadth/sector/latest",
+    "/v1/leadership/summary/latest",
+    "/v1/stim/history",
+    "/v1/selections/published/latest",
+]
+
+
+def _decode_header(header_b64: str) -> dict:
+    return json.loads(base64.b64decode(header_b64).decode("utf-8"))
 
 
 @pytest.fixture()
@@ -465,3 +477,183 @@ class TestBazaarRichDiscoveryMetadata:
         assert "investment advice service" not in serialized
         assert "guaranteed return" not in serialized
         assert "stock trends is an investment adviser" not in serialized
+
+
+# ---------------------------------------------------------------------------
+# Compact challenge mode
+# ---------------------------------------------------------------------------
+
+class TestCompactChallengeMode:
+    def test_challenge_mode_parser_defaults_to_full(self):
+        assert normalize_challenge_mode(None) == "full"
+        assert normalize_challenge_mode("") == "full"
+        assert normalize_challenge_mode("full") == "full"
+        assert normalize_challenge_mode("unknown") == "full"
+        assert normalize_challenge_mode(" compact ") == "compact"
+
+    def test_default_402_still_contains_rich_bazaar_metadata_and_input_schema(self, monkeypatch):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        reqs = build_x402_requirements(
+            path="/v1/breadth/sector/latest",
+            amount_usd=_AMOUNT,
+            method="GET",
+        )
+        bazaar = reqs["extensions"]["bazaar"]
+        info = bazaar["info"]
+
+        assert info["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert "parameters" in info["input"]
+        assert "schema" in info["input"]
+        assert "query" in info["input"]
+        assert "response_shape" in info["output"]
+        assert "example" in info["output"]
+        assert "input" in bazaar["schema"]["properties"]
+        assert "output" in bazaar["schema"]["properties"]
+
+    def test_compact_402_has_payment_required_header_from_request_mode(self, monkeypatch):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        result = enforce_x402_payment(
+            headers={"x-stocktrends-challenge-mode": "compact"},
+            path="/v1/breadth/sector/latest",
+            method="GET",
+            amount_usd=_AMOUNT,
+            validation_valid=True,
+            validation_error=None,
+            validation_detail=None,
+            validated_payment_reference=None,
+            validated_payment_network=None,
+            validated_payment_token=None,
+            validated_payment_amount_native=None,
+            replay_checker=lambda _reference: False,
+        )
+
+        assert result.outcome == "challenge"
+        assert result.payment_required_header
+        decoded = _decode_header(result.payment_required_header)
+        assert decoded["extensions"]["bazaar"]["info"]["input"]["summary"]
+        assert "parameters" not in decoded["extensions"]["bazaar"]["info"]["input"]
+
+    @pytest.mark.parametrize("path", _RICH_HEADER_PATHS)
+    def test_compact_header_is_smaller_than_full(self, monkeypatch, path):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        _, full_header = build_x402_challenge(
+            path=path,
+            amount_usd=_AMOUNT,
+            method="GET",
+        )
+        _, compact_header = build_x402_challenge(
+            path=path,
+            amount_usd=_AMOUNT,
+            method="GET",
+            challenge_mode="compact",
+        )
+
+        assert len(compact_header) < len(full_header)
+
+    @pytest.mark.parametrize("path", _RICH_HEADER_PATHS)
+    def test_compact_header_stays_below_undici_safe_threshold(self, monkeypatch, path):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        _, compact_header = build_x402_challenge(
+            path=path,
+            amount_usd=_AMOUNT,
+            method="GET",
+            challenge_mode="compact",
+        )
+
+        assert len(compact_header) < 8192
+
+    def test_compact_header_preserves_x402_resource_accepts_and_pricing(self, monkeypatch):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        body, compact_header = build_x402_challenge(
+            path="/v1/leadership/summary/latest",
+            amount_usd=_AMOUNT,
+            method="GET",
+            challenge_mode="compact",
+        )
+        decoded = _decode_header(compact_header)
+
+        assert body["payment_required"] == decoded
+        assert decoded["x402Version"] == 2
+        assert decoded["resource"]["url"] == f"{_BASE_URL}/v1/leadership/summary/latest"
+        assert decoded["resource"]["mimeType"] == "application/json"
+        assert decoded["resource"]["description"].strip()
+        assert isinstance(decoded["accepts"], list) and decoded["accepts"]
+        accept = decoded["accepts"][0]
+        assert accept["scheme"] == "exact"
+        assert accept["network"] == "eip155:8453"
+        assert accept["amount"] == "500"
+        assert "asset" in accept
+        assert "payTo" in accept
+        assert "maxTimeoutSeconds" in accept
+        assert "extra" in accept
+
+    def test_compact_mode_does_not_change_pricing_or_payment_requirement(self, monkeypatch):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        full = build_x402_requirements(
+            path="/v1/stim/history",
+            amount_usd=_AMOUNT,
+            method="GET",
+        )
+        compact = build_x402_requirements(
+            path="/v1/stim/history",
+            amount_usd=_AMOUNT,
+            method="GET",
+            challenge_mode="compact",
+        )
+
+        assert compact["resource"] == full["resource"]
+        assert compact["accepts"] == full["accepts"]
+
+    def test_compact_bazaar_info_uses_links_instead_of_large_schemas(self, monkeypatch):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        reqs = build_x402_requirements(
+            path="/v1/selections/published/latest",
+            amount_usd=_AMOUNT,
+            method="GET",
+            challenge_mode="compact",
+        )
+        bazaar = reqs["extensions"]["bazaar"]
+        info = bazaar["info"]
+
+        assert info["service_name"] == "Stock Trends API"
+        assert info["title"]
+        assert info["analytical_role"]
+        assert info["endpoint_family"]
+        assert info["research_goal"]
+        assert info["safe_for_autonomous_execution_with_budget_controls"] is True
+        assert info["state_mutation"] is False
+        assert info["not_investment_advice"] is True
+        assert info["not_investment_adviser"] is True
+        assert info["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert info["ai_context"] == "https://api.stocktrends.com/v1/ai/context"
+        assert info["workflows"] == "https://api.stocktrends.com/v1/workflows"
+        assert info["pricing_catalog"] == "https://api.stocktrends.com/v1/pricing/catalog"
+        assert info["developer_portal"] == "https://developer.stocktrends.com/"
+
+        assert info["input"]["type"] == "http"
+        assert info["input"]["method"] == "GET"
+        assert "schema" not in info["input"]
+        assert "parameters" not in info["input"]
+        assert "query" not in info["input"]
+        assert "body" not in info["input"]
+        assert "schema" not in info["output"]
+        assert "example" not in info["output"]
+        assert "response_shape" not in info["output"]
+        assert "examples" not in info
+        assert "properties" not in bazaar["schema"]
+
+    def test_unknown_challenge_mode_falls_back_to_full(self, monkeypatch):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        full = build_x402_requirements(
+            path="/v1/leadership/rotation/history",
+            amount_usd=_AMOUNT,
+            method="GET",
+        )
+        unknown = build_x402_requirements(
+            path="/v1/leadership/rotation/history",
+            amount_usd=_AMOUNT,
+            method="GET",
+            challenge_mode="please-be-small",
+        )
+
+        assert unknown == full

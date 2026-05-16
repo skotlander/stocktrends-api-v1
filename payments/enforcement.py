@@ -5,10 +5,12 @@ from decimal import Decimal
 from typing import Callable, Optional
 
 from payments.x402 import (
+    X402_CHALLENGE_MODE_HEADER,
     build_x402_challenge,
     build_x402_requirements,
     extract_x402_payment_context,
     has_payment_signature,
+    normalize_challenge_mode,
     settle_with_facilitator,
     verify_with_facilitator,
 )
@@ -58,6 +60,13 @@ def enforce_x402_payment(
     replay_checker: Callable[[str], bool],
     **_kwargs,
 ) -> PaymentEnforcementResult:
+    challenge_mode_header = None
+    if headers is not None:
+        challenge_mode_header = (
+            headers.get(X402_CHALLENGE_MODE_HEADER)
+            or headers.get(X402_CHALLENGE_MODE_HEADER.lower())
+        )
+    challenge_mode = normalize_challenge_mode(challenge_mode_header)
     current_payment_requirements = build_x402_requirements(
         path=path,
         amount_usd=amount_usd,
@@ -70,6 +79,7 @@ def enforce_x402_payment(
             path=path,
             amount_usd=amount_usd,
             method=method,
+            challenge_mode=challenge_mode,
         )
         return PaymentEnforcementResult(
             outcome="challenge",

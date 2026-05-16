@@ -17,6 +17,7 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 from discovery.endpoint_metadata import (
     build_bazaar_extension,
+    build_compact_bazaar_extension,
     get_resource_description,
 )
 
@@ -52,6 +53,9 @@ X402_DEFAULT_TOKEN_DECIMALS = int(os.getenv("X402_DEFAULT_TOKEN_DECIMALS", "6"))
 X402_SELLER_ADDRESS = os.getenv("X402_SELLER_ADDRESS", "")
 X402_TIMEOUT_SECONDS = float(os.getenv("X402_TIMEOUT_SECONDS", "10"))
 X402_API_BASE_URL = os.getenv("X402_API_BASE_URL", "").rstrip("/")
+X402_CHALLENGE_MODE_HEADER = "X-StockTrends-Challenge-Mode"
+X402_CHALLENGE_MODE_FULL = "full"
+X402_CHALLENGE_MODE_COMPACT = "compact"
 
 
 # =========================================================
@@ -113,6 +117,12 @@ def _decode_b64_json(value: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("Decoded base64 JSON is not an object.")
     return parsed
+
+
+def normalize_challenge_mode(value: str | None) -> str:
+    if isinstance(value, str) and value.strip().lower() == X402_CHALLENGE_MODE_COMPACT:
+        return X402_CHALLENGE_MODE_COMPACT
+    return X402_CHALLENGE_MODE_FULL
 
 
 # =========================================================
@@ -248,6 +258,7 @@ def build_x402_requirements(
     max_timeout_seconds: int = 300,
     description: str = "",
     mime_type: str = "application/json",
+    challenge_mode: str = X402_CHALLENGE_MODE_FULL,
 ) -> dict[str, Any]:
     extra: dict[str, Any] = {
         "name": X402_DEFAULT_TOKEN_NAME,
@@ -259,7 +270,11 @@ def build_x402_requirements(
     http_method = method.upper()
     resource_url = f"{X402_API_BASE_URL}{path}" if X402_API_BASE_URL else path
     resource_description = description or get_resource_description(path)
-    bazaar_extension = build_bazaar_extension(path, http_method)
+    normalized_challenge_mode = normalize_challenge_mode(challenge_mode)
+    if normalized_challenge_mode == X402_CHALLENGE_MODE_COMPACT:
+        bazaar_extension = build_compact_bazaar_extension(path, http_method)
+    else:
+        bazaar_extension = build_bazaar_extension(path, http_method)
 
     # Registry-backed Bazaar metadata keeps v2 discovery construction in one place.
     return {
@@ -319,6 +334,7 @@ def build_x402_challenge(
     token: str = X402_DEFAULT_TOKEN,
     scheme: str = X402_DEFAULT_SCHEME,
     pay_to: str = X402_SELLER_ADDRESS,
+    challenge_mode: str = X402_CHALLENGE_MODE_FULL,
 ) -> tuple[dict[str, Any], str]:
     if not isinstance(amount_usd, Decimal):
         amount_usd = Decimal(str(amount_usd))
@@ -331,6 +347,7 @@ def build_x402_challenge(
         token=token,
         scheme=scheme,
         pay_to=pay_to,
+        challenge_mode=challenge_mode,
     )
 
     challenge_body = {
