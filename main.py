@@ -73,6 +73,7 @@ def _root_discovery_links() -> dict[str, str]:
     return {
         "developer_portal": DEVELOPER_PORTAL_URL,
         "start_here": _absolute_url(DISCOVERY_START_HERE),
+        # Backward-compatible alias for clients that consumed the original root shape.
         "secondary": _absolute_url(DISCOVERY_SECONDARY),
         "secondary_context": _absolute_url(DISCOVERY_SECONDARY),
         "workflows": _absolute_url("/v1/workflows"),

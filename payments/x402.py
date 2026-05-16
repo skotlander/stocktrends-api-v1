@@ -17,7 +17,6 @@ from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
 from discovery.endpoint_metadata import (
     build_bazaar_extension,
-    get_bazaar_output,
     get_resource_description,
 )
 
@@ -260,41 +259,9 @@ def build_x402_requirements(
     http_method = method.upper()
     resource_url = f"{X402_API_BASE_URL}{path}" if X402_API_BASE_URL else path
     resource_description = description or get_resource_description(path)
-    bazaar_output = get_bazaar_output(path)
+    bazaar_extension = build_bazaar_extension(path, http_method)
 
-    # Bazaar extension shape differs by method class.
-    # GET/HEAD/DELETE: query-param style (no body fields required).
-    # POST/PUT/PATCH:  body style — declare bodyType and an empty body schema.
-    _QUERY_METHODS = {"GET", "HEAD", "DELETE"}
-    if http_method in _QUERY_METHODS:
-        bazaar_info: dict[str, Any] = {
-            "input": {"type": "http", "method": http_method},
-            "output": bazaar_output,
-        }
-        bazaar_schema_input_props: dict[str, Any] = {
-            "type": {"type": "string", "const": "http"},
-            "method": {"type": "string", "enum": [http_method]},
-        }
-        bazaar_schema_required = ["type", "method"]
-    else:
-        bazaar_info = {
-            "input": {"type": "http", "method": http_method, "bodyType": "json", "body": {}},
-            "output": bazaar_output,
-        }
-        bazaar_schema_input_props = {
-            "type": {"type": "string", "const": "http"},
-            "method": {"type": "string", "enum": [http_method]},
-            "bodyType": {"type": "string", "enum": ["json"]},
-            "body": {},
-        }
-        bazaar_schema_required = ["type", "method", "bodyType", "body"]
-
-    bazaar_extension = build_bazaar_extension(path, http_method)["bazaar"]
-    bazaar_info = bazaar_extension["info"]
-    bazaar_schema_input_props = bazaar_extension["schema"]["properties"]["input"]["properties"]
-    bazaar_schema_required = bazaar_extension["schema"]["properties"]["input"]["required"]
-    bazaar_output_schema = bazaar_extension["schema"]["properties"]["output"]
-
+    # Registry-backed Bazaar metadata keeps v2 discovery construction in one place.
     return {
         "x402Version": 2,
         # V2 canonical resource identity (ResourceInfo) — separate from accepts entries.
@@ -315,25 +282,7 @@ def build_x402_requirements(
                 "extra": extra,
             }
         ],
-        "extensions": {
-            "bazaar": {
-                "info": bazaar_info,
-                "schema": {
-                    "$schema": "https://json-schema.org/draft/2020-12/schema",
-                    "type": "object",
-                    "properties": {
-                        "input": {
-                            "type": "object",
-                            "properties": bazaar_schema_input_props,
-                            "required": bazaar_schema_required,
-                            "additionalProperties": False,
-                        },
-                        "output": bazaar_output_schema,
-                    },
-                    "required": ["input", "output"],
-                },
-            }
-        },
+        "extensions": bazaar_extension,
     }
 
 

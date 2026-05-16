@@ -340,11 +340,17 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         safe_example_request={
             "method": "GET",
             "path": "/v1/agent/screener/top",
-            "query": {"limit": 10, "min_rsi": 100},
+            "query": {"limit": 10, "min_rsi": 40},
         },
         optional_inputs={
             "limit": {"type": "integer", "required": False, "safe_default": 25, "minimum": 1, "maximum": 100},
-            "min_rsi": {"type": "integer", "required": False, "safe_default": 100, "description": "RSI baseline is 100."},
+            "min_rsi": {
+                "type": "integer",
+                "required": False,
+                "safe_default": 40,
+                "example": 40,
+                "description": "Minimum Stock Trends RSI threshold. RSI baseline is 100.",
+            },
             "exchange": {"type": "string", "required": False, "enum": EXCHANGE_ENUM},
         },
         analytical_role=ROLE_MARKET_INTELLIGENCE_FILTER,
@@ -1249,10 +1255,10 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             "min_rsi": {
                 "type": "integer",
                 "required": False,
-                "safe_default": 110,
+                "safe_default": 40,
                 "minimum": 0,
                 "maximum": 500,
-                "example": 110,
+                "example": 40,
                 "description": "Minimum Stock Trends RSI threshold. RSI baseline is 100.",
             },
             "min_mt_cnt": {
@@ -1284,7 +1290,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         safe_example_request={
             "method": "GET",
             "path": "/v1/leadership/summary/latest",
-            "query": {"exchange": "N", "type": "CS", "min_rsi": 110, "min_mt_cnt": 4},
+            "query": {"exchange": "N", "type": "CS", "min_rsi": 40, "min_mt_cnt": 4},
         },
         response_shape=[
             "request_id", "weekdate", "exchange", "filters.type", "filters.min_rsi",
@@ -1300,7 +1306,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             "request_id": "req_demo",
             "weekdate": "YYYY-MM-DD",
             "exchange": "N",
-            "filters": {"type": "CS", "min_rsi": 110, "min_mt_cnt": 4},
+            "filters": {"type": "CS", "min_rsi": 40, "min_mt_cnt": 4},
             "overall_leaders": [
                 {
                     "symbol": "SAMPLE",
@@ -1803,6 +1809,7 @@ def build_bazaar_extension(path: str, method: str | None = None) -> dict[str, An
     input_info: dict[str, Any] = {
         "type": "http",
         "method": http_method,
+        # Generic stable accessor; query/body below exposes the method-specific location.
         "schema": input_schema,
         "parameters": schema_to_parameters(input_schema, location),
         "example": safe_example_request,
