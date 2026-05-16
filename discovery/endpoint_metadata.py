@@ -14,6 +14,14 @@ from typing import Any
 
 SUPPORTED_RAILS = ["subscription", "x402", "mpp"]
 
+SERVICE_NAME = "Stock Trends API"
+SERVICE_CATEGORY = "agent_native_probabilistic_market_intelligence"
+DEVELOPER_PORTAL_URL = "https://developer.stocktrends.com/"
+AI_CONTEXT_URL = "https://api.stocktrends.com/v1/ai/context"
+TOOLS_MANIFEST_URL = "https://api.stocktrends.com/v1/ai/tools"
+WORKFLOWS_URL = "https://api.stocktrends.com/v1/workflows"
+PRICING_CATALOG_URL = "https://api.stocktrends.com/v1/pricing/catalog"
+
 # ---------------------------------------------------------------------------
 # Canonical analytical role constants.
 # Endpoint roles describe WHAT an endpoint does analytically.
@@ -42,6 +50,13 @@ SYMBOL_EXCHANGE_INPUT = {
     "required": True,
     "example": "IBM-N",
     "safe_default_for_demo": "IBM-N",
+    "pattern": "^[A-Z0-9.]+-[A-Z]$",
+    "description": "Stock Trends symbol plus exchange suffix.",
+}
+
+SYMBOL_EXCHANGE_PROPERTY_SCHEMA = {
+    "type": "string",
+    "example": "IBM-N",
     "pattern": "^[A-Z0-9.]+-[A-Z]$",
     "description": "Stock Trends symbol plus exchange suffix.",
 }
@@ -815,7 +830,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         pricing_rule_id="evaluate_symbol",
         resource_description="Deterministic symbol-level decision evaluation combining Stock Trends signal context with market regime context.",
         bazaar_output_description="Returns bias, confidence, decision_score, alignment, symbol_context, regime_context, and signal_notes for a requested symbol.",
-        purpose="Evaluate one symbol for a buy, hold, or sell bias in regime context.",
+        purpose="Evaluate one symbol for directional decision-support bias in regime context.",
         investment_agent_value="Combines signal and regime context into a compact decision object for agent workflows.",
         workflow_role="Symbol-level decision step.",
         input_rule="POST body may provide symbol_exchange, or symbol plus exchange.",
@@ -843,10 +858,38 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         investment_agent_value="Turns ranked signals into a bounded portfolio proposal with deterministic scoring context.",
         workflow_role="Portfolio construction.",
         optional_inputs={
-            "universe": {"type": "string", "required": False, "enum": ["top"], "safe_default": "top"},
-            "count": {"type": "integer", "required": False, "minimum": 1, "maximum": 10, "safe_default": 5},
-            "bias": {"type": "string", "required": False, "enum": ["auto", "bullish", "bearish"], "safe_default": "auto"},
-            "exchange": {"type": "string", "required": False, "enum": US_EXCHANGE_ENUM + ["T"]},
+            "universe": {
+                "type": "string",
+                "required": False,
+                "enum": ["top"],
+                "safe_default": "top",
+                "example": "top",
+                "description": "Candidate universe selector. Currently supports top-ranked signal candidates.",
+            },
+            "count": {
+                "type": "integer",
+                "required": False,
+                "minimum": 1,
+                "maximum": 10,
+                "safe_default": 5,
+                "example": 5,
+                "description": "Number of equal-weight positions to construct.",
+            },
+            "bias": {
+                "type": "string",
+                "required": False,
+                "enum": ["auto", "bullish", "bearish"],
+                "safe_default": "auto",
+                "example": "auto",
+                "description": "Portfolio orientation selector. auto derives context from market regime signals.",
+            },
+            "exchange": {
+                "type": "string",
+                "required": False,
+                "enum": US_EXCHANGE_ENUM + ["T"],
+                "example": "N",
+                "description": "Optional exchange filter for candidate selection.",
+            },
         },
         safe_example_request={"method": "POST", "path": "/v1/portfolio/construct", "json": {"universe": "top", "count": 5, "bias": "auto"}},
         response_shape=[
@@ -891,7 +934,29 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         purpose="Evaluate an existing or proposed portfolio.",
         investment_agent_value="Lets agents score portfolio alignment to current Stock Trends signal and regime context.",
         workflow_role="Portfolio review.",
-        required_inputs={"positions": {"type": "array", "required": True, "description": "List of symbol/weight positions."}},
+        required_inputs={
+            "positions": {
+                "type": "array",
+                "required": True,
+                "description": "List of symbol/weight positions.",
+                "example": [{"symbol_exchange": "IBM-N", "weight": 1.0}],
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "symbol_exchange": copy.deepcopy(SYMBOL_EXCHANGE_PROPERTY_SCHEMA),
+                        "weight": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "example": 1.0,
+                            "description": "Portfolio weight for this position.",
+                        },
+                    },
+                    "required": ["symbol_exchange", "weight"],
+                    "additionalProperties": False,
+                },
+            }
+        },
         safe_example_request={"method": "POST", "path": "/v1/portfolio/evaluate", "json": {"positions": [{"symbol_exchange": "IBM-N", "weight": 1.0}]}},
         response_shape=["request_id", "weekdate", "positions[].symbol_exchange", "positions[].weight", "positions[].trend", "positions[].decision_score", "positions_found", "positions_missing", "effective_weight", "portfolio_score", "portfolio_bias", "portfolio_confidence", "portfolio_alignment", "regime_context.current_regime", "evaluation_notes"],
         example_object={"request_id": "req_demo", "positions_found": 1, "portfolio_score": 0.0, "positions": [{"symbol_exchange": "SAMPLE-N", "found": True}]},
@@ -918,13 +983,43 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
                 "type": "array",
                 "required": True,
                 "description": "Left portfolio as a direct array of symbol-weight positions.",
-                "items": {"type": "object"},
+                "example": [{"symbol_exchange": "IBM-N", "weight": 1.0}],
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "symbol_exchange": copy.deepcopy(SYMBOL_EXCHANGE_PROPERTY_SCHEMA),
+                        "weight": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "example": 1.0,
+                            "description": "Portfolio weight for this position.",
+                        },
+                    },
+                    "required": ["symbol_exchange", "weight"],
+                    "additionalProperties": False,
+                },
             },
             "right": {
                 "type": "array",
                 "required": True,
                 "description": "Right portfolio as a direct array of symbol-weight positions.",
-                "items": {"type": "object"},
+                "example": [{"symbol_exchange": "MSFT-Q", "weight": 1.0}],
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "symbol_exchange": copy.deepcopy(SYMBOL_EXCHANGE_PROPERTY_SCHEMA),
+                        "weight": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "example": 1.0,
+                            "description": "Portfolio weight for this position.",
+                        },
+                    },
+                    "required": ["symbol_exchange", "weight"],
+                    "additionalProperties": False,
+                },
             },
         },
         safe_example_request={"method": "POST", "path": "/v1/portfolio/compare", "json": {"left": [{"symbol_exchange": "IBM-N", "weight": 1.0}], "right": [{"symbol_exchange": "MSFT-Q", "weight": 1.0}]}},
@@ -1499,22 +1594,8 @@ def _schema_property_from_input_meta(meta: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
-def _inputs_with_parameter_source(inputs: dict[str, Any], location: str) -> dict[str, Any]:
-    enriched: dict[str, Any] = {}
-    for name, meta in inputs.items():
-        item = copy.deepcopy(meta)
-        item.setdefault("input_location", location)
-        item.setdefault("parameter_source", location)
-        enriched[name] = item
-    return enriched
-
-
-def build_input_schema(path: str) -> dict[str, Any] | None:
-    entry = _ENDPOINT_METADATA_BY_PATH.get(path)
-    if entry is None:
-        return None
-
-    location = input_location_for_method(entry["method"])
+def _build_input_schema_from_entry(entry: dict[str, Any], method: str | None = None) -> dict[str, Any]:
+    location = input_location_for_method(method or entry["method"])
     properties: dict[str, Any] = {}
     required: list[str] = []
     for source in ("required_inputs", "optional_inputs"):
@@ -1535,7 +1616,27 @@ def build_input_schema(path: str) -> dict[str, Any] | None:
     }
     if entry.get("input_rule"):
         schema["description"] = entry["input_rule"]
+    elif not properties:
+        schema["description"] = f"No {location} parameters are required for this endpoint."
     return schema
+
+
+def _inputs_with_parameter_source(inputs: dict[str, Any], location: str) -> dict[str, Any]:
+    enriched: dict[str, Any] = {}
+    for name, meta in inputs.items():
+        item = copy.deepcopy(meta)
+        item.setdefault("input_location", location)
+        item.setdefault("parameter_source", location)
+        enriched[name] = item
+    return enriched
+
+
+def build_input_schema(path: str) -> dict[str, Any] | None:
+    entry = _ENDPOINT_METADATA_BY_PATH.get(path)
+    if entry is None:
+        return None
+
+    return _build_input_schema_from_entry(entry)
 
 
 def build_tool_parameters(path: str) -> list[dict[str, Any]] | None:
@@ -1607,3 +1708,170 @@ def build_tool_template(path: str) -> dict[str, Any] | None:
     else:
         template["request_body_schema"] = input_schema
     return template
+
+
+def _fallback_input_schema(location: str) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {},
+        "required": [],
+        "description": f"No {location} parameters are declared for this resource.",
+        "x-stocktrends-input-location": location,
+        "x-stocktrends-parameter-source": location,
+    }
+
+
+def _bazaar_safe_input_schema(input_schema: dict[str, Any], location: str) -> dict[str, Any]:
+    schema = copy.deepcopy(input_schema)
+    schema.setdefault("type", "object")
+    schema.setdefault("properties", {})
+    schema.setdefault("required", [])
+    schema.setdefault("description", f"No {location} parameters are required for this endpoint.")
+    schema.setdefault("additionalProperties", False)
+    schema["x-stocktrends-input-location"] = location
+    schema["x-stocktrends-parameter-source"] = location
+    return schema
+
+
+def _bazaar_output_schema(entry: dict[str, Any] | None, bazaar_output: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "type": "object",
+        "description": str(
+            (entry or {}).get("output_summary")
+            or bazaar_output.get("description")
+            or "JSON response returned after successful payment."
+        ),
+        "properties": {
+            "type": {"type": "string", "const": "json"},
+            "description": {"type": "string"},
+            "example": {},
+            "response_shape": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["type", "description", "example"],
+        "additionalProperties": True,
+    }
+
+
+def _bazaar_endpoint_description(entry: dict[str, Any] | None, path: str) -> str:
+    if not entry:
+        return (
+            f"Stock Trends API market-research resource for {path}. "
+            "Use with budget controls; not investment advice."
+        )
+    return (
+        f"{entry['purpose']} Analytical role: {entry.get('analytical_role', entry['category'])}. "
+        f"Workflow context: {entry['workflow_role']} Expected output: {entry['output_summary']} "
+        "Use for market-research and decision-support context; not investment advice."
+    )
+
+
+def build_bazaar_extension(path: str, method: str | None = None) -> dict[str, Any]:
+    """
+    Build Coinbase/x402 Bazaar v2 discovery metadata for a Payment Required response.
+
+    The structure is intentionally metadata-only. It consumes the central endpoint
+    registry and never resolves prices, verifies payments, or changes endpoint
+    execution behavior.
+    """
+    entry = _ENDPOINT_METADATA_BY_PATH.get(path)
+    http_method = (method or (entry or {}).get("method") or "GET").upper()
+    location = input_location_for_method(http_method)
+    input_schema = (
+        _build_input_schema_from_entry(entry, http_method)
+        if entry is not None
+        else _fallback_input_schema(location)
+    )
+    input_schema = _bazaar_safe_input_schema(input_schema, location)
+
+    bazaar_output = get_bazaar_output(path)
+    output_schema = _bazaar_output_schema(entry, bazaar_output)
+    output_info = copy.deepcopy(bazaar_output)
+    output_info.setdefault("type", "json")
+    output_info.setdefault("description", output_schema["description"])
+    output_info.setdefault("example", {"request_id": "req_demo"})
+    if entry is not None:
+        output_info["response_shape"] = copy.deepcopy(entry.get("response_shape", []))
+    output_info["schema"] = output_schema
+
+    safe_example_request = copy.deepcopy(
+        (entry or {}).get(
+            "safe_example_request",
+            {"method": http_method, "path": path, "query" if location == "query" else "json": {}},
+        )
+    )
+
+    input_info: dict[str, Any] = {
+        "type": "http",
+        "method": http_method,
+        "schema": input_schema,
+        "parameters": schema_to_parameters(input_schema, location),
+        "example": safe_example_request,
+    }
+    input_schema_property_name = "query" if location == "query" else "body"
+    input_info[input_schema_property_name] = input_schema
+    if location == "body":
+        input_info["bodyType"] = "json"
+
+    info: dict[str, Any] = {
+        "service_name": SERVICE_NAME,
+        "service_category": SERVICE_CATEGORY,
+        "title": str((entry or {}).get("title") or path),
+        "description": _bazaar_endpoint_description(entry, path),
+        "analytical_role": (entry or {}).get("analytical_role"),
+        "research_goal": (entry or {}).get("purpose"),
+        "endpoint_family": (entry or {}).get("category"),
+        "workflow_context": (entry or {}).get("workflow_role"),
+        "interpretation_dependencies": {
+            "dependency": copy.deepcopy((entry or {}).get("interpretation_dependency")),
+            "guidance": copy.deepcopy((entry or {}).get("interpretation_guidance")),
+            "required_steps": copy.deepcopy((entry or {}).get("required_interpretation_steps")),
+        },
+        "related_endpoints": copy.deepcopy((entry or {}).get("related_endpoints", [])),
+        "next_recommended_calls": copy.deepcopy((entry or {}).get("next_recommended_calls", [])),
+        "safe_for_autonomous_execution_with_budget_controls": True,
+        "state_mutation": False,
+        "market_research_context": True,
+        "decision_support_context": True,
+        "not_investment_advice": True,
+        "not_investment_adviser": True,
+        "developer_portal": DEVELOPER_PORTAL_URL,
+        "ai_context": AI_CONTEXT_URL,
+        "tools_manifest": TOOLS_MANIFEST_URL,
+        "workflows": WORKFLOWS_URL,
+        "pricing_catalog": PRICING_CATALOG_URL,
+        "input": input_info,
+        "output": output_info,
+        "examples": [safe_example_request],
+    }
+
+    schema_input_properties: dict[str, Any] = {
+        "type": {"type": "string", "const": "http"},
+        "method": {"type": "string", "enum": [http_method]},
+        input_schema_property_name: input_schema,
+    }
+    schema_input_required = ["type", "method", input_schema_property_name]
+    if location == "body":
+        schema_input_properties["bodyType"] = {"type": "string", "enum": ["json"]}
+        schema_input_required.insert(2, "bodyType")
+
+    return {
+        "bazaar": {
+            "info": info,
+            "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "title": str((entry or {}).get("title") or path),
+                "description": _bazaar_endpoint_description(entry, path),
+                "properties": {
+                    "input": {
+                        "type": "object",
+                        "properties": schema_input_properties,
+                        "required": schema_input_required,
+                        "additionalProperties": False,
+                    },
+                    "output": output_schema,
+                },
+                "required": ["input", "output"],
+            },
+        }
+    }

@@ -348,3 +348,120 @@ class TestIndicatorPaymentRequiredMetadata:
             assert output["description"] != "JSON response returned after successful payment."
             assert output["example"]
             assert expected_field in json.dumps(output["example"])
+
+
+# ---------------------------------------------------------------------------
+# Bazaar v2 rich discovery metadata
+# ---------------------------------------------------------------------------
+
+class TestBazaarRichDiscoveryMetadata:
+    def _requirements(self, monkeypatch, path: str, method: str):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        return build_x402_requirements(path=path, amount_usd=_AMOUNT, method=method)
+
+    def test_get_stim_latest_declares_query_input_schema(self, monkeypatch):
+        reqs = self._requirements(monkeypatch, "/v1/stim/latest", "GET")
+        bazaar = reqs["extensions"]["bazaar"]
+        input_info = bazaar["info"]["input"]
+        input_schema = input_info["query"]
+
+        assert input_info["method"] == "GET"
+        assert "bodyType" not in input_info
+        assert input_schema["x-stocktrends-input-location"] == "query"
+        assert "symbol_exchange" in input_schema["properties"]
+        assert input_schema["properties"]["symbol_exchange"]["pattern"] == "^[A-Z0-9.]+-[A-Z]$"
+        assert "symbol_exchange" in input_schema["required"]
+        assert bazaar["schema"]["properties"]["input"]["properties"]["query"] == input_schema
+
+    def test_get_market_regime_latest_declares_empty_query_schema(self, monkeypatch):
+        reqs = self._requirements(monkeypatch, "/v1/market/regime/latest", "GET")
+        input_info = reqs["extensions"]["bazaar"]["info"]["input"]
+
+        assert input_info["method"] == "GET"
+        assert "query" in input_info
+        assert input_info["query"]["type"] == "object"
+        assert input_info["query"]["properties"] == {}
+        assert input_info["query"]["x-stocktrends-input-location"] == "query"
+        assert "bodyType" not in input_info
+
+    def test_post_portfolio_construct_declares_json_body_schema(self, monkeypatch):
+        reqs = self._requirements(monkeypatch, "/v1/portfolio/construct", "POST")
+        input_info = reqs["extensions"]["bazaar"]["info"]["input"]
+        body_schema = input_info["body"]
+
+        assert input_info["method"] == "POST"
+        assert input_info["bodyType"] == "json"
+        assert body_schema["x-stocktrends-input-location"] == "body"
+        assert {"universe", "count", "bias"}.issubset(body_schema["properties"])
+        assert body_schema["properties"]["bias"]["enum"] == ["auto", "bullish", "bearish"]
+        assert reqs["extensions"]["bazaar"]["schema"]["properties"]["input"]["properties"]["body"] == body_schema
+
+    def test_post_portfolio_compare_declares_json_body_schema(self, monkeypatch):
+        reqs = self._requirements(monkeypatch, "/v1/portfolio/compare", "POST")
+        input_info = reqs["extensions"]["bazaar"]["info"]["input"]
+        body_schema = input_info["body"]
+
+        assert input_info["bodyType"] == "json"
+        assert {"left", "right"} == set(body_schema["required"])
+        assert body_schema["properties"]["left"]["items"]["required"] == ["symbol_exchange", "weight"]
+        assert body_schema["properties"]["right"]["items"]["properties"]["symbol_exchange"]["pattern"] == "^[A-Z0-9.]+-[A-Z]$"
+
+    def test_bazaar_info_has_semantic_and_planning_context(self, monkeypatch):
+        reqs = self._requirements(monkeypatch, "/v1/market/regime/latest", "GET")
+        info = reqs["extensions"]["bazaar"]["info"]
+
+        assert info["service_name"] == "Stock Trends API"
+        assert info["service_category"] == "agent_native_probabilistic_market_intelligence"
+        assert info["analytical_role"] == "market_regime_classifier"
+        assert info["research_goal"]
+        assert info["workflow_context"]
+        assert info["safe_for_autonomous_execution_with_budget_controls"] is True
+        assert info["state_mutation"] is False
+        assert info["developer_portal"] == "https://developer.stocktrends.com/"
+        assert info["ai_context"] == "https://api.stocktrends.com/v1/ai/context"
+        assert info["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert info["workflows"] == "https://api.stocktrends.com/v1/workflows"
+        assert info["pricing_catalog"] == "https://api.stocktrends.com/v1/pricing/catalog"
+
+    def test_bazaar_examples_are_safe_endpoint_examples(self, monkeypatch):
+        cases = [
+            ("/v1/market/regime/latest", "GET", {"query": {}}),
+            ("/v1/stim/latest", "GET", {"query": {"symbol_exchange": "IBM-N"}}),
+            ("/v1/agent/screener/top", "GET", {"query": {"limit": 10, "min_rsi": 100}}),
+            ("/v1/breadth/sector/latest", "GET", {"query": {"group_level": "sector", "limit": 5000}}),
+            ("/v1/leadership/summary/latest", "GET", {"query": {"exchange": "N", "type": "CS", "min_rsi": 110, "min_mt_cnt": 4}}),
+            ("/v1/decision/evaluate-symbol", "POST", {"json": {"symbol_exchange": "IBM-N"}}),
+            ("/v1/portfolio/construct", "POST", {"json": {"universe": "top", "count": 5, "bias": "auto"}}),
+            ("/v1/portfolio/evaluate", "POST", {"json": {"positions": [{"symbol_exchange": "IBM-N", "weight": 1.0}]}}),
+            ("/v1/portfolio/compare", "POST", {"json": {"left": [{"symbol_exchange": "IBM-N", "weight": 1.0}], "right": [{"symbol_exchange": "MSFT-Q", "weight": 1.0}]}}),
+        ]
+
+        for path, method, expected_fragment in cases:
+            reqs = self._requirements(monkeypatch, path, method)
+            example = reqs["extensions"]["bazaar"]["info"]["examples"][0]
+            assert example["method"] == method
+            assert example["path"] == path
+            for key, expected in expected_fragment.items():
+                assert example[key] == expected
+
+    def test_output_schema_and_backward_compatible_output_info_are_preserved(self, monkeypatch):
+        reqs = self._requirements(monkeypatch, "/v1/portfolio/construct", "POST")
+        bazaar = reqs["extensions"]["bazaar"]
+
+        assert "output" in bazaar["info"]
+        assert bazaar["info"]["output"]["type"] == "json"
+        assert bazaar["info"]["output"]["example"]
+        assert "schema" in bazaar["info"]["output"]
+        assert bazaar["schema"]["properties"]["output"]["type"] == "object"
+
+    def test_legal_safe_language(self, monkeypatch):
+        reqs = self._requirements(monkeypatch, "/v1/decision/evaluate-symbol", "POST")
+        info = reqs["extensions"]["bazaar"]["info"]
+        serialized = json.dumps(info).lower()
+
+        assert info["not_investment_advice"] is True
+        assert info["not_investment_adviser"] is True
+        assert "buy/sell recommendation" not in serialized
+        assert "investment advice service" not in serialized
+        assert "guaranteed return" not in serialized
+        assert "stock trends is an investment adviser" not in serialized

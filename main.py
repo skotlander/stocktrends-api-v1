@@ -48,6 +48,8 @@ DISCOVERY_START_HERE = "/v1/ai/tools"
 DISCOVERY_SECONDARY = "/v1/ai/context"
 DISCOVERY_DOCS = "/v1/docs"
 DISCOVERY_OPENAPI = "/v1/openapi.json"
+PUBLIC_API_BASE_URL = "https://api.stocktrends.com"
+DEVELOPER_PORTAL_URL = "https://developer.stocktrends.com/"
 
 
 def is_protected_v1_path(path: str) -> bool:
@@ -60,6 +62,23 @@ def _discovery_links() -> dict[str, str]:
         "secondary": DISCOVERY_SECONDARY,
         "docs": DISCOVERY_DOCS,
         "openapi": DISCOVERY_OPENAPI,
+    }
+
+
+def _absolute_url(path: str) -> str:
+    return f"{PUBLIC_API_BASE_URL}{path}"
+
+
+def _root_discovery_links() -> dict[str, str]:
+    return {
+        "developer_portal": DEVELOPER_PORTAL_URL,
+        "start_here": _absolute_url(DISCOVERY_START_HERE),
+        "secondary": _absolute_url(DISCOVERY_SECONDARY),
+        "secondary_context": _absolute_url(DISCOVERY_SECONDARY),
+        "workflows": _absolute_url("/v1/workflows"),
+        "pricing_catalog": _absolute_url("/v1/pricing/catalog"),
+        "docs": _absolute_url(DISCOVERY_DOCS),
+        "openapi": _absolute_url(DISCOVERY_OPENAPI),
     }
 
 
@@ -253,19 +272,19 @@ def root():
         "message": "Start with the machine-readable tools manifest for agent discovery.",
         "description": APP_DESCRIPTION,
         "planning_helpers": [
-            "/v1/cost-estimate",
-            "/v1/workflows",
-            "/v1/pricing/catalog",
-            "/v1/instruments/lookup",
-            "/v1/instruments/resolve",
-            "/v1/stwr/reports/catalog",
-            "/v1/meta/indicators",
-            "/v1/meta/stim",
-            "/v1/meta/stwr",
-            "/v1/leadership/definitions",
-            "/v1/ai/proof/market-edge",
+            _absolute_url("/v1/cost-estimate"),
+            _absolute_url("/v1/workflows"),
+            _absolute_url("/v1/pricing/catalog"),
+            _absolute_url("/v1/instruments/lookup"),
+            _absolute_url("/v1/instruments/resolve"),
+            _absolute_url("/v1/stwr/reports/catalog"),
+            _absolute_url("/v1/meta/indicators"),
+            _absolute_url("/v1/meta/stim"),
+            _absolute_url("/v1/meta/stwr"),
+            _absolute_url("/v1/leadership/definitions"),
+            _absolute_url("/v1/ai/proof/market-edge"),
         ],
-        **_discovery_links(),
+        **_root_discovery_links(),
     }
 
 

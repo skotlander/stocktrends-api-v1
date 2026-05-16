@@ -15,7 +15,11 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 
-from discovery.endpoint_metadata import get_bazaar_output, get_resource_description
+from discovery.endpoint_metadata import (
+    build_bazaar_extension,
+    get_bazaar_output,
+    get_resource_description,
+)
 
 
 logger = logging.getLogger("stocktrends_api.x402")
@@ -285,6 +289,12 @@ def build_x402_requirements(
         }
         bazaar_schema_required = ["type", "method", "bodyType", "body"]
 
+    bazaar_extension = build_bazaar_extension(path, http_method)["bazaar"]
+    bazaar_info = bazaar_extension["info"]
+    bazaar_schema_input_props = bazaar_extension["schema"]["properties"]["input"]["properties"]
+    bazaar_schema_required = bazaar_extension["schema"]["properties"]["input"]["required"]
+    bazaar_output_schema = bazaar_extension["schema"]["properties"]["output"]
+
     return {
         "x402Version": 2,
         # V2 canonical resource identity (ResourceInfo) — separate from accepts entries.
@@ -318,15 +328,7 @@ def build_x402_requirements(
                             "required": bazaar_schema_required,
                             "additionalProperties": False,
                         },
-                        "output": {
-                            "type": "object",
-                            "properties": {
-                                "type": {"type": "string"},
-                                "description": {"type": "string"},
-                                "example": {},
-                            },
-                            "required": ["type"],
-                        },
+                        "output": bazaar_output_schema,
                     },
                     "required": ["input", "output"],
                 },
