@@ -147,6 +147,18 @@ All requests must resolve to:
 
 ---
 
+## Deployment Note: x402 Challenge Headers
+
+`PAYMENT-REQUIRED` and `body.payment_required` are compact by default so x402 agents,
+crawlers, proxies, and JS fetch clients can parse payment details reliably.
+
+Do not set `X402_PAYMENT_REQUIRED_HEADER_MODE=full` or `rich` in production unless
+intentionally debugging rich challenge headers. Rich Stock Trends metadata belongs
+in `stocktrends_preview` and discovery surfaces such as `/v1/ai/tools`, not in the
+x402 challenge object.
+
+---
+
 ## Logging Requirements
 
 Every valid request must log:

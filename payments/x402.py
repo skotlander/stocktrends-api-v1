@@ -54,6 +54,7 @@ X402_SELLER_ADDRESS = os.getenv("X402_SELLER_ADDRESS", "")
 X402_TIMEOUT_SECONDS = float(os.getenv("X402_TIMEOUT_SECONDS", "10"))
 X402_API_BASE_URL = os.getenv("X402_API_BASE_URL", "").rstrip("/")
 X402_CHALLENGE_MODE_HEADER = "X-StockTrends-Challenge-Mode"
+X402_PAYMENT_REQUIRED_HEADER_MODE_ENV = "X402_PAYMENT_REQUIRED_HEADER_MODE"
 X402_CHALLENGE_MODE_FULL = "full"
 X402_CHALLENGE_MODE_COMPACT = "compact"
 
@@ -119,10 +120,29 @@ def _decode_b64_json(value: str) -> dict[str, Any]:
     return parsed
 
 
-def normalize_challenge_mode(value: str | None) -> str:
-    if isinstance(value, str) and value.strip().lower() == X402_CHALLENGE_MODE_COMPACT:
+def _explicit_challenge_mode(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+
+    normalized = value.strip().lower()
+    if normalized == X402_CHALLENGE_MODE_COMPACT:
         return X402_CHALLENGE_MODE_COMPACT
-    return X402_CHALLENGE_MODE_FULL
+    if normalized in {X402_CHALLENGE_MODE_FULL, "rich"}:
+        return X402_CHALLENGE_MODE_FULL
+    return None
+
+
+def normalize_challenge_mode(value: str | None) -> str:
+    return _explicit_challenge_mode(value) or X402_CHALLENGE_MODE_FULL
+
+
+def normalize_payment_required_challenge_mode(value: str | None = None) -> str:
+    """Resolve the compact-by-default challenge mode used in 402 responses."""
+    return (
+        _explicit_challenge_mode(value)
+        or _explicit_challenge_mode(os.getenv(X402_PAYMENT_REQUIRED_HEADER_MODE_ENV))
+        or X402_CHALLENGE_MODE_COMPACT
+    )
 
 
 # =========================================================
@@ -334,11 +354,12 @@ def build_x402_challenge(
     token: str = X402_DEFAULT_TOKEN,
     scheme: str = X402_DEFAULT_SCHEME,
     pay_to: str = X402_SELLER_ADDRESS,
-    challenge_mode: str = X402_CHALLENGE_MODE_FULL,
+    challenge_mode: str | None = None,
 ) -> tuple[dict[str, Any], str]:
     if not isinstance(amount_usd, Decimal):
         amount_usd = Decimal(str(amount_usd))
 
+    resolved_challenge_mode = normalize_payment_required_challenge_mode(challenge_mode)
     requirements = build_x402_requirements(
         path=path,
         amount_usd=amount_usd,
@@ -347,7 +368,7 @@ def build_x402_challenge(
         token=token,
         scheme=scheme,
         pay_to=pay_to,
-        challenge_mode=challenge_mode,
+        challenge_mode=resolved_challenge_mode,
     )
 
     challenge_body = {
