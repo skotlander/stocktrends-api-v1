@@ -35,6 +35,7 @@ from payments.x402 import (
     build_x402_requirements,
     build_x402_challenge,
     normalize_challenge_mode,
+    normalize_payment_required_challenge_mode,
     _extract_single_requirement,
 )
 
@@ -52,6 +53,7 @@ _RICH_HEADER_PATHS = [
     "/v1/selections/published/latest",
 ]
 _UNDICI_SAFE_HEADER_THRESHOLD_BYTES = 8192
+_COMPACT_HEADER_THRESHOLD_BYTES = 2048
 
 
 def _decode_header(header_b64: str) -> dict:
@@ -286,7 +288,11 @@ class TestPaymentRequiredHeader:
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
         _, hdr = build_x402_challenge(path=_PATH, amount_usd=_AMOUNT, method="GET")
         decoded = self._decode(hdr)
-        assert decoded["extensions"]["bazaar"]["info"]["input"]["type"] == "http"
+        bazaar = decoded["extensions"]["bazaar"]
+        assert bazaar["title"]
+        assert bazaar["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert bazaar["metadataUrl"] == "https://api.stocktrends.com/v1/ai/context"
+        assert bazaar["schemaUrl"] == "https://api.stocktrends.com/v1/ai/tools"
 
     def test_header_resource_fallback_no_base_url(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", "")
@@ -301,6 +307,14 @@ class TestPaymentRequiredHeader:
         # The JSON body's resource field must equal the header's resource.url
         assert body["resource"] == decoded["resource"]["url"]
         assert body["resource"] == _FULL_URL
+
+    def test_body_payment_required_matches_compact_header_by_default(self, monkeypatch):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        body, hdr = build_x402_challenge(path=_PATH, amount_usd=_AMOUNT, method="GET")
+        decoded = self._decode(hdr)
+        assert body["payment_required"] == decoded
+        assert "info" not in decoded["extensions"]["bazaar"]
+        assert "schema" not in decoded["extensions"]["bazaar"]
 
 
 # ---------------------------------------------------------------------------
@@ -347,12 +361,26 @@ class TestExtensionsBazaarOutput:
         r = build_x402_requirements(path=_PATH, amount_usd=_AMOUNT, method="POST")
         assert r["extensions"]["bazaar"]["info"]["output"]["type"] == "json"
 
-    def test_decoded_header_has_output(self, monkeypatch):
+    def test_explicit_full_decoded_header_has_output(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
-        _, hdr = build_x402_challenge(path=_PATH, amount_usd=_AMOUNT, method="GET")
+        _, hdr = build_x402_challenge(
+            path=_PATH,
+            amount_usd=_AMOUNT,
+            method="GET",
+            challenge_mode="full",
+        )
         decoded = json.loads(base64.b64decode(hdr).decode("utf-8"))
         assert decoded["extensions"]["bazaar"]["info"]["output"]["type"] == "json"
         assert "example" in decoded["extensions"]["bazaar"]["info"]["output"]
+
+    def test_default_decoded_header_omits_rich_output_payload(self, monkeypatch):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        _, hdr = build_x402_challenge(path=_PATH, amount_usd=_AMOUNT, method="GET")
+        decoded = json.loads(base64.b64decode(hdr).decode("utf-8"))
+        serialized = json.dumps(decoded)
+        assert "response_shape" not in serialized
+        assert "example" not in serialized
+        assert "output" not in decoded["extensions"]["bazaar"]
 
 
 # ---------------------------------------------------------------------------
@@ -374,13 +402,23 @@ class TestIndicatorPaymentRequiredMetadata:
 
         for challenge in (body["payment_required"], decoded):
             description = challenge["resource"]["description"]
-            output = challenge["extensions"]["bazaar"]["info"]["output"]
+            bazaar = challenge["extensions"]["bazaar"]
             assert description.strip()
             assert "Stock Trends" in description
-            assert output["description"].strip()
-            assert output["description"] != "JSON response returned after successful payment."
-            assert output["example"]
-            assert expected_field in json.dumps(output["example"])
+            assert bazaar["title"].strip()
+            assert bazaar["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+            assert bazaar["metadataUrl"] == "https://api.stocktrends.com/v1/ai/context"
+
+        rich_requirements = build_x402_requirements(
+            path=path,
+            amount_usd=Decimal("0.0035"),
+            method="GET",
+        )
+        output = rich_requirements["extensions"]["bazaar"]["info"]["output"]
+        assert output["description"].strip()
+        assert output["description"] != "JSON response returned after successful payment."
+        assert output["example"]
+        assert expected_field in json.dumps(output["example"])
 
 
 # ---------------------------------------------------------------------------
@@ -511,8 +549,25 @@ class TestCompactChallengeMode:
         assert normalize_challenge_mode(None) == "full"
         assert normalize_challenge_mode("") == "full"
         assert normalize_challenge_mode("full") == "full"
+        assert normalize_challenge_mode("rich") == "full"
         assert normalize_challenge_mode("unknown") == "full"
         assert normalize_challenge_mode(" compact ") == "compact"
+
+    def test_payment_required_challenge_mode_defaults_to_compact(self, monkeypatch):
+        monkeypatch.delenv("X402_PAYMENT_REQUIRED_HEADER_MODE", raising=False)
+        assert normalize_payment_required_challenge_mode(None) == "compact"
+        assert normalize_payment_required_challenge_mode("") == "compact"
+        assert normalize_payment_required_challenge_mode("unknown") == "compact"
+        assert normalize_payment_required_challenge_mode("full") == "full"
+        assert normalize_payment_required_challenge_mode("rich") == "full"
+        assert normalize_payment_required_challenge_mode("compact") == "compact"
+
+    def test_payment_required_challenge_mode_has_env_escape_hatch(self, monkeypatch):
+        monkeypatch.setenv("X402_PAYMENT_REQUIRED_HEADER_MODE", "rich")
+        assert normalize_payment_required_challenge_mode(None) == "full"
+        monkeypatch.setenv("X402_PAYMENT_REQUIRED_HEADER_MODE", "full")
+        assert normalize_payment_required_challenge_mode(None) == "full"
+        assert normalize_payment_required_challenge_mode("compact") == "compact"
 
     def test_default_402_still_contains_rich_bazaar_metadata_and_input_schema(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
@@ -533,7 +588,32 @@ class TestCompactChallengeMode:
         assert "input" in bazaar["schema"]["properties"]
         assert "output" in bazaar["schema"]["properties"]
 
-    def test_compact_402_has_payment_required_header_from_request_mode(self, monkeypatch):
+    def test_default_402_uses_compact_payment_required_header(self, monkeypatch):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        monkeypatch.delenv("X402_PAYMENT_REQUIRED_HEADER_MODE", raising=False)
+        result = enforce_x402_payment(
+            headers={},
+            path="/v1/breadth/sector/latest",
+            method="GET",
+            amount_usd=_AMOUNT,
+            validation_valid=True,
+            validation_error=None,
+            validation_detail=None,
+            validated_payment_reference=None,
+            validated_payment_network=None,
+            validated_payment_token=None,
+            validated_payment_amount_native=None,
+            replay_checker=lambda _reference: False,
+        )
+
+        assert result.outcome == "challenge"
+        decoded = _decode_header(result.payment_required_header)
+        assert result.challenge_body["payment_required"] == decoded
+        assert decoded["extensions"]["bazaar"]["tools_manifest"]
+        assert "info" not in decoded["extensions"]["bazaar"]
+        assert "schema" not in decoded["extensions"]["bazaar"]
+
+    def test_request_mode_can_still_select_compact_payment_required_header(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
         result = enforce_x402_payment(
             headers={"x-stocktrends-challenge-mode": "compact"},
@@ -553,8 +633,21 @@ class TestCompactChallengeMode:
         assert result.outcome == "challenge"
         assert result.payment_required_header
         decoded = _decode_header(result.payment_required_header)
-        assert decoded["extensions"]["bazaar"]["info"]["input"]["summary"]
-        assert "parameters" not in decoded["extensions"]["bazaar"]["info"]["input"]
+        assert decoded["extensions"]["bazaar"]["tools_manifest"]
+        assert "parameters" not in json.dumps(decoded["extensions"]["bazaar"])
+
+    def test_env_escape_hatch_can_select_full_payment_required_header(self, monkeypatch):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        monkeypatch.setenv("X402_PAYMENT_REQUIRED_HEADER_MODE", "full")
+        body, hdr = build_x402_challenge(
+            path="/v1/breadth/sector/latest",
+            amount_usd=_AMOUNT,
+            method="GET",
+        )
+        decoded = _decode_header(hdr)
+        assert body["payment_required"] == decoded
+        assert "parameters" in decoded["extensions"]["bazaar"]["info"]["input"]
+        assert "schema" in decoded["extensions"]["bazaar"]["info"]["input"]
 
     @pytest.mark.parametrize("path", _RICH_HEADER_PATHS)
     def test_compact_header_is_smaller_than_full(self, monkeypatch, path):
@@ -563,6 +656,7 @@ class TestCompactChallengeMode:
             path=path,
             amount_usd=_AMOUNT,
             method="GET",
+            challenge_mode="full",
         )
         _, compact_header = build_x402_challenge(
             path=path,
@@ -574,21 +668,21 @@ class TestCompactChallengeMode:
         assert len(compact_header) < len(full_header)
 
     @pytest.mark.parametrize("path", _RICH_HEADER_PATHS)
-    def test_compact_header_stays_below_undici_safe_threshold(self, monkeypatch, path):
+    def test_default_compact_header_stays_below_conservative_threshold(self, monkeypatch, path):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
-        _, compact_header = build_x402_challenge(
+        _, default_header = build_x402_challenge(
             path=path,
             amount_usd=_AMOUNT,
             method="GET",
-            challenge_mode="compact",
         )
 
-        assert len(compact_header) < _UNDICI_SAFE_HEADER_THRESHOLD_BYTES
+        assert len(default_header) < _COMPACT_HEADER_THRESHOLD_BYTES
 
     @pytest.mark.parametrize("path", _RICH_HEADER_PATHS)
     def test_full_rich_headers_document_compact_mode_need(self, monkeypatch, path):
-        """Default rich discovery headers are intentionally large; compact is opt-in."""
+        """Rich discovery challenge objects stay available only as an escape hatch."""
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        monkeypatch.delenv("X402_PAYMENT_REQUIRED_HEADER_MODE", raising=False)
         _, default_header = build_x402_challenge(
             path=path,
             amount_usd=_AMOUNT,
@@ -607,21 +701,19 @@ class TestCompactChallengeMode:
             challenge_mode="compact",
         )
 
-        assert default_header == explicit_full_header
-        assert len(default_header) > _UNDICI_SAFE_HEADER_THRESHOLD_BYTES
-        assert len(compact_header) < _UNDICI_SAFE_HEADER_THRESHOLD_BYTES
-        assert len(compact_header) < len(default_header)
+        assert default_header == compact_header
+        assert len(explicit_full_header) > _UNDICI_SAFE_HEADER_THRESHOLD_BYTES
+        assert len(default_header) < _COMPACT_HEADER_THRESHOLD_BYTES
+        assert len(default_header) < len(explicit_full_header)
 
-        default_bazaar = _decode_header(default_header)["extensions"]["bazaar"]
-        compact_bazaar = _decode_header(compact_header)["extensions"]["bazaar"]
-        assert "parameters" in default_bazaar["info"]["input"]
-        assert "schema" in default_bazaar["info"]["input"]
-        assert "response_shape" in default_bazaar["info"]["output"]
-        assert "example" in default_bazaar["info"]["output"]
-        assert "parameters" not in compact_bazaar["info"]["input"]
-        assert "schema" not in compact_bazaar["info"]["input"]
-        assert "response_shape" not in compact_bazaar["info"]["output"]
-        assert "example" not in compact_bazaar["info"]["output"]
+        full_bazaar = _decode_header(explicit_full_header)["extensions"]["bazaar"]
+        compact_bazaar = _decode_header(default_header)["extensions"]["bazaar"]
+        assert "parameters" in full_bazaar["info"]["input"]
+        assert "schema" in full_bazaar["info"]["input"]
+        assert "response_shape" in full_bazaar["info"]["output"]
+        assert "example" in full_bazaar["info"]["output"]
+        assert "info" not in compact_bazaar
+        assert "schema" not in compact_bazaar
 
     def test_compact_header_preserves_x402_resource_accepts_and_pricing(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
@@ -647,6 +739,36 @@ class TestCompactChallengeMode:
         assert "payTo" in accept
         assert "maxTimeoutSeconds" in accept
         assert "extra" in accept
+
+    def test_stim_latest_default_challenge_is_compact_and_keeps_atomic_amount(self, monkeypatch):
+        monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
+        monkeypatch.delenv("X402_PAYMENT_REQUIRED_HEADER_MODE", raising=False)
+        body, header = build_x402_challenge(
+            path="/v1/stim/latest",
+            amount_usd=Decimal("0.002500"),
+            method="GET",
+        )
+        decoded = _decode_header(header)
+        serialized = json.dumps(decoded)
+
+        assert body["payment_required"] == decoded
+        assert len(header) < _COMPACT_HEADER_THRESHOLD_BYTES
+        assert decoded["accepts"][0]["amount"] == "2500"
+        assert decoded["accepts"][0]["network"] == "eip155:8453"
+        assert decoded["accepts"][0]["asset"]
+        assert "payTo" in decoded["accepts"][0]
+        assert decoded["extensions"]["bazaar"]["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert decoded["extensions"]["bazaar"]["schemaUrl"] == "https://api.stocktrends.com/v1/ai/tools"
+        for forbidden in (
+            "interpretation_dependencies",
+            "required_steps",
+            "response_shape",
+            "stocktrends_preview",
+            "symbol_exchange",
+            "properties",
+            "examples",
+        ):
+            assert forbidden not in serialized
 
     def test_compact_mode_does_not_change_pricing_or_payment_requirement(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
@@ -674,34 +796,24 @@ class TestCompactChallengeMode:
             challenge_mode="compact",
         )
         bazaar = reqs["extensions"]["bazaar"]
-        info = bazaar["info"]
 
-        assert info["service_name"] == "Stock Trends API"
-        assert info["title"]
-        assert info["analytical_role"]
-        assert info["endpoint_family"]
-        assert info["research_goal"]
-        assert info["safe_for_autonomous_execution_with_budget_controls"] is True
-        assert info["state_mutation"] is False
-        assert info["not_investment_advice"] is True
-        assert info["not_investment_adviser"] is True
-        assert info["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
-        assert info["ai_context"] == "https://api.stocktrends.com/v1/ai/context"
-        assert info["workflows"] == "https://api.stocktrends.com/v1/workflows"
-        assert info["pricing_catalog"] == "https://api.stocktrends.com/v1/pricing/catalog"
-        assert info["developer_portal"] == "https://developer.stocktrends.com/"
+        assert bazaar["title"]
+        assert bazaar["category"] == "selections"
+        assert bazaar["family"] == "selections"
+        assert bazaar["role"] == "probabilistic_selection_list"
+        assert bazaar["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert bazaar["metadataUrl"] == "https://api.stocktrends.com/v1/ai/context"
+        assert bazaar["schemaUrl"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert bazaar["pricing_catalog"] == "https://api.stocktrends.com/v1/pricing/catalog"
 
-        assert info["input"]["type"] == "http"
-        assert info["input"]["method"] == "GET"
-        assert "schema" not in info["input"]
-        assert "parameters" not in info["input"]
-        assert "query" not in info["input"]
-        assert "body" not in info["input"]
-        assert "schema" not in info["output"]
-        assert "example" not in info["output"]
-        assert "response_shape" not in info["output"]
-        assert "examples" not in info
-        assert "properties" not in bazaar["schema"]
+        serialized = json.dumps(bazaar)
+        assert "info" not in bazaar
+        assert "schema" not in bazaar
+        assert "input" not in bazaar
+        assert "output" not in bazaar
+        assert "parameters" not in serialized
+        assert "response_shape" not in serialized
+        assert "example" not in serialized
 
     def test_unknown_challenge_mode_falls_back_to_full(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)

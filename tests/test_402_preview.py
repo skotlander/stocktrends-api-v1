@@ -16,7 +16,7 @@ Coverage map (from Codex review):
   [x] anonymous x402 challenge includes preview for known preview path
   [x] unit unknown preview paths return None
   [x] accepted_payment_methods remain subscription,x402,mpp
-  [x] PAYMENT-REQUIRED header unchanged
+  [x] PAYMENT-REQUIRED header remains present while rich metadata stays in body preview
   [x] MPP errors do not include preview
   [x] validation/replay/settlement 402s do not include preview
   [x] preview is schema-only with structural examples and resolved pricing only
@@ -404,8 +404,8 @@ def test_default_x402_challenge_preview_remains_rich(client_x402_challenge_known
     assert "example_object" in preview
 
 
-def test_compact_x402_challenge_preview_uses_compact_body(client_x402_challenge_known):
-    """Compact mode avoids returning large preview arrays in the 402 body."""
+def test_compact_x402_challenge_mode_keeps_rich_body_preview(client_x402_challenge_known):
+    """Challenge compactness must not remove rich Stock Trends body metadata."""
     response = client_x402_challenge_known.get(
         _KNOWN_PREVIEW_PATH,
         headers={
@@ -416,12 +416,11 @@ def test_compact_x402_challenge_preview_uses_compact_body(client_x402_challenge_
     assert response.status_code == 402
     preview = response.json()["stocktrends_preview"]
 
-    assert "response_shape" not in preview
-    assert "example_object" not in preview
-    assert "required_inputs" not in preview
-    assert preview["discovery"]["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
-    assert preview["not_investment_advice"] is True
-    assert preview["not_investment_adviser"] is True
+    assert "required_inputs" in preview
+    assert "response_shape" in preview
+    assert "example_object" in preview
+    assert preview["required_inputs"]["symbol_exchange"]["example"] == "IBM-N"
+    assert preview["pricing"]["pricing_rule_id"] == "indicators_latest_paid"
 
 
 def test_x402_challenge_preview_is_schema_only(client_x402_challenge_known):
@@ -437,6 +436,25 @@ def test_x402_challenge_preview_is_schema_only(client_x402_challenge_known):
     assert preview["pricing"]["pricing_rule_id"] == "indicators_latest_paid"
     assert float(preview["pricing"]["stc_cost"]) > 0
     assert float(preview["pricing"]["effective_price_usd"]) > 0
+
+
+def test_stim_latest_402_body_preview_keeps_input_schema_and_safe_example(monkeypatch):
+    _stub_runtime(monkeypatch, enforce_result=_make_challenge_result("/v1/stim/latest"))
+    with TestClient(main.app) as client:
+        response = client.get(
+            "/v1/stim/latest",
+            headers={"X-StockTrends-Payment-Method": "x402"},
+        )
+
+    assert response.status_code == 402
+    preview = response.json()["stocktrends_preview"]
+
+    assert preview["pricing"]["pricing_rule_id"] == "stim_latest_paid"
+    assert "symbol_exchange" in preview["required_inputs"]
+    assert preview["required_inputs"]["symbol_exchange"]["pattern"] == "^[A-Z0-9.]+-[A-Z]$"
+    assert preview["safe_example_request"]["query"]["symbol_exchange"] == "IBM-N"
+    assert preview["interpretation_dependency"]["endpoint"] == "/v1/meta/stim"
+    assert preview["required_interpretation_steps"]
 
 
 def test_x402_challenge_existing_fields_preserved(client_x402_challenge_known):

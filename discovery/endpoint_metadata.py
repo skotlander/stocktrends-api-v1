@@ -1951,69 +1951,27 @@ def build_bazaar_extension(path: str, method: str | None = None) -> dict[str, An
 
 def build_compact_bazaar_extension(path: str, method: str | None = None) -> dict[str, Any]:
     """
-    Build compact Bazaar metadata for clients that opt into smaller x402 headers.
+    Build compact Bazaar metadata for x402 challenge objects.
 
-    This intentionally omits full input/output schemas, parameter arrays,
-    response_shape arrays, and large examples. The full builder above remains
-    the default Seller Tools discovery surface.
+    Challenge objects must stay small enough for x402 agents, crawlers,
+    proxies, and JS fetch clients. Rich endpoint semantics live in
+    stocktrends_preview and discovery manifests, so this extension only carries
+    stable pointers and a tiny endpoint summary.
     """
     entry = _ENDPOINT_METADATA_BY_PATH.get(path)
-    http_method = (method or (entry or {}).get("method") or "GET").upper()
-    location = input_location_for_method(http_method)
+    category = (entry or {}).get("category")
 
-    info: dict[str, Any] = {
-        "service_name": SERVICE_NAME,
+    bazaar: dict[str, Any] = {
         "title": str((entry or {}).get("title") or path),
-        "analytical_role": (entry or {}).get("analytical_role"),
-        "endpoint_family": (entry or {}).get("category"),
-        "research_goal": (entry or {}).get("purpose"),
-        "safe_for_autonomous_execution_with_budget_controls": True,
-        "state_mutation": False,
-        "not_investment_advice": True,
-        "not_investment_adviser": True,
-        "input_location": {
-            "location": location,
-            "summary": _compact_input_summary(location),
-        },
-        "parameter_source": {
-            "source": location,
-            "summary": _compact_parameter_source_summary(location),
-        },
-        "input": {
-            "type": "http",
-            "method": http_method,
-            "location": location,
-            "summary": _compact_input_summary(location),
-        },
-        "output": {
-            "type": "json",
-            "summary": str(
-                (entry or {}).get("output_summary")
-                or get_bazaar_output(path).get("description")
-                or "JSON response returned after successful payment."
-            ),
-        },
+        "category": category,
+        "family": category,
         "tools_manifest": TOOLS_MANIFEST_URL,
-        "ai_context": AI_CONTEXT_URL,
-        "workflows": WORKFLOWS_URL,
+        "metadataUrl": AI_CONTEXT_URL,
+        "schemaUrl": TOOLS_MANIFEST_URL,
         "pricing_catalog": PRICING_CATALOG_URL,
-        "developer_portal": DEVELOPER_PORTAL_URL,
     }
 
-    safe_example_request = _small_safe_example_request(entry)
-    if safe_example_request is not None:
-        info["safe_example_request"] = safe_example_request
+    if entry is not None and entry.get("analytical_role"):
+        bazaar["role"] = entry["analytical_role"]
 
-    return {
-        "bazaar": {
-            "info": info,
-            "schema": {
-                "type": "object",
-                "description": (
-                    "Compact Bazaar metadata. Fetch tools_manifest for full "
-                    "input/output schemas and examples."
-                ),
-                "additionalProperties": True,
-            },
-        }
-    }
+    return {"bazaar": bazaar}

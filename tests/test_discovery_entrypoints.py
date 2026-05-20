@@ -125,6 +125,12 @@ def test_cost_estimate_workflow_id_openapi_parameter_is_valid(client):
     ]
 
 
+def test_v1_docs_loads(client):
+    response = client.get("/v1/docs")
+
+    assert response.status_code == 200
+
+
 def test_openapi_and_ai_tools_agree_on_target_get_parameter_locations(client):
     response = client.get("/v1/openapi.json")
     assert response.status_code == 200

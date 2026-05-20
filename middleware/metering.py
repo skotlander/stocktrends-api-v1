@@ -22,13 +22,10 @@ from payments.policy_provider import (
     get_accepted_payment_methods_for_path,
     is_agent_pay_enforcement_path,
 )
-from discovery.preview import get_compact_endpoint_preview, get_endpoint_preview
+from discovery.preview import get_endpoint_preview
 from pricing.classifier import classify_request
 from payments.x402 import (
-    X402_CHALLENGE_MODE_COMPACT,
-    X402_CHALLENGE_MODE_HEADER,
     is_x402_payment_method,
-    normalize_challenge_mode,
     validate_x402_payment,
     encode_payment_response_header,
     X402_DEFAULT_TOKEN_DECIMALS,
@@ -1188,15 +1185,7 @@ class MeteringMiddleware(BaseHTTPMiddleware):
                     challenge_body["accepted_payment_methods"] = accepted_methods_str.split(",")
                     # Inject non-sensitive schema preview for known agent endpoints only.
                     # Omitted entirely for unknown paths; never contains live data.
-                    challenge_mode = normalize_challenge_mode(
-                        request.headers.get(X402_CHALLENGE_MODE_HEADER)
-                    )
-                    preview_builder = (
-                        get_compact_endpoint_preview
-                        if challenge_mode == X402_CHALLENGE_MODE_COMPACT
-                        else get_endpoint_preview
-                    )
-                    _preview = preview_builder(
+                    _preview = get_endpoint_preview(
                         path,
                         pricing_rule_id=pricing_rule_for_headers,
                         stc_cost=f"{unit_price_usd:.6f}",
