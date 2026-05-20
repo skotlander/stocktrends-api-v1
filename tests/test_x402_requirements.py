@@ -53,11 +53,15 @@ _RICH_HEADER_PATHS = [
     "/v1/selections/published/latest",
 ]
 _UNDICI_SAFE_HEADER_THRESHOLD_BYTES = 8192
-_COMPACT_HEADER_THRESHOLD_BYTES = 2048
+_COMPACT_DECODED_THRESHOLD_BYTES = 4096
 
 
 def _decode_header(header_b64: str) -> dict:
     return json.loads(base64.b64decode(header_b64).decode("utf-8"))
+
+
+def _decoded_header_bytes(header_b64: str) -> int:
+    return len(base64.b64decode(header_b64))
 
 
 @pytest.fixture()
@@ -289,10 +293,12 @@ class TestPaymentRequiredHeader:
         _, hdr = build_x402_challenge(path=_PATH, amount_usd=_AMOUNT, method="GET")
         decoded = self._decode(hdr)
         bazaar = decoded["extensions"]["bazaar"]
-        assert bazaar["title"]
-        assert bazaar["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
-        assert bazaar["metadataUrl"] == "https://api.stocktrends.com/v1/ai/context"
-        assert bazaar["schemaUrl"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert bazaar["info"]["title"]
+        assert bazaar["info"]["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert bazaar["info"]["metadataUrl"] == "https://api.stocktrends.com/v1/ai/context"
+        assert bazaar["info"]["schemaUrl"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert "input" in bazaar["schema"]["properties"]
+        assert "output" in bazaar["schema"]["properties"]
 
     def test_header_resource_fallback_no_base_url(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", "")
@@ -313,8 +319,8 @@ class TestPaymentRequiredHeader:
         body, hdr = build_x402_challenge(path=_PATH, amount_usd=_AMOUNT, method="GET")
         decoded = self._decode(hdr)
         assert body["payment_required"] == decoded
-        assert "info" not in decoded["extensions"]["bazaar"]
-        assert "schema" not in decoded["extensions"]["bazaar"]
+        assert "info" in decoded["extensions"]["bazaar"]
+        assert "schema" in decoded["extensions"]["bazaar"]
 
 
 # ---------------------------------------------------------------------------
@@ -379,8 +385,8 @@ class TestExtensionsBazaarOutput:
         decoded = json.loads(base64.b64decode(hdr).decode("utf-8"))
         serialized = json.dumps(decoded)
         assert "response_shape" not in serialized
-        assert "example" not in serialized
-        assert "output" not in decoded["extensions"]["bazaar"]
+        assert decoded["extensions"]["bazaar"]["info"]["output"]["example"] == {"request_id": "req_demo"}
+        assert "output" in decoded["extensions"]["bazaar"]["info"]
 
 
 # ---------------------------------------------------------------------------
@@ -405,9 +411,9 @@ class TestIndicatorPaymentRequiredMetadata:
             bazaar = challenge["extensions"]["bazaar"]
             assert description.strip()
             assert "Stock Trends" in description
-            assert bazaar["title"].strip()
-            assert bazaar["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
-            assert bazaar["metadataUrl"] == "https://api.stocktrends.com/v1/ai/context"
+            assert bazaar["info"]["title"].strip()
+            assert bazaar["info"]["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+            assert bazaar["info"]["metadataUrl"] == "https://api.stocktrends.com/v1/ai/context"
 
         rich_requirements = build_x402_requirements(
             path=path,
@@ -609,9 +615,11 @@ class TestCompactChallengeMode:
         assert result.outcome == "challenge"
         decoded = _decode_header(result.payment_required_header)
         assert result.challenge_body["payment_required"] == decoded
-        assert decoded["extensions"]["bazaar"]["tools_manifest"]
-        assert "info" not in decoded["extensions"]["bazaar"]
-        assert "schema" not in decoded["extensions"]["bazaar"]
+        bazaar = decoded["extensions"]["bazaar"]
+        assert bazaar["info"]["tools_manifest"]
+        assert "queryParams" in bazaar["info"]["input"]
+        assert "input" in bazaar["schema"]["properties"]
+        assert "output" in bazaar["schema"]["properties"]
 
     def test_request_mode_can_still_select_compact_payment_required_header(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
@@ -633,8 +641,10 @@ class TestCompactChallengeMode:
         assert result.outcome == "challenge"
         assert result.payment_required_header
         decoded = _decode_header(result.payment_required_header)
-        assert decoded["extensions"]["bazaar"]["tools_manifest"]
-        assert "parameters" not in json.dumps(decoded["extensions"]["bazaar"])
+        bazaar = decoded["extensions"]["bazaar"]
+        assert bazaar["info"]["tools_manifest"]
+        assert "queryParams" in bazaar["info"]["input"]
+        assert "interpretation_dependencies" not in json.dumps(bazaar)
 
     def test_env_escape_hatch_can_select_full_payment_required_header(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
@@ -676,7 +686,7 @@ class TestCompactChallengeMode:
             method="GET",
         )
 
-        assert len(default_header) < _COMPACT_HEADER_THRESHOLD_BYTES
+        assert _decoded_header_bytes(default_header) < _COMPACT_DECODED_THRESHOLD_BYTES
 
     @pytest.mark.parametrize("path", _RICH_HEADER_PATHS)
     def test_full_rich_headers_document_compact_mode_need(self, monkeypatch, path):
@@ -703,7 +713,7 @@ class TestCompactChallengeMode:
 
         assert default_header == compact_header
         assert len(explicit_full_header) > _UNDICI_SAFE_HEADER_THRESHOLD_BYTES
-        assert len(default_header) < _COMPACT_HEADER_THRESHOLD_BYTES
+        assert _decoded_header_bytes(default_header) < _COMPACT_DECODED_THRESHOLD_BYTES
         assert len(default_header) < len(explicit_full_header)
 
         full_bazaar = _decode_header(explicit_full_header)["extensions"]["bazaar"]
@@ -712,8 +722,9 @@ class TestCompactChallengeMode:
         assert "schema" in full_bazaar["info"]["input"]
         assert "response_shape" in full_bazaar["info"]["output"]
         assert "example" in full_bazaar["info"]["output"]
-        assert "info" not in compact_bazaar
-        assert "schema" not in compact_bazaar
+        assert "info" in compact_bazaar
+        assert "schema" in compact_bazaar
+        assert "response_shape" not in json.dumps(compact_bazaar)
 
     def test_compact_header_preserves_x402_resource_accepts_and_pricing(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)
@@ -752,21 +763,24 @@ class TestCompactChallengeMode:
         serialized = json.dumps(decoded)
 
         assert body["payment_required"] == decoded
-        assert len(header) < _COMPACT_HEADER_THRESHOLD_BYTES
+        assert _decoded_header_bytes(header) < _COMPACT_DECODED_THRESHOLD_BYTES
         assert decoded["accepts"][0]["amount"] == "2500"
         assert decoded["accepts"][0]["network"] == "eip155:8453"
         assert decoded["accepts"][0]["asset"]
         assert "payTo" in decoded["accepts"][0]
-        assert decoded["extensions"]["bazaar"]["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
-        assert decoded["extensions"]["bazaar"]["schemaUrl"] == "https://api.stocktrends.com/v1/ai/tools"
+        bazaar = decoded["extensions"]["bazaar"]
+        assert bazaar["info"]["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert bazaar["info"]["schemaUrl"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert bazaar["info"]["input"]["queryParams"]["symbol_exchange"] == "IBM-N"
+        input_schema = bazaar["schema"]["properties"]["input"]["properties"]["queryParams"]
+        assert input_schema["properties"]["symbol_exchange"]["pattern"] == "^[A-Z0-9.]+-[A-Z]$"
+        assert "symbol_exchange" in input_schema["required"]
+        assert "description" not in input_schema["properties"]["symbol_exchange"]
         for forbidden in (
             "interpretation_dependencies",
             "required_steps",
             "response_shape",
             "stocktrends_preview",
-            "symbol_exchange",
-            "properties",
-            "examples",
         ):
             assert forbidden not in serialized
 
@@ -796,24 +810,28 @@ class TestCompactChallengeMode:
             challenge_mode="compact",
         )
         bazaar = reqs["extensions"]["bazaar"]
+        info = bazaar["info"]
+        schema = bazaar["schema"]
 
-        assert bazaar["title"]
-        assert bazaar["category"] == "selections"
-        assert bazaar["family"] == "selections"
-        assert bazaar["role"] == "probabilistic_selection_list"
-        assert bazaar["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
-        assert bazaar["metadataUrl"] == "https://api.stocktrends.com/v1/ai/context"
-        assert bazaar["schemaUrl"] == "https://api.stocktrends.com/v1/ai/tools"
-        assert bazaar["pricing_catalog"] == "https://api.stocktrends.com/v1/pricing/catalog"
+        assert info["title"]
+        assert info["category"] == "selections"
+        assert info["family"] == "selections"
+        assert info["role"] == "probabilistic_selection_list"
+        assert info["tools_manifest"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert info["metadataUrl"] == "https://api.stocktrends.com/v1/ai/context"
+        assert info["schemaUrl"] == "https://api.stocktrends.com/v1/ai/tools"
+        assert info["pricing_catalog"] == "https://api.stocktrends.com/v1/pricing/catalog"
+        assert info["input"]["type"] == "http"
+        assert info["input"]["method"] == "GET"
+        assert "queryParams" in info["input"]
+        assert info["output"]["type"] == "json"
+        assert info["output"]["format"] == "application/json"
+        assert "input" in schema["properties"]
+        assert "output" in schema["properties"]
 
         serialized = json.dumps(bazaar)
-        assert "info" not in bazaar
-        assert "schema" not in bazaar
-        assert "input" not in bazaar
-        assert "output" not in bazaar
-        assert "parameters" not in serialized
         assert "response_shape" not in serialized
-        assert "example" not in serialized
+        assert "interpretation_dependencies" not in serialized
 
     def test_unknown_challenge_mode_falls_back_to_full(self, monkeypatch):
         monkeypatch.setattr(x402_module, "X402_API_BASE_URL", _BASE_URL)

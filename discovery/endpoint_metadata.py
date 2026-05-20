@@ -1848,6 +1848,140 @@ def _small_safe_example_request(entry: dict[str, Any] | None) -> dict[str, Any] 
     return example
 
 
+def _compact_bazaar_input_example(
+    entry: dict[str, Any] | None,
+    *,
+    http_method: str,
+    location: str,
+    path: str,
+) -> dict[str, Any]:
+    example = _small_safe_example_request(entry) or {
+        "method": http_method,
+        "path": path,
+        "query" if location == "query" else "json": {},
+    }
+    example_key = "query" if location == "query" else "json"
+    example_input = example.get(example_key)
+    return copy.deepcopy(example_input) if isinstance(example_input, dict) else {}
+
+
+def _compact_json_schema(schema: Any) -> Any:
+    if isinstance(schema, list):
+        return [_compact_json_schema(item) for item in schema]
+
+    if not isinstance(schema, dict):
+        return copy.deepcopy(schema)
+
+    keep_keys = {
+        "type",
+        "properties",
+        "required",
+        "items",
+        "enum",
+        "const",
+        "format",
+        "pattern",
+        "minimum",
+        "maximum",
+        "minItems",
+        "maxItems",
+        "additionalProperties",
+        "default",
+    }
+    compact: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key == "properties" and isinstance(value, dict):
+            compact[key] = {
+                prop_name: _compact_json_schema(prop_schema)
+                for prop_name, prop_schema in value.items()
+            }
+            continue
+        if key in keep_keys:
+            compact[key] = _compact_json_schema(value)
+
+    if compact.get("type") == "object":
+        compact.setdefault("properties", {})
+        compact.setdefault("required", [])
+        compact.setdefault("additionalProperties", False)
+    return compact
+
+
+def _compact_bazaar_output_info(
+    entry: dict[str, Any] | None,
+    bazaar_output: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "type": "json",
+        "format": "application/json",
+        "example": {"request_id": "req_demo"},
+    }
+
+
+def _compact_bazaar_output_schema(
+    entry: dict[str, Any] | None,
+    bazaar_output: dict[str, Any],
+) -> dict[str, Any]:
+    description = str(
+        (entry or {}).get("output_summary")
+        or bazaar_output.get("description")
+        or "JSON response returned after successful payment."
+    )
+    return {
+        "type": "object",
+        "description": description,
+        "properties": {
+            "type": {"type": "string", "const": "json"},
+            "format": {"type": "string"},
+            "example": {},
+        },
+        "required": ["type"],
+        "additionalProperties": True,
+    }
+
+
+def _compact_bazaar_info_schema(
+    *,
+    input_schema: dict[str, Any],
+    output_schema: dict[str, Any],
+    http_method: str,
+    location: str,
+) -> dict[str, Any]:
+    input_schema_property = "queryParams" if location == "query" else "body"
+    input_properties: dict[str, Any] = {
+        "type": {"type": "string", "const": "http"},
+        "method": {"type": "string", "enum": [http_method]},
+        input_schema_property: input_schema,
+    }
+    input_required = ["type", "method", input_schema_property]
+    if location == "body":
+        input_properties["bodyType"] = {"type": "string", "enum": ["json"]}
+        input_required.append("bodyType")
+
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+            "input": {
+                "type": "object",
+                "properties": input_properties,
+                "required": input_required,
+                "additionalProperties": True,
+            },
+            "output": output_schema,
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "category": {"type": "string"},
+            "family": {"type": "string"},
+            "tools_manifest": {"type": "string"},
+            "metadataUrl": {"type": "string"},
+            "schemaUrl": {"type": "string"},
+            "pricing_catalog": {"type": "string"},
+        },
+        "required": ["input", "output"],
+        "additionalProperties": True,
+    }
+
+
 def build_bazaar_extension(path: str, method: str | None = None) -> dict[str, Any]:
     """
     Build Coinbase/x402 Bazaar v2 discovery metadata for a Payment Required response.
@@ -1954,24 +2088,66 @@ def build_compact_bazaar_extension(path: str, method: str | None = None) -> dict
     Build compact Bazaar metadata for x402 challenge objects.
 
     Challenge objects must stay small enough for x402 agents, crawlers,
-    proxies, and JS fetch clients. Rich endpoint semantics live in
-    stocktrends_preview and discovery manifests, so this extension only carries
-    stable pointers and a tiny endpoint summary.
+    proxies, and JS fetch clients. It still preserves the official Bazaar
+    info/schema contract inline so CDP can validate and index callable input.
+    Rich Stock Trends semantics live in stocktrends_preview and discovery
+    manifests.
     """
     entry = _ENDPOINT_METADATA_BY_PATH.get(path)
+    http_method = (method or (entry or {}).get("method") or "GET").upper()
+    location = input_location_for_method(http_method)
     category = (entry or {}).get("category")
 
-    bazaar: dict[str, Any] = {
+    input_schema = (
+        _build_input_schema_from_entry(entry, http_method)
+        if entry is not None
+        else _fallback_input_schema(location)
+    )
+    input_schema = _compact_json_schema(_bazaar_safe_input_schema(input_schema, location))
+    input_example = _compact_bazaar_input_example(
+        entry,
+        http_method=http_method,
+        location=location,
+        path=path,
+    )
+    bazaar_output = get_bazaar_output(path)
+    output_info = _compact_bazaar_output_info(entry, bazaar_output)
+    output_schema = _compact_bazaar_output_schema(entry, bazaar_output)
+
+    input_info: dict[str, Any] = {
+        "type": "http",
+        "method": http_method,
+    }
+    if location == "query":
+        input_info["queryParams"] = input_example
+    else:
+        input_info["bodyType"] = "json"
+        input_info["body"] = input_example
+
+    info: dict[str, Any] = {
         "title": str((entry or {}).get("title") or path),
+        "description": get_resource_description(path),
         "category": category,
         "family": category,
         "tools_manifest": TOOLS_MANIFEST_URL,
         "metadataUrl": AI_CONTEXT_URL,
         "schemaUrl": TOOLS_MANIFEST_URL,
         "pricing_catalog": PRICING_CATALOG_URL,
+        "input": input_info,
+        "output": output_info,
     }
 
     if entry is not None and entry.get("analytical_role"):
-        bazaar["role"] = entry["analytical_role"]
+        info["role"] = entry["analytical_role"]
 
-    return {"bazaar": bazaar}
+    return {
+        "bazaar": {
+            "info": info,
+            "schema": _compact_bazaar_info_schema(
+                input_schema=input_schema,
+                output_schema=output_schema,
+                http_method=http_method,
+                location=location,
+            ),
+        }
+    }
