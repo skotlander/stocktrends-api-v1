@@ -151,11 +151,7 @@ def meta_stim(request: Request):
             "not_final_intelligence_layer": profile["not_final_intelligence_layer"],
             "architecture_source": profile["architecture_source"],
         },
-        "base_period_mean_returns_pct": {
-            "x4wk": 0.00,
-            "x13wk": 2.19,
-            "x40wk": 6.45,
-        },
+        "base_period_mean_returns_pct": profile["base_period_mean_returns_pct"],
         "forecast_horizons": profile["forecast_horizons"],
         "returnmeans_table": "st_returnmeans",
         "columns": {

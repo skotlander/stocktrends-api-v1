@@ -986,8 +986,7 @@ def ai_context():
             "source": COGNITION_ARCHITECTURE_DOC,
             "inference_contract_endpoint": INFERENCE_CONTRACT_ENDPOINT,
             "current_baseline_provider_profile": STIM_PROVIDER_PROFILE_ENDPOINT,
-            "current_baseline_provider": STIM_PROVIDER_PROFILE_ENDPOINT,
-            "current_baseline_provider_id": "stim",
+            "current_baseline_provider": "stim",
             "doctrine": [
                 "ST-IM is the current baseline inference provider, not the final intelligence layer.",
                 "Future Causal AI is a first-class future inference provider.",

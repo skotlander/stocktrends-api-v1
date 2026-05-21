@@ -85,7 +85,7 @@ def _fetch_latest_weekdate_st_data(engine, symbol: str, exchange: str):
         "13-week, and 40-week horizons. Fields: xNwk1 = lower percentile/confidence bound, "
         "xNwk2 = upper percentile/confidence bound, xNwk = expected return (mean), "
         "xNwksd = standard deviation. Interpret probabilities as conditional historical "
-        "tendencies under uncertainty, not guarantees or direct buy/sell commands. "
+        "tendencies under uncertainty, not guarantees, price targets, or direct buy/sell commands. "
         "Includes staleness detection (is_stale, missing_reason) for weeks where insufficient "
         "sample data prevented ST-IM estimation. "
         "Fetch /v1/meta/inference and /v1/meta/stim before interpretation. "
