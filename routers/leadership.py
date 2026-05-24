@@ -144,7 +144,7 @@ def leadership_definitions():
             "mt_cnt": "Weeks in the current major trend classification (bullish or bearish).",
             "rsi_updn": "Weekly change in relative strength: + improving, - weakening, 0 flat.",
         },
-        "taxonomy_source": "st_listsectorsandindustries",
+        "taxonomy_source": "Stock Trends sector and industry taxonomy",
         "taxonomy_levels": ["sector", "industry_group", "industry"],
         "notes": {
             "bullish_trends": list(BULLISH_TRENDS),
@@ -171,7 +171,7 @@ def leadership_summary_latest(
       - top leaders per sector (ranked by RSI, mt_cnt)
       - top leaders per industry group (ranked by RSI, mt_cnt)
 
-    Taxonomy is from st_listsectorsandindustries via st_data.industry_id = industry_code.
+    Taxonomy uses Stock Trends sector and industry classifications.
     """
     engine = get_engine()
 
@@ -405,5 +405,5 @@ def leadership_rotation_history(
         "week_count": len(weeks),
         "count": len(flat),
         "weeks": weeks,
-        "note": "Ranking computed with MySQL user variables for MySQL 5.7 compatibility. Taxonomy from st_listsectorsandindustries.",
+        "note": "Ranking computed with MySQL user variables for MySQL 5.7 compatibility. Taxonomy uses Stock Trends sector and industry classifications.",
     }
