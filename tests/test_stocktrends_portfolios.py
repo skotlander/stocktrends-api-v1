@@ -154,6 +154,10 @@ class _Connection:
 
         if "FROM stp_returnslog" in sql:
             rows = [row for row in self._return_rows if row["port_id"] == params.get("port_id")]
+            if "start_date" in params:
+                rows = [row for row in rows if row["weekdate"] >= params["start_date"]]
+            if "end_date" in params:
+                rows = [row for row in rows if row["weekdate"] <= params["end_date"]]
             return _Result(rows)
 
         rows = [row for row in self._portfolio_rows if row["status"] == 1]
@@ -197,6 +201,16 @@ def _assert_no_payment_challenge(response):
     assert response.headers.get("x-stocktrends-accepted-payment-methods") == "none"
     assert response.headers.get("x-stocktrends-pricing-rule") == "default_free"
     assert "payment-required" not in response.headers
+
+
+def _schema_has_date_format(schema: Any) -> bool:
+    if isinstance(schema, dict):
+        if schema.get("format") == "date":
+            return True
+        return any(_schema_has_date_format(value) for value in schema.values())
+    if isinstance(schema, list):
+        return any(_schema_has_date_format(value) for value in schema)
+    return False
 
 
 @pytest.fixture
@@ -355,6 +369,74 @@ def test_portfolio_returns_history_is_public_and_uses_returns_log(protected_clie
     assert "stp_positions" not in executed_sql
 
 
+def test_portfolio_returns_history_with_no_rows_returns_empty_list(protected_client, portfolio_engine):
+    portfolio_engine.return_rows = [
+        row for row in portfolio_engine.return_rows if row["port_id"] != 2
+    ]
+
+    response = protected_client.get("/v1/stocktrends/portfolios/2/returns")
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["port_id"] == 2
+    assert body["count"] == 0
+    assert body["returns"] == []
+
+
+def test_portfolio_returns_history_start_date_filters_earlier_rows(protected_client, portfolio_engine):
+    response = protected_client.get(
+        "/v1/stocktrends/portfolios/2/returns?start_date=2024-01-12"
+    )
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["count"] == 1
+    assert [row["weekdate"] for row in body["returns"]] == ["2024-01-12"]
+
+    executed_sql, params = portfolio_engine.executed[-1]
+    assert "weekdate >= :start_date" in executed_sql
+    assert params["start_date"] == date(2024, 1, 12)
+    assert "ORDER BY weekdate ASC" in executed_sql
+
+
+def test_portfolio_returns_history_end_date_filters_later_rows(protected_client, portfolio_engine):
+    response = protected_client.get(
+        "/v1/stocktrends/portfolios/2/returns?end_date=2024-01-05"
+    )
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["count"] == 1
+    assert [row["weekdate"] for row in body["returns"]] == ["2024-01-05"]
+
+    executed_sql, params = portfolio_engine.executed[-1]
+    assert "weekdate <= :end_date" in executed_sql
+    assert params["end_date"] == date(2024, 1, 5)
+    assert "ORDER BY weekdate ASC" in executed_sql
+
+
+def test_portfolio_returns_history_start_and_end_date_work_together(protected_client, portfolio_engine):
+    response = protected_client.get(
+        "/v1/stocktrends/portfolios/2/returns?start_date=2024-01-06&end_date=2024-01-12"
+    )
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["count"] == 1
+    assert [row["weekdate"] for row in body["returns"]] == ["2024-01-12"]
+
+    executed_sql, params = portfolio_engine.executed[-1]
+    assert "weekdate >= :start_date" in executed_sql
+    assert "weekdate <= :end_date" in executed_sql
+    assert params["start_date"] == date(2024, 1, 6)
+    assert params["end_date"] == date(2024, 1, 12)
+    assert "ORDER BY weekdate ASC" in executed_sql
+
+
 @pytest.mark.parametrize("port_id", [404, 99])
 def test_portfolio_returns_history_returns_404_for_missing_or_inactive(protected_client, port_id):
     response = protected_client.get(f"/v1/stocktrends/portfolios/{port_id}/returns")
@@ -433,3 +515,14 @@ def test_stocktrends_portfolio_endpoints_appear_in_openapi(protected_client):
     returns_description = paths["/stocktrends/portfolios/{port_id}/returns"]["get"]["description"]
     assert "Official Stock Trends portfolio returns history" in returns_description
     assert "stp_returnslog" not in returns_description
+    returns_parameters = {
+        parameter["name"]: parameter
+        for parameter in paths["/stocktrends/portfolios/{port_id}/returns"]["get"]["parameters"]
+        if "name" in parameter
+    }
+    assert returns_parameters["start_date"]["in"] == "query"
+    assert returns_parameters["start_date"]["required"] is False
+    assert _schema_has_date_format(returns_parameters["start_date"]["schema"])
+    assert returns_parameters["end_date"]["in"] == "query"
+    assert returns_parameters["end_date"]["required"] is False
+    assert _schema_has_date_format(returns_parameters["end_date"]["schema"])

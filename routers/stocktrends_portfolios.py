@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Path, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -289,6 +290,14 @@ def get_stocktrends_portfolio(
 def get_stocktrends_portfolio_returns(
     request: Request,
     port_id: int = Path(..., ge=1, description="Official Stock Trends portfolio identifier."),
+    start_date: date | None = Query(
+        default=None,
+        description="Inclusive start weekdate filter in YYYY-MM-DD format.",
+    ),
+    end_date: date | None = Query(
+        default=None,
+        description="Inclusive end weekdate filter in YYYY-MM-DD format.",
+    ),
 ):
     portfolio_sql = text(
         """
@@ -306,8 +315,18 @@ def get_stocktrends_portfolio_returns(
         LIMIT 1
         """
     )
+
+    returns_where = ["port_id = :port_id"]
+    returns_params: dict[str, Any] = {"port_id": port_id}
+    if start_date is not None:
+        returns_where.append("weekdate >= :start_date")
+        returns_params["start_date"] = start_date
+    if end_date is not None:
+        returns_where.append("weekdate <= :end_date")
+        returns_params["end_date"] = end_date
+
     returns_sql = text(
-        """
+        f"""
         SELECT
             weekdate,
             buys,
@@ -322,7 +341,7 @@ def get_stocktrends_portfolio_returns(
             tsxindex,
             spindex
         FROM stp_returnslog
-        WHERE port_id = :port_id
+        WHERE {" AND ".join(returns_where)}
         ORDER BY weekdate ASC
         """
     )
@@ -340,7 +359,7 @@ def get_stocktrends_portfolio_returns(
                         "port_id": port_id,
                     },
                 )
-            return_rows = conn.execute(returns_sql, {"port_id": port_id}).mappings().all()
+            return_rows = conn.execute(returns_sql, returns_params).mappings().all()
     except HTTPException:
         raise
     except Exception as exc:
