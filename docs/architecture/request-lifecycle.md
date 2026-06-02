@@ -13,6 +13,25 @@ This document defines the exact lifecycle of an API request, including:
 
 ## Step-by-Step Lifecycle
 
+### 0. Endpoint Access Classification
+
+Before implementation, every endpoint must be classified as one of:
+
+* public/free discovery
+* protected authenticated
+* paid machine-payment
+
+That classification must agree across:
+
+1. Payment Policy Provider
+2. Pricing Classifier
+3. API-Key Middleware
+
+A zero-cost pricing rule does not override payment-policy enforcement. Public
+endpoints must not be registered as payment-gated EndpointPaymentPolicy routes.
+
+---
+
 ### 1. Request Received
 
 Example:

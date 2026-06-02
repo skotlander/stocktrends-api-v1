@@ -222,6 +222,73 @@ MPP requires different reasoning.
 
 ---
 
+## ENDPOINT ACCESS CLASSIFICATION (REQUIRED BEFORE IMPLEMENTATION)
+
+Every new endpoint MUST be classified before implementation as one of:
+
+### 1. Public / Free Discovery Endpoint
+
+Examples:
+
+- `/v1/meta/*`
+- `/v1/stocktrends/portfolios`
+- `/v1/stocktrends/portfolios/{port_id}`
+
+Requirements:
+
+- Anonymous access permitted.
+- No `EndpointPaymentPolicy` registration.
+- Pricing classifier returns free/non-metered behavior.
+- API-key middleware allows access.
+- OpenAPI remains publicly discoverable.
+
+Important:
+
+A pricing rule with a cost of zero does NOT automatically make an endpoint public.
+
+Public endpoints must not be registered as payment-gated `EndpointPaymentPolicy` routes.
+
+### 2. Protected Endpoint
+
+Examples:
+
+- Subscription-only endpoints.
+- Authenticated planning endpoints.
+
+Requirements:
+
+- API key or authenticated access required.
+- No x402 payment challenge unless explicitly intended.
+
+### 3. Paid Machine-Payment Endpoint
+
+Examples:
+
+- ST-IM inference endpoints.
+- Portfolio returns/history endpoints.
+- Agent intelligence endpoints.
+
+Requirements:
+
+- `EndpointPaymentPolicy` registration required.
+- Active pricing rule required.
+- x402/subscription/MPP behavior verified.
+- Tests must confirm anonymous requests return payment challenge behavior.
+
+### Verification Requirement
+
+For every new endpoint, implementation and review must verify all three access-control layers agree:
+
+1. Payment Policy Provider
+2. Pricing Classifier
+3. API-Key Middleware
+
+Do not assume a zero-cost pricing rule overrides payment-policy enforcement.
+
+The access-control classification must be intentional and consistent across all layers.
+
+---
+
 ## VERIFICATION BEFORE COMPLETION (MANDATORY)
 
 Never mark work complete without proof:

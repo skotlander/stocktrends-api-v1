@@ -303,6 +303,19 @@ When modifying endpoints:
 * preserve OpenAPI/docs functionality
 * ensure headers reflect actual behavior
 
+### Endpoint Access Classification
+
+Before adding or changing any endpoint, explicitly classify it as:
+
+* public/free discovery
+* protected authenticated
+* paid machine-payment
+
+Public/free endpoints must be aligned across the payment policy provider,
+pricing classifier, and API-key middleware. A zero-cost pricing rule does not
+make an endpoint public if it is still registered as a payment-gated
+EndpointPaymentPolicy route.
+
 Critical endpoints:
 
 * `/v1/`
