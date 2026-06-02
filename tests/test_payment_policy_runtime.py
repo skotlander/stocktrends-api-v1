@@ -357,6 +357,102 @@ class PaymentPolicyRuntimeTests(unittest.TestCase):
         self.assertEqual(decision.econ_payment_required, 1)
         self.assertEqual(decision.econ_payment_method, "x402")
 
+    def test_stocktrends_strategy_metadata_paths_are_public_not_endpoint_policies(self):
+        future_strategy_policy = policy_provider.EndpointPaymentPolicy(
+            endpoint_id="stocktrends_strategy_detail_paid",
+            path_pattern="/v1/stocktrends/strategies/{strategy_id}",
+            method="GET",
+            allowed_rails=("subscription", "x402", "mpp"),
+            pricing_rule_id="stocktrends_strategy_detail_paid",
+        )
+        future_portfolio_strategy_policy = policy_provider.EndpointPaymentPolicy(
+            endpoint_id="stocktrends_portfolio_strategy_paid",
+            path_pattern="/v1/stocktrends/portfolios/{port_id}/strategy",
+            method="GET",
+            allowed_rails=("subscription", "x402", "mpp"),
+            pricing_rule_id="stocktrends_portfolio_strategy_paid",
+        )
+        future_config = replace(
+            policy_provider._default_policy_config(),
+            endpoint_payment_policies=(future_strategy_policy, future_portfolio_strategy_policy),
+        )
+
+        with patch.object(policy_provider, "get_runtime_payment_policy_config", return_value=future_config), patch.object(
+            classifier, "ENABLE_AGENT_PAY", True
+        ):
+            for path in (
+                "/v1/stocktrends/strategies",
+                "/v1/stocktrends/strategies/3",
+                "/v1/stocktrends/portfolios/2/strategy",
+            ):
+                effective = policy_provider.get_effective_endpoint_payment_policy(path, "GET")
+                accepted = policy_provider.get_accepted_payment_methods_for_path(
+                    f"{path}?include=ignored",
+                    "default_free",
+                    method="GET",
+                )
+                decision = classifier.classify_request(
+                    path=path,
+                    method="GET",
+                    has_paid_auth=False,
+                    payment_method_header="x402",
+                    agent_identifier="agent-123",
+                )
+
+                self.assertIsNone(effective)
+                self.assertTrue(policy_provider.is_public_stocktrends_path(path))
+                self.assertTrue(decision.access_granted)
+                self.assertEqual(decision.is_metered, 0)
+                self.assertEqual(decision.econ_payment_required, 0)
+                self.assertEqual(accepted, "none")
+
+    def test_stocktrends_strategy_child_paths_are_not_public(self):
+        future_matches_policy = policy_provider.EndpointPaymentPolicy(
+            endpoint_id="stocktrends_strategy_matches_paid",
+            path_pattern="/v1/stocktrends/strategies/{strategy_id}/matches",
+            method="GET",
+            allowed_rails=("subscription", "x402", "mpp"),
+            pricing_rule_id="stocktrends_strategy_matches_paid",
+        )
+        future_portfolio_strategy_current_policy = policy_provider.EndpointPaymentPolicy(
+            endpoint_id="stocktrends_portfolio_strategy_current_paid",
+            path_pattern="/v1/stocktrends/portfolios/{port_id}/strategy/current",
+            method="GET",
+            allowed_rails=("subscription", "x402", "mpp"),
+            pricing_rule_id="stocktrends_portfolio_strategy_current_paid",
+        )
+        future_config = replace(
+            policy_provider._default_policy_config(),
+            endpoint_payment_policies=(future_matches_policy, future_portfolio_strategy_current_policy),
+        )
+
+        with patch.object(policy_provider, "get_runtime_payment_policy_config", return_value=future_config), patch.object(
+            classifier, "ENABLE_AGENT_PAY", True
+        ):
+            for path, rule_id in (
+                ("/v1/stocktrends/strategies/3/matches", "stocktrends_strategy_matches_paid"),
+                (
+                    "/v1/stocktrends/portfolios/2/strategy/current",
+                    "stocktrends_portfolio_strategy_current_paid",
+                ),
+            ):
+                effective = policy_provider.get_effective_endpoint_payment_policy(path, "GET")
+                decision = classifier.classify_request(
+                    path=path,
+                    method="GET",
+                    has_paid_auth=False,
+                    payment_method_header="x402",
+                    agent_identifier="agent-123",
+                )
+
+                self.assertFalse(policy_provider.is_public_stocktrends_path(path))
+                self.assertIsNotNone(effective)
+                self.assertEqual(effective.pricing_rule_id, rule_id)
+                self.assertEqual(effective.allowed_rails, ("subscription", "x402", "mpp"))
+                self.assertTrue(decision.access_granted)
+                self.assertEqual(decision.econ_payment_required, 1)
+                self.assertEqual(decision.econ_payment_method, "x402")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,9 @@ Current public/free Stock Trends portfolio endpoints include:
 * `GET /v1/stocktrends/portfolios/{port_id}/returns`
 * `GET /v1/stocktrends/portfolios/{port_id}/summary`
 * `GET /v1/stocktrends/portfolios/{port_id}/positions/history`
+* `GET /v1/stocktrends/strategies`
+* `GET /v1/stocktrends/strategies/{strategy_id}`
+* `GET /v1/stocktrends/portfolios/{port_id}/strategy`
 
 Official Stock Trends portfolio returns history is sourced from
 `stp_returnslog`, the canonical portfolio performance history. Do not
@@ -128,6 +131,52 @@ For the public summary implementation:
 
 Current live holdings are excluded from the summary. Do not make arbitrary
 `/summary/*` child paths public/free.
+
+Official Stock Trends strategy metadata is public/free provenance metadata. It
+is sourced from:
+
+* `Strategy`
+* `StrategyCondition`
+* `stp_ports.strategy_id`
+
+The canonical mapping is:
+
+```text
+stp_ports.strategy_id
+    = Strategy.StrategyId
+    = StrategyCondition.StrategyId
+```
+
+Public strategy metadata exposes declared buy/sell rule rows and economic
+assumptions only:
+
+* `Strategy.Description`
+* `Strategy.InvestmentAmt`
+* `Strategy.TransactionCostPct`
+* `Strategy.StopLossPct`
+* `Strategy.StopLossMinimum`
+* `StrategyCondition.BuySell`
+* `StrategyCondition.LeftSide`
+* `StrategyCondition.Operator`
+* `StrategyCondition.RightSide`
+* `StrategyCondition.sell_trigger`
+
+`StrategyCondition.BuySell = 'B'` means a buy-condition row.
+`StrategyCondition.BuySell = 'S'` means a sell-condition row.
+
+Strategy conditions are exposed as legacy metadata for provenance and
+verification. They are not executable query endpoints. Public strategy metadata
+must not evaluate conditions against current market data and must not return
+current matching stocks, current buy candidates, current sell candidates, or
+current live holdings.
+
+Do not make arbitrary strategy child paths public/free. In particular, these
+remain protected unless intentionally reclassified later:
+
+* `/v1/stocktrends/strategies/{strategy_id}/matches`
+* `/v1/stocktrends/strategies/{strategy_id}/current`
+* `/v1/stocktrends/portfolios/{port_id}/strategy/current`
+* `/v1/stocktrends/portfolios/{port_id}/strategy/matches`
 
 ---
 

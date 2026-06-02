@@ -107,6 +107,12 @@ https://developer.stocktrends.com/mpp
   Get a compact public history summary for an official Stock Trends model portfolio, including annualized ROI on average invested capital. Current live holdings are intentionally excluded.
 * `GET /stocktrends/portfolios/{port_id}/positions/history`
   Get official Stock Trends historical closed-position records. Current live holdings are intentionally excluded.
+* `GET /stocktrends/strategies`
+  List public Stock Trends strategy metadata: declared buy/sell condition counts, investment amount, transaction-cost estimate, and stop-loss assumptions.
+* `GET /stocktrends/strategies/{strategy_id}`
+  Get public legacy buy/sell condition metadata and economic assumptions for one Stock Trends strategy. Conditions are metadata, not executable query endpoints.
+* `GET /stocktrends/portfolios/{port_id}/strategy`
+  Get public portfolio-to-strategy provenance linking an official model portfolio to its declared strategy metadata and verification endpoints.
 
 ### Market Regime
 
@@ -305,8 +311,13 @@ Publicly accessible resources include:
 * `GET /v1/stocktrends/portfolios/{port_id}/returns`
 * `GET /v1/stocktrends/portfolios/{port_id}/summary`
 * `GET /v1/stocktrends/portfolios/{port_id}/positions/history`
+* `GET /v1/stocktrends/strategies`
+* `GET /v1/stocktrends/strategies/{strategy_id}`
+* `GET /v1/stocktrends/portfolios/{port_id}/strategy`
 
 Use these for discovery, schema inspection, and grounding. Start with `/v1/ai/tools`.
+
+Stock Trends strategy metadata describes the declared buy/sell rules and economic assumptions behind official model portfolios. Strategy conditions are exposed as legacy metadata for provenance and verification. They are not executable query endpoints and do not return current matching stocks or current live holdings.
 
 ### 2. Subscription access
 
@@ -516,6 +527,7 @@ Agents should:
 * Use pricing endpoints before expensive workflows
 * Use `/cost-estimate` when cost must be known in advance
 * Use `/workflows` as the recommended starting point for portfolio agents; `portfolio_build` is the first workflow when the agent needs fresh symbol discovery and portfolio construction
+* Use `/stocktrends/strategies` and `/stocktrends/portfolios/{port_id}/strategy` to ground portfolio outcomes in declared strategy provenance. These public endpoints expose legacy condition metadata only; they do not execute strategy expressions or return current matching candidates.
 * Reuse `symbol_exchange` values from screener, selections, STWR reports, and `portfolio_construct` outputs in downstream calls
 * For `/portfolio/compare`, send `left` and `right` as direct arrays of positions: `{"left":[{"symbol_exchange":"IBM-N","weight":1}],"right":[{"symbol_exchange":"MSFT-Q","weight":1}]}`
 * Use `/agent/screener/top` as a strong first premium endpoint
