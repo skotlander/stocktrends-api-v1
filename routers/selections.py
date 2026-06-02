@@ -214,7 +214,6 @@ def _stim_select_signal_metadata() -> dict[str, Any]:
             "x40wk1_gt": STIM_SELECT_BASE_40WK,
             "price_gte": STIM_SELECT_MIN_PRICE,
             "volume_gt": STIM_SELECT_MIN_VOLUME,
-            "avgmean_formula": "(x4wk + x13wk + x40wk) / 3",
             "prob4wk_formula": "1 - normal_cdf((0 - x4wk) / x4wksd)",
             "prob13wk_formula": "1 - normal_cdf((2.19 - x13wk) / x13wksd)",
             "prob40wk_formula": "1 - normal_cdf((6.45 - x40wk) / x40wksd)",

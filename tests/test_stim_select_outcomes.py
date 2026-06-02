@@ -300,6 +300,7 @@ def test_stim_select_outcomes_summary_returns_metrics(client):
 
     assert body["signal"]["signal_id"] == "stim_select"
     assert body["signal"]["criteria"]["x13wk1_gt"] == 2.19
+    assert "avgmean_formula" not in body["signal"]["criteria"]
     assert body["signal"]["base_period_mean_13wk"] == 2.19
     assert body["filters"] == {
         "start_date": None,
