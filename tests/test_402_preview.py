@@ -39,6 +39,7 @@ import middleware.metering as metering_module
 import pricing.classifier as classifier_module
 from payments.enforcement import PaymentEnforcementResult
 from discovery.preview import get_endpoint_preview, _PREVIEW_BY_PATH
+from pricing.classifier import PricingDecision
 
 
 # ---------------------------------------------------------------------------
@@ -573,6 +574,47 @@ def test_public_tools_endpoint_remains_non_payment_public():
     assert response.status_code == 200
     assert response.headers.get("x-stocktrends-payment-required") == "false"
     assert response.headers.get("cache-control") != "no-store, private"
+
+
+def test_non_developer_origin_gets_no_cors_headers(monkeypatch):
+    """Requests from non-whitelisted origins must not receive access-control-allow-origin."""
+    _stub_runtime(monkeypatch, enforce_result=_make_challenge_result("/v1/stim/latest"))
+    with TestClient(main.app) as client:
+        response = client.get(
+            "/v1/stim/latest",
+            headers={"Origin": "https://evil.example.com"},
+        )
+
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_paid_200_response_gets_no_store_cache_control(monkeypatch):
+    """A successful paid endpoint response (200) receives Cache-Control: no-store, private."""
+    paid_decision = PricingDecision(
+        is_metered=1,
+        access_granted=True,
+        deny_reason=None,
+        log_pricing_rule_id="stim_latest",
+        log_payment_method="subscription",
+        econ_pricing_rule_id="stim_latest",
+        econ_payment_required=0,
+        econ_payment_status=None,
+        econ_payment_method="subscription",
+    )
+    monkeypatch.setattr(metering_module, "classify_request", lambda **kwargs: paid_decision)
+    monkeypatch.setattr(metering_module, "log_api_request_event", lambda *a, **kw: None)
+    monkeypatch.setattr(metering_module, "log_api_request_economics", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        metering_module,
+        "resolve_economic_amounts",
+        lambda *a, **kw: (Decimal("0.05"), Decimal("0.05"), Decimal("0.05")),
+    )
+
+    with TestClient(main.app) as client:
+        response = client.get("/v1/ai/tools")
+
+    assert response.status_code == 200
+    assert response.headers.get("cache-control") == "no-store, private"
 
 
 # ---------------------------------------------------------------------------
