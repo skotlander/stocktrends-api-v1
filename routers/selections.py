@@ -126,7 +126,7 @@ def _stim_select_outcomes_base_where(
 
 def _stim_select_outcomes_source_sql(where: str) -> str:
     return f"""
-        FROM stdata.st_data a
+        FROM stweekly.st_data a
         JOIN stweekly.st_returnmeans b
           ON a.weekdate = b.weekdate
          AND a.exchange = b.exchange
@@ -311,7 +311,7 @@ def stim_select_outcomes_summary(
     """
     Public aggregate evidence for the ST-IM Select signal-selection rule.
 
-    This summarizes mature historical observations from stdata.st_data joined
+    This summarizes mature historical observations from stweekly.st_data joined
     to stweekly.st_returnmeans. It intentionally returns aggregate outcomes only.
     """
     if start_date is not None and end_date is not None and start_date > end_date:
