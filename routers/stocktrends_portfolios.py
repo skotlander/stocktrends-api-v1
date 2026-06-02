@@ -54,13 +54,49 @@ class StockTrendsPortfolioReturnsPortfolio(BaseModel):
 
 class StockTrendsPortfolioReturnPoint(BaseModel):
     weekdate: str = Field(..., description="Week-ending date for the portfolio return observation.")
-    return_pct: float | None = Field(
+    buys: int | None = Field(
         default=None,
-        description="Official portfolio return percentage for the week.",
+        description="Official portfolio buy activity recorded for the week.",
     )
-    value: float | None = Field(
+    sells: int | None = Field(
         default=None,
-        description="Official portfolio value for the week.",
+        description="Official portfolio sell activity recorded for the week.",
+    )
+    held: int | None = Field(
+        default=None,
+        description="Official portfolio held count recorded for the week.",
+    )
+    net_proceeds: float | None = Field(
+        default=None,
+        description="Official net proceeds recorded for the portfolio observation.",
+    )
+    realized_gain: float | None = Field(
+        default=None,
+        description="Official realized gain for the portfolio observation.",
+    )
+    cumulative_realized_gain: float | None = Field(
+        default=None,
+        description="Official cumulative realized gain through the observation week.",
+    )
+    total_valuation: float | None = Field(
+        default=None,
+        description="Official total portfolio valuation for the observation week.",
+    )
+    unrealized_gain: float | None = Field(
+        default=None,
+        description="Official unrealized gain for the portfolio observation.",
+    )
+    cumulative_total_gain: float | None = Field(
+        default=None,
+        description="Official cumulative total gain through the observation week.",
+    )
+    tsx_index: float | None = Field(
+        default=None,
+        description="TSX index reference value recorded with the portfolio observation.",
+    )
+    sp_index: float | None = Field(
+        default=None,
+        description="S&P index reference value recorded with the portfolio observation.",
     )
 
 
@@ -111,8 +147,17 @@ def _row_to_return_point(row: Any) -> dict[str, Any]:
     weekdate = data.get("weekdate")
     return {
         "weekdate": weekdate.isoformat() if hasattr(weekdate, "isoformat") else str(weekdate),
-        "return_pct": _to_float(data.get("return_pct")),
-        "value": _to_float(data.get("value")),
+        "buys": _to_int(data.get("buys")),
+        "sells": _to_int(data.get("sells")),
+        "held": _to_int(data.get("held")),
+        "net_proceeds": _to_float(data.get("net_proceeds")),
+        "realized_gain": _to_float(data.get("realizedgain")),
+        "cumulative_realized_gain": _to_float(data.get("cum_realizedgain")),
+        "total_valuation": _to_float(data.get("totalvaluation")),
+        "unrealized_gain": _to_float(data.get("unrealizedgain")),
+        "cumulative_total_gain": _to_float(data.get("cum_totalgain")),
+        "tsx_index": _to_float(data.get("tsxindex")),
+        "sp_index": _to_float(data.get("spindex")),
     }
 
 
@@ -265,8 +310,17 @@ def get_stocktrends_portfolio_returns(
         """
         SELECT
             weekdate,
-            return_pct,
-            value
+            buys,
+            sells,
+            held,
+            net_proceeds,
+            realizedgain,
+            cum_realizedgain,
+            totalvaluation,
+            unrealizedgain,
+            cum_totalgain,
+            tsxindex,
+            spindex
         FROM stp_returnslog
         WHERE port_id = :port_id
         ORDER BY weekdate ASC

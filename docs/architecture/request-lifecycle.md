@@ -44,8 +44,17 @@ trail source rather than the public performance-history source.
 Current public response mapping:
 
 * `stp_returnslog.weekdate` -> `returns[].weekdate`
-* `stp_returnslog.return_pct` -> `returns[].return_pct`
-* `stp_returnslog.value` -> `returns[].value`
+* `stp_returnslog.buys` -> `returns[].buys`
+* `stp_returnslog.sells` -> `returns[].sells`
+* `stp_returnslog.held` -> `returns[].held`
+* `stp_returnslog.net_proceeds` -> `returns[].net_proceeds`
+* `stp_returnslog.realizedgain` -> `returns[].realized_gain`
+* `stp_returnslog.cum_realizedgain` -> `returns[].cumulative_realized_gain`
+* `stp_returnslog.totalvaluation` -> `returns[].total_valuation`
+* `stp_returnslog.unrealizedgain` -> `returns[].unrealized_gain`
+* `stp_returnslog.cum_totalgain` -> `returns[].cumulative_total_gain`
+* `stp_returnslog.tsxindex` -> `returns[].tsx_index`
+* `stp_returnslog.spindex` -> `returns[].sp_index`
 
 ---
 
