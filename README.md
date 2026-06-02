@@ -165,6 +165,9 @@ GET /v1/stocktrends/portfolios/{port_id}
 GET /v1/stocktrends/portfolios/{port_id}/returns
 GET /v1/stocktrends/portfolios/{port_id}/summary
 GET /v1/stocktrends/portfolios/{port_id}/positions/history
+GET /v1/stocktrends/strategies
+GET /v1/stocktrends/strategies/{strategy_id}
+GET /v1/stocktrends/portfolios/{port_id}/strategy
 ```
 
 These routes expose official Stock Trends model portfolio metadata and returns
@@ -172,6 +175,12 @@ history, a compact public history summary, and historical closed-position
 records as public/free discovery data. The summary includes Stock Trends
 annualized ROI on average invested capital. Current live holdings are
 intentionally excluded from the public portfolio history surface.
+
+Stock Trends strategy metadata describes the declared buy/sell rules and
+economic assumptions behind official model portfolios. Strategy conditions are
+exposed as legacy metadata for provenance and verification. They are not
+executable query endpoints and do not return current matching stocks or current
+live holdings.
 
 ### Market Intelligence
 

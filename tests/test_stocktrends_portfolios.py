@@ -13,6 +13,7 @@ import middleware.metering as metering_module
 import payments.policy_provider as policy_provider
 import pricing.classifier as classifier_module
 import routers.stocktrends_portfolios as portfolios_router
+import routers.stocktrends_strategies as strategies_router
 
 
 _ROWS = [
@@ -218,6 +219,78 @@ _POSITIONS_ROWS = [
     },
 ]
 
+_STRATEGY_ROWS = [
+    {
+        "StrategyId": 3,
+        "Description": "ST-IM Select Strategy",
+        "InvestmentAmt": Decimal("10000.00"),
+        "TransactionCostPct": Decimal("1.00"),
+        "StopLossPct": Decimal("8.00"),
+        "StopLossMinimum": Decimal("0.50"),
+        "private_strategy_note": "strategy internals should not leak",
+    },
+    {
+        "StrategyId": 4,
+        "Description": "TSX 60 Strategy",
+        "InvestmentAmt": Decimal("7500.00"),
+        "TransactionCostPct": Decimal("0.75"),
+        "StopLossPct": Decimal("6.00"),
+        "StopLossMinimum": Decimal("0.25"),
+        "private_strategy_note": "strategy internals should not leak",
+    },
+]
+
+_STRATEGY_CONDITION_ROWS = [
+    {
+        "StrategyId": 3,
+        "BuySell": "B",
+        "LeftSide": "F_NumberOfWeeksAtRsi(rsi, 100)",
+        "Operator": ">=",
+        "RightSide": "3",
+        "sell_trigger": None,
+    },
+    {
+        "StrategyId": 3,
+        "BuySell": "B",
+        "LeftSide": "price",
+        "Operator": ">=",
+        "RightSide": "2",
+        "sell_trigger": None,
+    },
+    {
+        "StrategyId": 3,
+        "BuySell": "S",
+        "LeftSide": "IF(gain_loss > 0, 1, 0)",
+        "Operator": "=",
+        "RightSide": "1",
+        "sell_trigger": "PT",
+    },
+    {
+        "StrategyId": 3,
+        "BuySell": "S",
+        "LeftSide": "d.trend",
+        "Operator": "=",
+        "RightSide": "'^v'",
+        "sell_trigger": "1",
+    },
+    {
+        "StrategyId": 4,
+        "BuySell": "B",
+        "LeftSide": "rsi",
+        "Operator": ">",
+        "RightSide": "100",
+        "sell_trigger": None,
+    },
+    {
+        "StrategyId": 4,
+        "BuySell": "S",
+        "LeftSide": "d.trend",
+        "Operator": "=",
+        "RightSide": "'v-'",
+        "sell_trigger": "2",
+    },
+]
+
 
 class _Result:
     def __init__(self, rows: list[dict[str, Any]]):
@@ -239,11 +312,15 @@ class _Connection:
         portfolio_rows: list[dict[str, Any]],
         return_rows: list[dict[str, Any]],
         position_rows: list[dict[str, Any]],
+        strategy_rows: list[dict[str, Any]],
+        strategy_condition_rows: list[dict[str, Any]],
         executed: list[tuple[str, dict[str, Any]]],
     ):
         self._portfolio_rows = portfolio_rows
         self._return_rows = return_rows
         self._position_rows = position_rows
+        self._strategy_rows = strategy_rows
+        self._strategy_condition_rows = strategy_condition_rows
         self._executed = executed
 
     def __enter__(self):
@@ -256,6 +333,84 @@ class _Connection:
         params = params or {}
         sql = str(statement)
         self._executed.append((sql, params))
+
+        if "FROM StrategyCondition" in sql:
+            strategy_id = params.get("strategy_id")
+            rows = [
+                row
+                for row in self._strategy_condition_rows
+                if strategy_id is None or row["StrategyId"] == strategy_id
+            ]
+            rows = sorted(
+                rows,
+                key=lambda row: (
+                    row["StrategyId"],
+                    row["BuySell"],
+                    row["LeftSide"] or "",
+                    row["Operator"] or "",
+                    row["RightSide"] or "",
+                    row["sell_trigger"] or "",
+                ),
+            )
+            return _Result(
+                [
+                    {
+                        "strategy_id": row["StrategyId"],
+                        "buy_sell": row["BuySell"],
+                        "left_side": row["LeftSide"],
+                        "operator": row["Operator"],
+                        "right_side": row["RightSide"],
+                        "sell_trigger": row["sell_trigger"],
+                    }
+                    for row in rows
+                ]
+            )
+
+        if "FROM Strategy" in sql:
+            rows = self._strategy_rows
+            if "strategy_id" in params:
+                rows = [row for row in rows if row["StrategyId"] == params["strategy_id"]]
+
+            if "LEFT JOIN StrategyCondition" in sql:
+                result_rows = []
+                for row in sorted(rows, key=lambda item: item["StrategyId"]):
+                    conditions = [
+                        condition
+                        for condition in self._strategy_condition_rows
+                        if condition["StrategyId"] == row["StrategyId"]
+                    ]
+                    result_rows.append(
+                        {
+                            "strategy_id": row["StrategyId"],
+                            "description": row["Description"],
+                            "investment_amount": row["InvestmentAmt"],
+                            "transaction_cost_pct": row["TransactionCostPct"],
+                            "stop_loss_pct": row["StopLossPct"],
+                            "stop_loss_minimum": row["StopLossMinimum"],
+                            "buy_condition_count": sum(
+                                1 for condition in conditions if condition["BuySell"] == "B"
+                            ),
+                            "sell_condition_count": sum(
+                                1 for condition in conditions if condition["BuySell"] == "S"
+                            ),
+                            "total_condition_count": len(conditions),
+                        }
+                    )
+                return _Result(result_rows)
+
+            return _Result(
+                [
+                    {
+                        "strategy_id": row["StrategyId"],
+                        "description": row["Description"],
+                        "investment_amount": row["InvestmentAmt"],
+                        "transaction_cost_pct": row["TransactionCostPct"],
+                        "stop_loss_pct": row["StopLossPct"],
+                        "stop_loss_minimum": row["StopLossMinimum"],
+                    }
+                    for row in rows
+                ]
+            )
 
         if "FROM stp_returnslog" in sql:
             rows = [row for row in self._return_rows if row["port_id"] == params.get("port_id")]
@@ -336,14 +491,25 @@ class _Engine:
         portfolio_rows: list[dict[str, Any]],
         return_rows: list[dict[str, Any]],
         position_rows: list[dict[str, Any]],
+        strategy_rows: list[dict[str, Any]] | None = None,
+        strategy_condition_rows: list[dict[str, Any]] | None = None,
     ):
         self.portfolio_rows = portfolio_rows
         self.return_rows = return_rows
         self.position_rows = position_rows
+        self.strategy_rows = strategy_rows or list(_STRATEGY_ROWS)
+        self.strategy_condition_rows = strategy_condition_rows or list(_STRATEGY_CONDITION_ROWS)
         self.executed: list[tuple[str, dict[str, Any]]] = []
 
     def connect(self):
-        return _Connection(self.portfolio_rows, self.return_rows, self.position_rows, self.executed)
+        return _Connection(
+            self.portfolio_rows,
+            self.return_rows,
+            self.position_rows,
+            self.strategy_rows,
+            self.strategy_condition_rows,
+            self.executed,
+        )
 
 
 class _FailingEngine:
@@ -384,6 +550,8 @@ def portfolio_engine(monkeypatch):
     engine = _Engine(_ROWS, _RETURNS_ROWS, _POSITIONS_ROWS)
     monkeypatch.setattr(portfolios_router, "get_engine", lambda: engine)
     monkeypatch.setattr(portfolios_router, "text", lambda sql: sql)
+    monkeypatch.setattr(strategies_router, "get_engine", lambda: engine)
+    monkeypatch.setattr(strategies_router, "text", lambda sql: sql)
     return engine
 
 
@@ -1013,6 +1181,194 @@ def test_portfolio_positions_history_returns_404_for_missing_or_inactive(
     _assert_no_payment_challenge(response)
 
 
+def test_strategy_list_returns_public_metadata_assumptions_and_counts(
+    protected_client,
+    portfolio_engine,
+):
+    response = protected_client.get("/v1/stocktrends/strategies")
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["count"] == 2
+    assert body["data"][0] == {
+        "strategy_id": 3,
+        "description": "ST-IM Select Strategy",
+        "investment_amount": 10000.0,
+        "transaction_cost_pct": 1.0,
+        "round_trip_transaction_cost_pct": 2.0,
+        "stop_loss_pct": 8.0,
+        "stop_loss_minimum": 0.5,
+        "condition_counts": {
+            "buy": 2,
+            "sell": 2,
+            "total": 4,
+        },
+    }
+    assert "private_strategy_note" not in str(body)
+    assert "LIVE" not in str(body)
+    assert "IBM" not in str(body)
+    assert "MSFT" not in str(body)
+
+    executed_sql = "\n".join(sql for sql, _params in portfolio_engine.executed)
+    assert "FROM Strategy s" in executed_sql
+    assert "LEFT JOIN StrategyCondition" in executed_sql
+    assert "COUNT(sc.StrategyId) AS total_condition_count" in executed_sql
+    assert "st_data" not in executed_sql
+    assert "stp_positions" not in executed_sql
+
+
+def test_strategy_detail_groups_buy_sell_conditions_as_legacy_metadata(
+    protected_client,
+    portfolio_engine,
+):
+    response = protected_client.get("/v1/stocktrends/strategies/3")
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["strategy_id"] == 3
+    strategy = body["data"]
+    assert strategy["strategy_id"] == 3
+    assert strategy["investment_amount"] == 10000.0
+    assert strategy["transaction_cost_pct"] == 1.0
+    assert strategy["round_trip_transaction_cost_pct"] == 2.0
+    assert strategy["stop_loss_pct"] == 8.0
+    assert strategy["stop_loss_minimum"] == 0.5
+    assert strategy["conditions"]["buy"][0] == {
+        "sequence": 1,
+        "left_side": "F_NumberOfWeeksAtRsi(rsi, 100)",
+        "operator": ">=",
+        "right_side": "3",
+        "sell_trigger": None,
+        "legacy_expression": "F_NumberOfWeeksAtRsi(rsi, 100) >= 3",
+    }
+    assert strategy["conditions"]["sell"][1] == {
+        "sequence": 2,
+        "left_side": "d.trend",
+        "operator": "=",
+        "right_side": "'^v'",
+        "sell_trigger": "1",
+        "legacy_expression": "d.trend = '^v'",
+    }
+    assert strategy["public_verification"] == {
+        "related_portfolios_endpoint": "/v1/stocktrends/portfolios",
+        "portfolio_strategy_endpoint_template": "/v1/stocktrends/portfolios/{port_id}/strategy",
+        "current_live_holdings_excluded": True,
+        "conditions_are_metadata_not_executable_api": True,
+    }
+    assert "LIVE" not in str(body)
+    assert "current" not in str(body).lower().replace("current_live_holdings_excluded", "")
+
+    executed_sql = "\n".join(sql for sql, _params in portfolio_engine.executed)
+    assert "FROM Strategy" in executed_sql
+    assert "FROM StrategyCondition" in executed_sql
+    assert "ORDER BY StrategyId ASC, BuySell ASC, LeftSide ASC, Operator ASC, RightSide ASC, sell_trigger ASC" in executed_sql
+    assert "st_data" not in executed_sql
+    assert "stp_positions" not in executed_sql
+
+
+def test_strategy_detail_returns_404_for_unknown_strategy(protected_client):
+    response = protected_client.get("/v1/stocktrends/strategies/404")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "strategy_not_found"
+    assert response.json()["detail"]["strategy_id"] == 404
+    _assert_no_payment_challenge(response)
+
+
+def test_portfolio_strategy_returns_active_portfolio_strategy_provenance(
+    protected_client,
+    portfolio_engine,
+):
+    response = protected_client.get("/v1/stocktrends/portfolios/2/strategy")
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["port_id"] == 2
+    assert body["portfolio"] == {
+        "port_id": 2,
+        "name": "TSX 60 Portfolio",
+        "strategy_id": 4,
+        "selection_universe": "SPTX60",
+    }
+    assert body["strategy"]["strategy_id"] == 4
+    assert body["strategy"]["description"] == "TSX 60 Strategy"
+    assert body["strategy"]["conditions"]["buy"] == [
+        {
+            "sequence": 1,
+            "left_side": "rsi",
+            "operator": ">",
+            "right_side": "100",
+            "sell_trigger": None,
+            "legacy_expression": "rsi > 100",
+        }
+    ]
+    assert body["verification"] == {
+        "portfolio_metadata_endpoint": "/v1/stocktrends/portfolios/2",
+        "portfolio_returns_endpoint": "/v1/stocktrends/portfolios/2/returns",
+        "historical_positions_endpoint": "/v1/stocktrends/portfolios/2/positions/history",
+        "summary_endpoint": "/v1/stocktrends/portfolios/2/summary",
+        "current_live_holdings_excluded": True,
+        "current_matching_candidates_excluded": True,
+        "conditions_are_metadata_not_executable_api": True,
+    }
+    assert "LIVE" not in str(body)
+    assert "IBM" not in str(body)
+    assert "MSFT" not in str(body)
+
+    executed_sql = "\n".join(sql for sql, _params in portfolio_engine.executed)
+    assert "FROM stp_ports" in executed_sql
+    assert "AND status = 1" in executed_sql
+    assert "FROM Strategy" in executed_sql
+    assert "FROM StrategyCondition" in executed_sql
+    assert "st_data" not in executed_sql
+    assert "stp_positions" not in executed_sql
+
+
+@pytest.mark.parametrize("port_id", [404, 99])
+def test_portfolio_strategy_returns_404_for_missing_or_inactive(protected_client, port_id):
+    response = protected_client.get(f"/v1/stocktrends/portfolios/{port_id}/strategy")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "portfolio_not_found"
+    assert response.json()["detail"]["port_id"] == port_id
+    _assert_no_payment_challenge(response)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/stocktrends/strategies",
+        "/v1/stocktrends/strategies/3",
+        "/v1/stocktrends/portfolios/2/strategy",
+    ],
+)
+def test_strategy_metadata_access_classification_layers_are_public_free(path):
+    decision = classifier_module.classify_request(
+        path=path,
+        method="GET",
+        has_paid_auth=False,
+        payment_method_header=None,
+        plan_code=None,
+        agent_identifier=None,
+    )
+    accepted = policy_provider.get_accepted_payment_methods_for_path(
+        path,
+        decision.log_pricing_rule_id,
+        method="GET",
+    )
+
+    assert policy_provider.get_effective_endpoint_payment_policy(path, "GET") is None
+    assert policy_provider.is_public_stocktrends_path(path)
+    assert decision.access_granted is True
+    assert decision.is_metered == 0
+    assert decision.log_pricing_rule_id == "default_free"
+    assert decision.econ_payment_required == 0
+    assert accepted == "none"
+
+
 def test_portfolio_returns_access_classification_layers_are_public_free():
     path = "/v1/stocktrends/portfolios/2/returns"
 
@@ -1109,6 +1465,25 @@ def test_future_stocktrends_summary_child_paths_are_not_public_bypasses(protecte
     assert response.json() == {"detail": "Missing API key"}
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/stocktrends/strategies/3/matches",
+        "/v1/stocktrends/strategies/3/current",
+        "/v1/stocktrends/portfolios/2/strategy/current",
+        "/v1/stocktrends/portfolios/2/strategy/matches",
+    ],
+)
+def test_future_stocktrends_strategy_child_paths_are_not_public_bypasses(
+    protected_client,
+    path,
+):
+    response = protected_client.get(path)
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing API key"}
+
+
 def test_stocktrends_portfolio_metadata_routes_remain_read_only(protected_client):
     response = protected_client.post("/v1/stocktrends/portfolios")
 
@@ -1142,6 +1517,9 @@ def test_stocktrends_portfolio_endpoints_appear_in_openapi(protected_client):
     assert "/stocktrends/portfolios/{port_id}/returns" in paths
     assert "/stocktrends/portfolios/{port_id}/summary" in paths
     assert "/stocktrends/portfolios/{port_id}/positions/history" in paths
+    assert "/stocktrends/strategies" in paths
+    assert "/stocktrends/strategies/{strategy_id}" in paths
+    assert "/stocktrends/portfolios/{port_id}/strategy" in paths
     assert "Official Stock Trends model portfolios" in paths["/stocktrends/portfolios"]["get"]["description"]
     assert "Official Stock Trends model portfolio" in paths["/stocktrends/portfolios/{port_id}"]["get"]["description"]
     returns_description = paths["/stocktrends/portfolios/{port_id}/returns"]["get"]["description"]
@@ -1199,3 +1577,20 @@ def test_stocktrends_portfolio_endpoints_appear_in_openapi(protected_client):
     assert positions_parameters["end_date"]["in"] == "query"
     assert positions_parameters["end_date"]["required"] is False
     assert _schema_has_date_format(positions_parameters["end_date"]["schema"])
+
+    strategies_description = paths["/stocktrends/strategies"]["get"]["description"]
+    assert "Public/free strategy metadata" in strategies_description
+    assert "Conditions are metadata, not executable APIs" in strategies_description
+    assert "does not evaluate current matching stocks" in strategies_description
+    assert "does not return current live holdings" in strategies_description
+
+    strategy_detail_description = paths["/stocktrends/strategies/{strategy_id}"]["get"]["description"]
+    assert "legacy buy/sell condition expressions" in strategy_detail_description
+    assert "not executable query endpoints" in strategy_detail_description
+    assert "current live holdings" in strategy_detail_description
+
+    portfolio_strategy_description = paths["/stocktrends/portfolios/{port_id}/strategy"]["get"]["description"]
+    assert "portfolio-to-strategy provenance" in portfolio_strategy_description
+    assert "Conditions are metadata, not executable APIs" in portfolio_strategy_description
+    assert "current matching stocks" in portfolio_strategy_description
+    assert "current live holdings" in portfolio_strategy_description

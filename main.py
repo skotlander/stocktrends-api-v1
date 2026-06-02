@@ -34,6 +34,7 @@ from routers.market import router as market_router
 from routers.decision import router as decision_router
 from routers.portfolio import router as portfolio_router
 from routers.stocktrends_portfolios import router as stocktrends_portfolios_router
+from routers.stocktrends_strategies import router as stocktrends_strategies_router
 from routers.workflows import router as workflows_router
 from routers.observability import router as observability_router
 
@@ -412,6 +413,7 @@ v1.include_router(market_router)
 v1.include_router(decision_router)
 v1.include_router(portfolio_router)
 v1.include_router(stocktrends_portfolios_router)
+v1.include_router(stocktrends_strategies_router)
 v1.include_router(workflows_router)
 v1.include_router(observability_router)
 

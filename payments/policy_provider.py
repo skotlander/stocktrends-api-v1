@@ -92,6 +92,10 @@ _PUBLIC_STOCKTRENDS_PORTFOLIO_METADATA_LIST_PATH = "/v1/stocktrends/portfolios"
 _PUBLIC_STOCKTRENDS_PORTFOLIO_METADATA_DETAIL_PREFIX = (
     f"{_PUBLIC_STOCKTRENDS_PORTFOLIO_METADATA_LIST_PATH}/"
 )
+_PUBLIC_STOCKTRENDS_STRATEGY_METADATA_LIST_PATH = "/v1/stocktrends/strategies"
+_PUBLIC_STOCKTRENDS_STRATEGY_METADATA_DETAIL_PREFIX = (
+    f"{_PUBLIC_STOCKTRENDS_STRATEGY_METADATA_LIST_PATH}/"
+)
 
 
 def is_public_stocktrends_portfolio_metadata_path(path: str) -> bool:
@@ -136,13 +140,44 @@ def is_public_stocktrends_portfolio_positions_history_path(path: str) -> bool:
     return len(parts) == 3 and bool(parts[0]) and parts[1] == "positions" and parts[2] == "history"
 
 
+def is_public_stocktrends_portfolio_strategy_path(path: str) -> bool:
+    path = path.split("?", 1)[0]
+    if not path.startswith(_PUBLIC_STOCKTRENDS_PORTFOLIO_METADATA_DETAIL_PREFIX):
+        return False
+
+    suffix = path[len(_PUBLIC_STOCKTRENDS_PORTFOLIO_METADATA_DETAIL_PREFIX):]
+    parts = suffix.split("/")
+    return len(parts) == 2 and bool(parts[0]) and parts[1] == "strategy"
+
+
 def is_public_stocktrends_portfolio_path(path: str) -> bool:
     return (
         is_public_stocktrends_portfolio_metadata_path(path)
         or is_public_stocktrends_portfolio_returns_path(path)
         or is_public_stocktrends_portfolio_summary_path(path)
         or is_public_stocktrends_portfolio_positions_history_path(path)
+        or is_public_stocktrends_portfolio_strategy_path(path)
     )
+
+
+def is_public_stocktrends_strategy_metadata_path(path: str) -> bool:
+    path = path.split("?", 1)[0]
+    if path == _PUBLIC_STOCKTRENDS_STRATEGY_METADATA_LIST_PATH:
+        return True
+
+    if not path.startswith(_PUBLIC_STOCKTRENDS_STRATEGY_METADATA_DETAIL_PREFIX):
+        return False
+
+    suffix = path[len(_PUBLIC_STOCKTRENDS_STRATEGY_METADATA_DETAIL_PREFIX):]
+    return bool(suffix) and "/" not in suffix
+
+
+def is_public_stocktrends_strategy_path(path: str) -> bool:
+    return is_public_stocktrends_strategy_metadata_path(path)
+
+
+def is_public_stocktrends_path(path: str) -> bool:
+    return is_public_stocktrends_portfolio_path(path) or is_public_stocktrends_strategy_path(path)
 
 # Matches standard 8-4-4-4-12 UUID format.  Control-plane systems sometimes use
 # their internal database UUID as a policy identifier rather than the semantic
@@ -523,7 +558,7 @@ def _lookup_exact_endpoint_policy(
     if not method:
         return None
 
-    if is_public_stocktrends_portfolio_path(path):
+    if is_public_stocktrends_path(path):
         return None
 
     normalized_method = method.strip().upper()
@@ -907,7 +942,7 @@ def get_accepted_payment_methods_for_path(
     config = get_runtime_payment_policy_config()
     normalized_method = (enforced_payment_method or "").strip().lower()
 
-    if is_public_stocktrends_portfolio_path(path):
+    if is_public_stocktrends_path(path):
         return config.accepted_payment_methods_default
 
     endpoint_allowed_rails = get_allowed_payment_rails_for_path(path, method)
