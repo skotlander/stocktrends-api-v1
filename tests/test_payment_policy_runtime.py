@@ -127,6 +127,38 @@ class PaymentPolicyRuntimeTests(unittest.TestCase):
         self.assertEqual(decision.econ_payment_required, 1)
         self.assertEqual(decision.econ_payment_method, "x402")
 
+    def test_stocktrends_portfolio_detail_policy_matches_path_template(self):
+        default_config = policy_provider._default_policy_config()
+
+        with patch.object(policy_provider, "get_runtime_payment_policy_config", return_value=default_config):
+            effective = policy_provider.get_effective_endpoint_payment_policy(
+                "/v1/stocktrends/portfolios/1",
+                "GET",
+            )
+            accepted = policy_provider.get_accepted_payment_methods_for_path(
+                "/v1/stocktrends/portfolios/1?include=ignored",
+                "default_subscription",
+                method="GET",
+            )
+
+        self.assertIsNotNone(effective)
+        self.assertEqual(effective.pricing_rule_id, "stocktrends_portfolios_detail_paid")
+        self.assertEqual(effective.allowed_rails, ("subscription", "x402", "mpp"))
+        self.assertEqual(accepted, "subscription,x402,mpp")
+
+    def test_stocktrends_portfolio_list_policy_is_registered(self):
+        default_config = policy_provider._default_policy_config()
+
+        with patch.object(policy_provider, "get_runtime_payment_policy_config", return_value=default_config):
+            effective = policy_provider.get_effective_endpoint_payment_policy(
+                "/v1/stocktrends/portfolios",
+                "GET",
+            )
+
+        self.assertIsNotNone(effective)
+        self.assertEqual(effective.pricing_rule_id, "stocktrends_portfolios_list_paid")
+        self.assertEqual(effective.machine_payment_rails, ("x402", "mpp"))
+
 
 if __name__ == "__main__":
     unittest.main()

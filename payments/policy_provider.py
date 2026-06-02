@@ -214,6 +214,21 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
                 allowed_rails=("subscription", "x402", "mpp"),
                 pricing_rule_id="portfolio_compare",
             ),
+            # --- official Stock Trends model portfolio metadata ---
+            EndpointPaymentPolicy(
+                endpoint_id="stocktrends_portfolios_list_paid",
+                path_pattern="/v1/stocktrends/portfolios",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="stocktrends_portfolios_list_paid",
+            ),
+            EndpointPaymentPolicy(
+                endpoint_id="stocktrends_portfolios_detail_paid",
+                path_pattern="/v1/stocktrends/portfolios/{port_id}",
+                method="GET",
+                allowed_rails=("subscription", "x402", "mpp"),
+                pricing_rule_id="stocktrends_portfolios_detail_paid",
+            ),
             # --- stim endpoints (explicit per-endpoint rules supersede the /v1/stim prefix
             #     fallback; each maps to its own active DB pricing rule so resolve_economic_amounts
             #     returns the correct non-zero STC/USD values for the x402 challenge) ---
@@ -470,9 +485,34 @@ def _lookup_exact_endpoint_policy(
 
     normalized_method = method.strip().upper()
     for policy in config.endpoint_payment_policies:
-        if policy.method == normalized_method and policy.path_pattern == path:
+        if policy.method == normalized_method and _path_pattern_matches(policy.path_pattern, path):
             return policy
     return None
+
+
+def _path_pattern_matches(pattern: str, path: str) -> bool:
+    # Most callers pass request.url.path, but tolerate a full path with query
+    # string for direct policy-helper calls.
+    path = path.split("?", 1)[0]
+
+    if pattern == path:
+        return True
+
+    pattern_parts = [part for part in pattern.strip("/").split("/") if part]
+    path_parts = [part for part in path.strip("/").split("/") if part]
+    if len(pattern_parts) != len(path_parts):
+        return False
+
+    for pattern_part, path_part in zip(pattern_parts, path_parts):
+        is_path_param = pattern_part.startswith("{") and pattern_part.endswith("}")
+        if is_path_param:
+            if not path_part:
+                return False
+            continue
+        if pattern_part != path_part:
+            return False
+
+    return True
 
 
 def _derive_allowed_rails_for_endpoint(

@@ -206,10 +206,12 @@ _CONTROL_PLANE_PAYLOAD = {
 
 class TestParseConfigPayload:
     def test_endpoint_policies_parsed(self):
-        # The control-plane payload covers 2 endpoints. Gap-filling merges in the
-        # remaining hardcoded defaults for uncovered endpoints (22 more = 24 total).
+        # The control-plane payload covers 2 endpoints. Gap-filling merges in
+        # all remaining hardcoded defaults for uncovered endpoints.
         cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD)
-        assert len(cfg.endpoint_payment_policies) == 24
+        assert len(cfg.endpoint_payment_policies) == len(
+            _default_policy_config().endpoint_payment_policies
+        )
 
     def test_allowed_rails_are_strings(self):
         cfg = _parse_config_payload(_CONTROL_PLANE_PAYLOAD)
