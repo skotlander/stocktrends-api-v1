@@ -186,19 +186,19 @@ signal-selection rule:
 * `stweekly.st_returnmeans.x4wk1 > 0`
 * `stweekly.st_returnmeans.x13wk1 > 2.19`
 * `stweekly.st_returnmeans.x40wk1 > 6.45`
-* `stdata.st_data.price >= 2`
-* `stdata.st_data.volume > 1000`
-* `stdata.st_data.fpr_chg13 IS NOT NULL`
+* `stweekly.st_data.price >= 2`
+* `stweekly.st_data.volume > 1000`
+* `stweekly.st_data.fpr_chg13 IS NOT NULL`
 
 The endpoint uses the canonical join:
 
 ```text
-stdata.st_data.weekdate = stweekly.st_returnmeans.weekdate
-AND stdata.st_data.exchange = stweekly.st_returnmeans.exchange
-AND stdata.st_data.symbol = stweekly.st_returnmeans.symbol
+stweekly.st_data.weekdate = stweekly.st_returnmeans.weekdate
+AND stweekly.st_data.exchange = stweekly.st_returnmeans.exchange
+AND stweekly.st_data.symbol = stweekly.st_returnmeans.symbol
 ```
 
-It uses `stdata.st_data.fpr_chg13` as the realized 13-week forward return. It
+It uses `stweekly.st_data.fpr_chg13` as the realized 13-week forward return. It
 does not reconstruct forward returns from future price joins. It is not limited
 to published reports and does not return current selections, current matching
 symbols, current candidates, or individual historical symbols.

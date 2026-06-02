@@ -348,6 +348,16 @@ def test_stim_select_outcomes_summary_empty_result_is_safe(client):
     assert outcomes["outperform_base_rate"] == 0.0
 
 
+def test_stim_select_outcomes_summary_sql_uses_stweekly_market_schema(client, outcome_engine):
+    response = client.get("/v1/selections/stim-select/outcomes/summary")
+
+    assert response.status_code == 200
+    executed_sql = "\n".join(sql for sql, _params in outcome_engine.executed)
+    assert "stdata.st_data" not in executed_sql
+    assert "FROM stweekly.st_data a" in executed_sql
+    assert "JOIN stweekly.st_returnmeans b" in executed_sql
+
+
 def test_stim_select_outcomes_summary_filters_start_date(client):
     response = client.get("/v1/selections/stim-select/outcomes/summary?start_date=2024-01-12")
 
@@ -408,6 +418,9 @@ def test_stim_select_outcomes_summary_limit_rank_is_per_week(client, outcome_eng
     assert "ROW_NUMBER() OVER" in executed_sql
     assert "PARTITION BY a.weekdate" in executed_sql
     assert "rank_13wk_probability <= :limit_rank" in executed_sql
+    assert "stdata.st_data" not in executed_sql
+    assert "FROM stweekly.st_data a" in executed_sql
+    assert "JOIN stweekly.st_returnmeans b" in executed_sql
 
 
 def test_stim_select_outcomes_summary_business_boundary(client):
