@@ -108,6 +108,13 @@ def _fake_authenticate(self, path: str, raw_key: str):
     }
 
 
+def _assert_no_payment_challenge(response):
+    assert response.headers.get("x-stocktrends-payment-required") == "false"
+    assert response.headers.get("x-stocktrends-accepted-payment-methods") == "none"
+    assert response.headers.get("x-stocktrends-pricing-rule") == "default_free"
+    assert "payment-required" not in response.headers
+
+
 @pytest.fixture
 def portfolio_engine(monkeypatch):
     engine = _Engine(_ROWS)
@@ -140,12 +147,10 @@ def protected_client(monkeypatch, portfolio_engine):
 
 
 def test_portfolio_list_returns_only_live_records_and_expected_fields(protected_client, portfolio_engine):
-    response = protected_client.get(
-        "/v1/stocktrends/portfolios",
-        headers={"X-API-Key": "test-key"},
-    )
+    response = protected_client.get("/v1/stocktrends/portfolios")
 
     assert response.status_code == 200
+    _assert_no_payment_challenge(response)
     body = response.json()
     assert body["count"] == 2
     assert [row["port_id"] for row in body["data"]] == [1, 2]
@@ -167,17 +172,13 @@ def test_portfolio_list_returns_only_live_records_and_expected_fields(protected_
     assert "FROM stp_ports" in executed_sql
     assert "WHERE status = 1" in executed_sql
     assert "web_content" not in executed_sql
-    assert response.headers["x-stocktrends-pricing-rule"] == "stocktrends_portfolios_list_paid"
-    assert response.headers["x-stocktrends-accepted-payment-methods"] == "subscription,x402,mpp"
 
 
 def test_portfolio_detail_returns_live_portfolio(protected_client, portfolio_engine):
-    response = protected_client.get(
-        "/v1/stocktrends/portfolios/2",
-        headers={"X-API-Key": "test-key"},
-    )
+    response = protected_client.get("/v1/stocktrends/portfolios/2")
 
     assert response.status_code == 200
+    _assert_no_payment_challenge(response)
     body = response.json()
     assert body["data"]["port_id"] == 2
     assert body["data"]["selection_universe"] == "SPTX60"
@@ -188,26 +189,30 @@ def test_portfolio_detail_returns_live_portfolio(protected_client, portfolio_eng
     assert "WHERE port_id = :port_id" in executed_sql
     assert "AND status = 1" in executed_sql
     assert "web_content" not in executed_sql
-    assert response.headers["x-stocktrends-pricing-rule"] == "stocktrends_portfolios_detail_paid"
 
 
 @pytest.mark.parametrize("port_id", [404, 99])
 def test_portfolio_detail_returns_404_for_missing_or_inactive(protected_client, port_id):
-    response = protected_client.get(
-        f"/v1/stocktrends/portfolios/{port_id}",
-        headers={"X-API-Key": "test-key"},
-    )
+    response = protected_client.get(f"/v1/stocktrends/portfolios/{port_id}")
 
     assert response.status_code == 404
     assert response.json()["detail"]["error"] == "portfolio_not_found"
     assert response.json()["detail"]["port_id"] == port_id
+    _assert_no_payment_challenge(response)
 
 
-def test_stocktrends_portfolio_endpoints_are_protected(protected_client):
-    response = protected_client.get("/v1/stocktrends/portfolios")
+def test_future_stocktrends_portfolio_child_paths_are_not_public_bypasses(protected_client):
+    response = protected_client.get("/v1/stocktrends/portfolios/2/returns")
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Missing API key"}
+
+
+def test_stocktrends_portfolio_metadata_routes_remain_read_only(protected_client):
+    response = protected_client.post("/v1/stocktrends/portfolios")
+
+    assert response.status_code == 405
+    _assert_no_payment_challenge(response)
 
 
 def test_portfolio_detail_db_errors_use_caller_safe_message(protected_client, monkeypatch):

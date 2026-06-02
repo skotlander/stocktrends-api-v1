@@ -11,7 +11,12 @@ from sqlalchemy import text
 
 from db import get_auth_engine
 from metering.logger import log_auth_failure_event
-from payments.policy_provider import is_agent_pay_auth_candidate, is_agent_pay_enforcement_path, is_free_metered_path
+from payments.policy_provider import (
+    is_agent_pay_auth_candidate,
+    is_agent_pay_enforcement_path,
+    is_free_metered_path,
+    is_public_stocktrends_portfolio_metadata_path,
+)
 
 _ENABLE_AGENT_PAY = os.getenv("ENABLE_AGENT_PAY", "false").lower() == "true"
 
@@ -68,6 +73,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/v1/instruments/lookup",
             "/v1/instruments/resolve",
             "/v1/stwr/reports/catalog",
+            "/v1/stocktrends/portfolios",
             "/v1/meta/indicators",
             "/v1/meta/inference",
             "/v1/meta/stim",
@@ -246,7 +252,11 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         request.state.quota_limit = None
 
         # Public routes
-        if path in self.public_paths or any(path.startswith(prefix) for prefix in self.public_prefixes):
+        if (
+            path in self.public_paths
+            or is_public_stocktrends_portfolio_metadata_path(path)
+            or any(path.startswith(prefix) for prefix in self.public_prefixes)
+        ):
             return await call_next(request)
 
         raw_key = extract_api_key(request)
