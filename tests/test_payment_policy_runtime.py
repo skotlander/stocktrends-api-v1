@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 from urllib import error as urllib_error
 
@@ -127,7 +128,7 @@ class PaymentPolicyRuntimeTests(unittest.TestCase):
         self.assertEqual(decision.econ_payment_required, 1)
         self.assertEqual(decision.econ_payment_method, "x402")
 
-    def test_stocktrends_portfolio_detail_policy_matches_path_template(self):
+    def test_stocktrends_portfolio_detail_metadata_path_is_public_not_endpoint_policy(self):
         default_config = policy_provider._default_policy_config()
 
         with patch.object(policy_provider, "get_runtime_payment_policy_config", return_value=default_config):
@@ -141,12 +142,11 @@ class PaymentPolicyRuntimeTests(unittest.TestCase):
                 method="GET",
             )
 
-        self.assertIsNotNone(effective)
-        self.assertEqual(effective.pricing_rule_id, "stocktrends_portfolios_detail_paid")
-        self.assertEqual(effective.allowed_rails, ("subscription", "x402", "mpp"))
-        self.assertEqual(accepted, "subscription,x402,mpp")
+        self.assertIsNone(effective)
+        self.assertTrue(policy_provider.is_public_stocktrends_portfolio_metadata_path("/v1/stocktrends/portfolios/1"))
+        self.assertEqual(accepted, "none")
 
-    def test_stocktrends_portfolio_list_policy_is_registered(self):
+    def test_stocktrends_portfolio_list_metadata_path_is_public_not_endpoint_policy(self):
         default_config = policy_provider._default_policy_config()
 
         with patch.object(policy_provider, "get_runtime_payment_policy_config", return_value=default_config):
@@ -154,10 +154,55 @@ class PaymentPolicyRuntimeTests(unittest.TestCase):
                 "/v1/stocktrends/portfolios",
                 "GET",
             )
+            accepted = policy_provider.get_accepted_payment_methods_for_path(
+                "/v1/stocktrends/portfolios",
+                "default_free",
+                method="GET",
+            )
 
+        self.assertIsNone(effective)
+        self.assertTrue(policy_provider.is_public_stocktrends_portfolio_metadata_path("/v1/stocktrends/portfolios"))
+        self.assertEqual(accepted, "none")
+
+    def test_stocktrends_portfolio_public_metadata_match_does_not_cover_paid_children(self):
+        future_child_policy = policy_provider.EndpointPaymentPolicy(
+            endpoint_id="stocktrends_portfolio_returns_paid",
+            path_pattern="/v1/stocktrends/portfolios/{port_id}/returns",
+            method="GET",
+            allowed_rails=("subscription", "x402", "mpp"),
+            pricing_rule_id="stocktrends_portfolio_returns_paid",
+        )
+        future_config = replace(
+            policy_provider._default_policy_config(),
+            endpoint_payment_policies=(future_child_policy,),
+        )
+
+        with patch.object(policy_provider, "get_runtime_payment_policy_config", return_value=future_config), patch.object(
+            classifier, "ENABLE_AGENT_PAY", True
+        ):
+            effective = policy_provider.get_effective_endpoint_payment_policy(
+                "/v1/stocktrends/portfolios/1/returns",
+                "GET",
+            )
+            decision = classifier.classify_request(
+                path="/v1/stocktrends/portfolios/1/returns",
+                method="GET",
+                has_paid_auth=False,
+                payment_method_header="x402",
+                agent_identifier="agent-123",
+            )
+
+        self.assertFalse(
+            policy_provider.is_public_stocktrends_portfolio_metadata_path(
+                "/v1/stocktrends/portfolios/1/returns"
+            )
+        )
         self.assertIsNotNone(effective)
-        self.assertEqual(effective.pricing_rule_id, "stocktrends_portfolios_list_paid")
-        self.assertEqual(effective.machine_payment_rails, ("x402", "mpp"))
+        self.assertEqual(effective.pricing_rule_id, "stocktrends_portfolio_returns_paid")
+        self.assertEqual(effective.allowed_rails, ("subscription", "x402", "mpp"))
+        self.assertTrue(decision.access_granted)
+        self.assertEqual(decision.econ_payment_required, 1)
+        self.assertEqual(decision.econ_payment_method, "x402")
 
 
 if __name__ == "__main__":

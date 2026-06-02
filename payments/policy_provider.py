@@ -88,6 +88,22 @@ def _normalize_string_list(value, *, default: tuple[str, ...]) -> tuple[str, ...
 
 
 _MACHINE_PAYMENT_RAILS = frozenset({"x402", "mpp"})
+_PUBLIC_STOCKTRENDS_PORTFOLIO_METADATA_LIST_PATH = "/v1/stocktrends/portfolios"
+_PUBLIC_STOCKTRENDS_PORTFOLIO_METADATA_DETAIL_PREFIX = (
+    f"{_PUBLIC_STOCKTRENDS_PORTFOLIO_METADATA_LIST_PATH}/"
+)
+
+
+def is_public_stocktrends_portfolio_metadata_path(path: str) -> bool:
+    path = path.split("?", 1)[0]
+    if path == _PUBLIC_STOCKTRENDS_PORTFOLIO_METADATA_LIST_PATH:
+        return True
+
+    if not path.startswith(_PUBLIC_STOCKTRENDS_PORTFOLIO_METADATA_DETAIL_PREFIX):
+        return False
+
+    suffix = path[len(_PUBLIC_STOCKTRENDS_PORTFOLIO_METADATA_DETAIL_PREFIX):]
+    return bool(suffix) and "/" not in suffix
 
 # Matches standard 8-4-4-4-12 UUID format.  Control-plane systems sometimes use
 # their internal database UUID as a policy identifier rather than the semantic
@@ -213,21 +229,6 @@ def _default_policy_config() -> RuntimePaymentPolicyConfig:
                 method="POST",
                 allowed_rails=("subscription", "x402", "mpp"),
                 pricing_rule_id="portfolio_compare",
-            ),
-            # --- official Stock Trends model portfolio metadata ---
-            EndpointPaymentPolicy(
-                endpoint_id="stocktrends_portfolios_list_paid",
-                path_pattern="/v1/stocktrends/portfolios",
-                method="GET",
-                allowed_rails=("subscription", "x402", "mpp"),
-                pricing_rule_id="stocktrends_portfolios_list_paid",
-            ),
-            EndpointPaymentPolicy(
-                endpoint_id="stocktrends_portfolios_detail_paid",
-                path_pattern="/v1/stocktrends/portfolios/{port_id}",
-                method="GET",
-                allowed_rails=("subscription", "x402", "mpp"),
-                pricing_rule_id="stocktrends_portfolios_detail_paid",
             ),
             # --- stim endpoints (explicit per-endpoint rules supersede the /v1/stim prefix
             #     fallback; each maps to its own active DB pricing rule so resolve_economic_amounts
@@ -481,6 +482,9 @@ def _lookup_exact_endpoint_policy(
     method: str | None,
 ) -> EndpointPaymentPolicy | None:
     if not method:
+        return None
+
+    if is_public_stocktrends_portfolio_metadata_path(path):
         return None
 
     normalized_method = method.strip().upper()
@@ -863,6 +867,10 @@ def get_accepted_payment_methods_for_path(
 ) -> str:
     config = get_runtime_payment_policy_config()
     normalized_method = (enforced_payment_method or "").strip().lower()
+
+    if is_public_stocktrends_portfolio_metadata_path(path):
+        return config.accepted_payment_methods_default
+
     endpoint_allowed_rails = get_allowed_payment_rails_for_path(path, method)
 
     if endpoint_allowed_rails is not None:
