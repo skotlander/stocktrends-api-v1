@@ -48,7 +48,13 @@ class StockTrendsStrategyListResponse(BaseModel):
 
 
 class StockTrendsStrategyCondition(BaseModel):
-    sequence: int = Field(..., description="Deterministic sequence within the buy or sell condition group.")
+    sequence: int = Field(
+        ...,
+        description=(
+            "Deterministic alphabetical sequence within the buy or sell condition group. "
+            "This does not imply strategy evaluation order."
+        ),
+    )
     left_side: str | None = Field(default=None, description="Legacy left-side condition expression.")
     operator: str | None = Field(default=None, description="Legacy condition operator.")
     right_side: str | None = Field(default=None, description="Legacy right-side condition expression.")

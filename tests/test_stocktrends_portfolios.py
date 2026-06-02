@@ -1327,6 +1327,57 @@ def test_portfolio_strategy_returns_active_portfolio_strategy_provenance(
     assert "stp_positions" not in executed_sql
 
 
+def test_portfolio_strategy_returns_404_when_active_portfolio_has_no_strategy(
+    protected_client,
+    portfolio_engine,
+):
+    portfolio_engine.portfolio_rows.append(
+        {
+            "port_id": 77,
+            "name": "Active Portfolio Without Strategy",
+            "strategy_id": None,
+            "exchanges": "N",
+            "index_symbols": "NONE",
+            "description": "Active portfolio with no strategy mapping.",
+            "status": 1,
+        }
+    )
+
+    path = "/v1/stocktrends/portfolios/77/strategy"
+    response = protected_client.get(path)
+
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert detail["error"] == "portfolio_strategy_not_found"
+    assert detail["port_id"] == 77
+    _assert_no_payment_challenge(response)
+    assert "payment-response" not in response.headers
+    assert "x-stocktrends-payment-network" not in response.headers
+    assert "x-stocktrends-payment-token" not in response.headers
+
+    decision = classifier_module.classify_request(
+        path=path,
+        method="GET",
+        has_paid_auth=False,
+        payment_method_header=None,
+        plan_code=None,
+        agent_identifier=None,
+    )
+    accepted = policy_provider.get_accepted_payment_methods_for_path(
+        path,
+        decision.log_pricing_rule_id,
+        method="GET",
+    )
+
+    assert policy_provider.get_effective_endpoint_payment_policy(path, "GET") is None
+    assert policy_provider.is_public_stocktrends_portfolio_strategy_path(path)
+    assert decision.access_granted is True
+    assert decision.is_metered == 0
+    assert decision.log_pricing_rule_id == "default_free"
+    assert decision.econ_payment_required == 0
+    assert accepted == "none"
+
+
 @pytest.mark.parametrize("port_id", [404, 99])
 def test_portfolio_strategy_returns_404_for_missing_or_inactive(protected_client, port_id):
     response = protected_client.get(f"/v1/stocktrends/portfolios/{port_id}/strategy")
