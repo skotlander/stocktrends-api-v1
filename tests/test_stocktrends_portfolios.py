@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -10,6 +11,7 @@ import main
 import middleware.api_key as api_key_module
 import middleware.metering as metering_module
 import payments.policy_provider as policy_provider
+import pricing.classifier as classifier_module
 import routers.stocktrends_portfolios as portfolios_router
 
 
@@ -46,6 +48,73 @@ _ROWS = [
     },
 ]
 
+_RETURNS_ROWS = [
+    {
+        "port_id": 2,
+        "weekdate": date(2024, 1, 5),
+        "buys": 2,
+        "sells": 1,
+        "held": 10,
+        "net_proceeds": Decimal("-1500.25"),
+        "realizedgain": Decimal("123.45"),
+        "cum_realizedgain": Decimal("1234.56"),
+        "totalvaluation": Decimal("12345.67"),
+        "unrealizedgain": Decimal("234.56"),
+        "cum_totalgain": Decimal("1469.12"),
+        "tsxindex": Decimal("21000.11"),
+        "spindex": Decimal("4800.22"),
+        "private_note": "legacy return audit note should not leak",
+    },
+    {
+        "port_id": 2,
+        "weekdate": date(2024, 1, 12),
+        "buys": 0,
+        "sells": 2,
+        "held": 8,
+        "net_proceeds": Decimal("2100.00"),
+        "realizedgain": Decimal("-45.67"),
+        "cum_realizedgain": Decimal("1188.89"),
+        "totalvaluation": Decimal("12290.12"),
+        "unrealizedgain": Decimal("200.01"),
+        "cum_totalgain": Decimal("1388.90"),
+        "tsxindex": Decimal("21100.33"),
+        "spindex": Decimal("4810.44"),
+        "private_note": "legacy return audit note should not leak",
+    },
+    {
+        "port_id": 1,
+        "weekdate": date(2024, 1, 5),
+        "buys": 1,
+        "sells": 0,
+        "held": 5,
+        "net_proceeds": Decimal("-500.00"),
+        "realizedgain": Decimal("88.00"),
+        "cum_realizedgain": Decimal("88.00"),
+        "totalvaluation": Decimal("10088.00"),
+        "unrealizedgain": Decimal("100.00"),
+        "cum_totalgain": Decimal("188.00"),
+        "tsxindex": Decimal("21000.11"),
+        "spindex": Decimal("4800.22"),
+        "private_note": "legacy return audit note should not leak",
+    },
+    {
+        "port_id": 99,
+        "weekdate": date(2024, 1, 5),
+        "buys": 9,
+        "sells": 9,
+        "held": 9,
+        "net_proceeds": Decimal("999.99"),
+        "realizedgain": Decimal("999.99"),
+        "cum_realizedgain": Decimal("999.99"),
+        "totalvaluation": Decimal("999.99"),
+        "unrealizedgain": Decimal("999.99"),
+        "cum_totalgain": Decimal("999.99"),
+        "tsxindex": Decimal("999.99"),
+        "spindex": Decimal("999.99"),
+        "private_note": "inactive portfolio returns should not leak",
+    },
+]
+
 
 class _Result:
     def __init__(self, rows: list[dict[str, Any]]):
@@ -62,8 +131,14 @@ class _Result:
 
 
 class _Connection:
-    def __init__(self, rows: list[dict[str, Any]], executed: list[tuple[str, dict[str, Any]]]):
-        self._rows = rows
+    def __init__(
+        self,
+        portfolio_rows: list[dict[str, Any]],
+        return_rows: list[dict[str, Any]],
+        executed: list[tuple[str, dict[str, Any]]],
+    ):
+        self._portfolio_rows = portfolio_rows
+        self._return_rows = return_rows
         self._executed = executed
 
     def __enter__(self):
@@ -77,19 +152,32 @@ class _Connection:
         sql = str(statement)
         self._executed.append((sql, params))
 
-        rows = [row for row in self._rows if row["status"] == 1]
+        if "FROM stp_returnslog" in sql:
+            rows = [row for row in self._return_rows if row["port_id"] == params.get("port_id")]
+            if "start_date" in params:
+                rows = [row for row in rows if row["weekdate"] >= params["start_date"]]
+            if "end_date" in params:
+                rows = [row for row in rows if row["weekdate"] <= params["end_date"]]
+            return _Result(rows)
+
+        rows = [row for row in self._portfolio_rows if row["status"] == 1]
         if "port_id" in params:
             rows = [row for row in rows if row["port_id"] == params["port_id"]]
         return _Result(rows)
 
 
 class _Engine:
-    def __init__(self, rows: list[dict[str, Any]]):
-        self.rows = rows
+    def __init__(
+        self,
+        portfolio_rows: list[dict[str, Any]],
+        return_rows: list[dict[str, Any]],
+    ):
+        self.portfolio_rows = portfolio_rows
+        self.return_rows = return_rows
         self.executed: list[tuple[str, dict[str, Any]]] = []
 
     def connect(self):
-        return _Connection(self.rows, self.executed)
+        return _Connection(self.portfolio_rows, self.return_rows, self.executed)
 
 
 class _FailingEngine:
@@ -115,9 +203,19 @@ def _assert_no_payment_challenge(response):
     assert "payment-required" not in response.headers
 
 
+def _schema_has_date_format(schema: Any) -> bool:
+    if isinstance(schema, dict):
+        if schema.get("format") == "date":
+            return True
+        return any(_schema_has_date_format(value) for value in schema.values())
+    if isinstance(schema, list):
+        return any(_schema_has_date_format(value) for value in schema)
+    return False
+
+
 @pytest.fixture
 def portfolio_engine(monkeypatch):
-    engine = _Engine(_ROWS)
+    engine = _Engine(_ROWS, _RETURNS_ROWS)
     monkeypatch.setattr(portfolios_router, "get_engine", lambda: engine)
     monkeypatch.setattr(portfolios_router, "text", lambda sql: sql)
     return engine
@@ -201,8 +299,181 @@ def test_portfolio_detail_returns_404_for_missing_or_inactive(protected_client, 
     _assert_no_payment_challenge(response)
 
 
-def test_future_stocktrends_portfolio_child_paths_are_not_public_bypasses(protected_client):
+def test_portfolio_returns_history_is_public_and_uses_returns_log(protected_client, portfolio_engine):
     response = protected_client.get("/v1/stocktrends/portfolios/2/returns")
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["port_id"] == 2
+    assert body["portfolio"] == {
+        "port_id": 2,
+        "name": "TSX 60 Portfolio",
+        "selection_universe": "SPTX60",
+    }
+    assert body["count"] == 2
+    assert body["returns"] == [
+        {
+            "weekdate": "2024-01-05",
+            "buys": 2,
+            "sells": 1,
+            "held": 10,
+            "net_proceeds": -1500.25,
+            "realized_gain": 123.45,
+            "cumulative_realized_gain": 1234.56,
+            "total_valuation": 12345.67,
+            "unrealized_gain": 234.56,
+            "cumulative_total_gain": 1469.12,
+            "tsx_index": 21000.11,
+            "sp_index": 4800.22,
+        },
+        {
+            "weekdate": "2024-01-12",
+            "buys": 0,
+            "sells": 2,
+            "held": 8,
+            "net_proceeds": 2100.0,
+            "realized_gain": -45.67,
+            "cumulative_realized_gain": 1188.89,
+            "total_valuation": 12290.12,
+            "unrealized_gain": 200.01,
+            "cumulative_total_gain": 1388.9,
+            "tsx_index": 21100.33,
+            "sp_index": 4810.44,
+        },
+    ]
+    assert "private_note" not in str(body)
+    assert "return_pct" not in str(body)
+    assert "value" not in str(body)
+
+    executed_sql = "\n".join(sql for sql, _params in portfolio_engine.executed)
+    assert "FROM stp_ports" in executed_sql
+    assert "AND status = 1" in executed_sql
+    assert "FROM stp_returnslog" in executed_sql
+    for expected_column in (
+        "buys",
+        "sells",
+        "held",
+        "net_proceeds",
+        "realizedgain",
+        "cum_realizedgain",
+        "totalvaluation",
+        "unrealizedgain",
+        "cum_totalgain",
+        "tsxindex",
+        "spindex",
+    ):
+        assert expected_column in executed_sql
+    assert "return_pct" not in executed_sql
+    assert "ORDER BY weekdate ASC" in executed_sql
+    assert "stp_positions" not in executed_sql
+
+
+def test_portfolio_returns_history_with_no_rows_returns_empty_list(protected_client, portfolio_engine):
+    portfolio_engine.return_rows = [
+        row for row in portfolio_engine.return_rows if row["port_id"] != 2
+    ]
+
+    response = protected_client.get("/v1/stocktrends/portfolios/2/returns")
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["port_id"] == 2
+    assert body["count"] == 0
+    assert body["returns"] == []
+
+
+def test_portfolio_returns_history_start_date_filters_earlier_rows(protected_client, portfolio_engine):
+    response = protected_client.get(
+        "/v1/stocktrends/portfolios/2/returns?start_date=2024-01-12"
+    )
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["count"] == 1
+    assert [row["weekdate"] for row in body["returns"]] == ["2024-01-12"]
+
+    executed_sql, params = portfolio_engine.executed[-1]
+    assert "weekdate >= :start_date" in executed_sql
+    assert params["start_date"] == date(2024, 1, 12)
+    assert "ORDER BY weekdate ASC" in executed_sql
+
+
+def test_portfolio_returns_history_end_date_filters_later_rows(protected_client, portfolio_engine):
+    response = protected_client.get(
+        "/v1/stocktrends/portfolios/2/returns?end_date=2024-01-05"
+    )
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["count"] == 1
+    assert [row["weekdate"] for row in body["returns"]] == ["2024-01-05"]
+
+    executed_sql, params = portfolio_engine.executed[-1]
+    assert "weekdate <= :end_date" in executed_sql
+    assert params["end_date"] == date(2024, 1, 5)
+    assert "ORDER BY weekdate ASC" in executed_sql
+
+
+def test_portfolio_returns_history_start_and_end_date_work_together(protected_client, portfolio_engine):
+    response = protected_client.get(
+        "/v1/stocktrends/portfolios/2/returns?start_date=2024-01-06&end_date=2024-01-12"
+    )
+
+    assert response.status_code == 200
+    _assert_no_payment_challenge(response)
+    body = response.json()
+    assert body["count"] == 1
+    assert [row["weekdate"] for row in body["returns"]] == ["2024-01-12"]
+
+    executed_sql, params = portfolio_engine.executed[-1]
+    assert "weekdate >= :start_date" in executed_sql
+    assert "weekdate <= :end_date" in executed_sql
+    assert params["start_date"] == date(2024, 1, 6)
+    assert params["end_date"] == date(2024, 1, 12)
+    assert "ORDER BY weekdate ASC" in executed_sql
+
+
+@pytest.mark.parametrize("port_id", [404, 99])
+def test_portfolio_returns_history_returns_404_for_missing_or_inactive(protected_client, port_id):
+    response = protected_client.get(f"/v1/stocktrends/portfolios/{port_id}/returns")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "portfolio_not_found"
+    assert response.json()["detail"]["port_id"] == port_id
+    _assert_no_payment_challenge(response)
+
+
+def test_portfolio_returns_access_classification_layers_are_public_free():
+    path = "/v1/stocktrends/portfolios/2/returns"
+
+    decision = classifier_module.classify_request(
+        path=path,
+        method="GET",
+        has_paid_auth=False,
+        payment_method_header=None,
+        plan_code=None,
+        agent_identifier=None,
+    )
+    accepted = policy_provider.get_accepted_payment_methods_for_path(
+        path,
+        decision.log_pricing_rule_id,
+        method="GET",
+    )
+
+    assert policy_provider.get_effective_endpoint_payment_policy(path, "GET") is None
+    assert policy_provider.is_public_stocktrends_portfolio_returns_path(path)
+    assert decision.access_granted is True
+    assert decision.is_metered == 0
+    assert decision.econ_payment_required == 0
+    assert accepted == "none"
+
+
+def test_future_stocktrends_portfolio_child_paths_are_not_public_bypasses(protected_client):
+    response = protected_client.get("/v1/stocktrends/portfolios/2/positions")
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Missing API key"}
@@ -238,5 +509,20 @@ def test_stocktrends_portfolio_endpoints_appear_in_openapi(protected_client):
     paths = schema["paths"]
     assert "/stocktrends/portfolios" in paths
     assert "/stocktrends/portfolios/{port_id}" in paths
+    assert "/stocktrends/portfolios/{port_id}/returns" in paths
     assert "Official Stock Trends model portfolios" in paths["/stocktrends/portfolios"]["get"]["description"]
     assert "Official Stock Trends model portfolio" in paths["/stocktrends/portfolios/{port_id}"]["get"]["description"]
+    returns_description = paths["/stocktrends/portfolios/{port_id}/returns"]["get"]["description"]
+    assert "Official Stock Trends portfolio returns history" in returns_description
+    assert "stp_returnslog" not in returns_description
+    returns_parameters = {
+        parameter["name"]: parameter
+        for parameter in paths["/stocktrends/portfolios/{port_id}/returns"]["get"]["parameters"]
+        if "name" in parameter
+    }
+    assert returns_parameters["start_date"]["in"] == "query"
+    assert returns_parameters["start_date"]["required"] is False
+    assert _schema_has_date_format(returns_parameters["start_date"]["schema"])
+    assert returns_parameters["end_date"]["in"] == "query"
+    assert returns_parameters["end_date"]["required"] is False
+    assert _schema_has_date_format(returns_parameters["end_date"]["schema"])

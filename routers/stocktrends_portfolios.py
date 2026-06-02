@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Path, Request
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -43,10 +44,81 @@ class StockTrendsPortfolioDetailResponse(BaseModel):
     data: StockTrendsPortfolioMetadata
 
 
+class StockTrendsPortfolioReturnsPortfolio(BaseModel):
+    port_id: int = Field(..., description="Official Stock Trends portfolio identifier.")
+    name: str | None = Field(default=None, description="Official Stock Trends portfolio name.")
+    selection_universe: str | None = Field(
+        default=None,
+        description="Stock Trends strategy selection/filter universe configured for the portfolio.",
+    )
+
+
+class StockTrendsPortfolioReturnPoint(BaseModel):
+    weekdate: str = Field(..., description="Week-ending date for the portfolio return observation.")
+    buys: int | None = Field(
+        default=None,
+        description="Official portfolio buy activity recorded for the week.",
+    )
+    sells: int | None = Field(
+        default=None,
+        description="Official portfolio sell activity recorded for the week.",
+    )
+    held: int | None = Field(
+        default=None,
+        description="Official portfolio held count recorded for the week.",
+    )
+    net_proceeds: float | None = Field(
+        default=None,
+        description="Official net proceeds recorded for the portfolio observation.",
+    )
+    realized_gain: float | None = Field(
+        default=None,
+        description="Official realized gain for the portfolio observation.",
+    )
+    cumulative_realized_gain: float | None = Field(
+        default=None,
+        description="Official cumulative realized gain through the observation week.",
+    )
+    total_valuation: float | None = Field(
+        default=None,
+        description="Official total portfolio valuation for the observation week.",
+    )
+    unrealized_gain: float | None = Field(
+        default=None,
+        description="Official unrealized gain for the portfolio observation.",
+    )
+    cumulative_total_gain: float | None = Field(
+        default=None,
+        description="Official cumulative total gain through the observation week.",
+    )
+    tsx_index: float | None = Field(
+        default=None,
+        description="TSX index reference value recorded with the portfolio observation.",
+    )
+    sp_index: float | None = Field(
+        default=None,
+        description="S&P index reference value recorded with the portfolio observation.",
+    )
+
+
+class StockTrendsPortfolioReturnsResponse(BaseModel):
+    request_id: str
+    port_id: int
+    portfolio: StockTrendsPortfolioReturnsPortfolio
+    count: int
+    returns: list[StockTrendsPortfolioReturnPoint]
+
+
 def _to_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
+
+
+def _to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 def _row_to_portfolio(row: Any) -> dict[str, Any]:
@@ -62,9 +134,37 @@ def _row_to_portfolio(row: Any) -> dict[str, Any]:
     }
 
 
+def _row_to_portfolio_summary(row: Any) -> dict[str, Any]:
+    portfolio = _row_to_portfolio(row)
+    return {
+        "port_id": portfolio["port_id"],
+        "name": portfolio["name"],
+        "selection_universe": portfolio["selection_universe"],
+    }
+
+
+def _row_to_return_point(row: Any) -> dict[str, Any]:
+    data = dict(row)
+    weekdate = data.get("weekdate")
+    return {
+        "weekdate": weekdate.isoformat() if hasattr(weekdate, "isoformat") else str(weekdate),
+        "buys": _to_int(data.get("buys")),
+        "sells": _to_int(data.get("sells")),
+        "held": _to_int(data.get("held")),
+        "net_proceeds": _to_float(data.get("net_proceeds")),
+        "realized_gain": _to_float(data.get("realizedgain")),
+        "cumulative_realized_gain": _to_float(data.get("cum_realizedgain")),
+        "total_valuation": _to_float(data.get("totalvaluation")),
+        "unrealized_gain": _to_float(data.get("unrealizedgain")),
+        "cumulative_total_gain": _to_float(data.get("cum_totalgain")),
+        "tsx_index": _to_float(data.get("tsxindex")),
+        "sp_index": _to_float(data.get("spindex")),
+    }
+
+
 def _raise_db_query_failed(request: Request, exc: Exception) -> None:
     logger.exception(
-        "Stock Trends portfolio metadata query failed; request_id=%s",
+        "Stock Trends portfolio query failed; request_id=%s",
         request.state.request_id,
         exc_info=True,
     )
@@ -173,4 +273,103 @@ def get_stocktrends_portfolio(
     return {
         "request_id": request.state.request_id,
         "data": _row_to_portfolio(row),
+    }
+
+
+@router.get(
+    "/{port_id}/returns",
+    response_model=StockTrendsPortfolioReturnsResponse,
+    summary="Get official Stock Trends portfolio returns history",
+    description=(
+        "Official Stock Trends portfolio returns history. "
+        "Returns chronological performance observations for one live official "
+        "Stock Trends model portfolio. Only status=1 portfolios are exposed; "
+        "nonexistent or inactive portfolio IDs return 404."
+    ),
+)
+def get_stocktrends_portfolio_returns(
+    request: Request,
+    port_id: int = Path(..., ge=1, description="Official Stock Trends portfolio identifier."),
+    start_date: date | None = Query(
+        default=None,
+        description="Inclusive start weekdate filter in YYYY-MM-DD format.",
+    ),
+    end_date: date | None = Query(
+        default=None,
+        description="Inclusive end weekdate filter in YYYY-MM-DD format.",
+    ),
+):
+    portfolio_sql = text(
+        """
+        SELECT
+            port_id,
+            name,
+            strategy_id,
+            exchanges,
+            index_symbols,
+            description,
+            status
+        FROM stp_ports
+        WHERE port_id = :port_id
+          AND status = 1
+        LIMIT 1
+        """
+    )
+
+    returns_where = ["port_id = :port_id"]
+    returns_params: dict[str, Any] = {"port_id": port_id}
+    if start_date is not None:
+        returns_where.append("weekdate >= :start_date")
+        returns_params["start_date"] = start_date
+    if end_date is not None:
+        returns_where.append("weekdate <= :end_date")
+        returns_params["end_date"] = end_date
+
+    returns_sql = text(
+        f"""
+        SELECT
+            weekdate,
+            buys,
+            sells,
+            held,
+            net_proceeds,
+            realizedgain,
+            cum_realizedgain,
+            totalvaluation,
+            unrealizedgain,
+            cum_totalgain,
+            tsxindex,
+            spindex
+        FROM stp_returnslog
+        WHERE {" AND ".join(returns_where)}
+        ORDER BY weekdate ASC
+        """
+    )
+
+    engine = get_engine()
+    try:
+        with engine.connect() as conn:
+            portfolio_row = conn.execute(portfolio_sql, {"port_id": port_id}).mappings().first()
+            if not portfolio_row:
+                raise HTTPException(
+                    status_code=404,
+                    detail={
+                        "request_id": request.state.request_id,
+                        "error": "portfolio_not_found",
+                        "port_id": port_id,
+                    },
+                )
+            return_rows = conn.execute(returns_sql, returns_params).mappings().all()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_db_query_failed(request, exc)
+
+    returns = [_row_to_return_point(row) for row in return_rows]
+    return {
+        "request_id": request.state.request_id,
+        "port_id": int(port_id),
+        "portfolio": _row_to_portfolio_summary(portfolio_row),
+        "count": len(returns),
+        "returns": returns,
     }

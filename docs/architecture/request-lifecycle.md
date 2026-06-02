@@ -30,6 +30,32 @@ That classification must agree across:
 A zero-cost pricing rule does not override payment-policy enforcement. Public
 endpoints must not be registered as payment-gated EndpointPaymentPolicy routes.
 
+Current public/free Stock Trends portfolio endpoints include:
+
+* `GET /v1/stocktrends/portfolios`
+* `GET /v1/stocktrends/portfolios/{port_id}`
+* `GET /v1/stocktrends/portfolios/{port_id}/returns`
+
+Official Stock Trends portfolio returns history is sourced from
+`stp_returnslog`, the canonical portfolio performance history. Do not
+reconstruct portfolio returns from `stp_positions`, which is a holdings/audit
+trail source rather than the public performance-history source.
+
+Current public response mapping:
+
+* `stp_returnslog.weekdate` -> `returns[].weekdate`
+* `stp_returnslog.buys` -> `returns[].buys`
+* `stp_returnslog.sells` -> `returns[].sells`
+* `stp_returnslog.held` -> `returns[].held`
+* `stp_returnslog.net_proceeds` -> `returns[].net_proceeds`
+* `stp_returnslog.realizedgain` -> `returns[].realized_gain`
+* `stp_returnslog.cum_realizedgain` -> `returns[].cumulative_realized_gain`
+* `stp_returnslog.totalvaluation` -> `returns[].total_valuation`
+* `stp_returnslog.unrealizedgain` -> `returns[].unrealized_gain`
+* `stp_returnslog.cum_totalgain` -> `returns[].cumulative_total_gain`
+* `stp_returnslog.tsxindex` -> `returns[].tsx_index`
+* `stp_returnslog.spindex` -> `returns[].sp_index`
+
 ---
 
 ### 1. Request Received
