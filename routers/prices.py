@@ -8,6 +8,7 @@ from db import get_engine
 
 # Reuse exchange validation + parsing you already have
 from routers.signals import VALID_EXCHANGES, parse_symbol_exchange
+from utils.volume import volume_to_actual_shares
 
 router = APIRouter(prefix="/prices", tags=["prices"])
 
@@ -136,6 +137,7 @@ def prices_latest(
 
     d = dict(row)
     d["symbol_exchange"] = f'{d["symbol"]}-{d["exchange"]}'
+    d["volume"] = volume_to_actual_shares(d.get("volume"))
     d["request_id"] = request.state.request_id
     return d
 
@@ -215,6 +217,7 @@ def prices_history(
     data = [dict(r) for r in reversed(rows)]
     for d in data:
         d["symbol_exchange"] = f'{d["symbol"]}-{d["exchange"]}'
+        d["volume"] = volume_to_actual_shares(d.get("volume"))
 
     return {
         "request_id": request.state.request_id,
