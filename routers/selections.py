@@ -14,6 +14,9 @@ from sqlalchemy import text
 
 from db import get_engine
 from routers.signals import VALID_EXCHANGES
+from services.stim_select_outcome_summary_cache import (
+    fetch_default_stim_select_outcome_summary_cache,
+)
 
 logger = logging.getLogger("stocktrends_api.selections")
 router = APIRouter(prefix="/selections", tags=["selections"])
@@ -307,8 +310,11 @@ def _stim_select_signal_metadata() -> dict[str, Any]:
     }
 
 
-def _stim_select_outcome_provenance() -> dict[str, Any]:
-    return {
+def _stim_select_outcome_provenance(
+    *,
+    cache_record: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    provenance = {
         "source": "stim_select_signal_outcome_summary",
         "realized_return_field": "fpr_chg13",
         "realized_return_horizon": "13 weeks",
@@ -323,6 +329,17 @@ def _stim_select_outcome_provenance() -> dict[str, Any]:
             "/v1/selections/published/history",
         ],
     }
+    if cache_record is not None:
+        provenance["cache"] = {
+            "served_from_cache": True,
+            "summary_key": cache_record.get("summary_key"),
+            "generated_at": _to_date_string(cache_record.get("generated_at")),
+            "source_latest_mature_weekdate": _to_date_string(
+                cache_record.get("source_latest_mature_weekdate")
+            ),
+            "refresh_command": "python -m maintenance.refresh_stim_select_outcome_summary_cache",
+        }
+    return provenance
 
 
 def _mast_select(include_mast: bool) -> str:
@@ -417,34 +434,67 @@ def stim_select_outcomes_summary(
     applied_end_date = end_date
 
     engine = get_engine()
+    cache_record: dict[str, Any] | None = None
+    value_rows = []
     try:
         with engine.connect() as conn:
             if default_window_applied:
-                applied_end_date = _latest_stim_select_mature_outcome_date(conn)
-                if applied_end_date is not None:
-                    applied_start_date = _subtract_years(
-                        applied_end_date,
-                        STIM_SELECT_OUTCOME_DEFAULT_WINDOW_YEARS,
+                cache_record = fetch_default_stim_select_outcome_summary_cache(
+                    conn,
+                    exchange=ex,
+                    limit_rank=limit_rank,
+                )
+                if cache_record is None:
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "request_id": request.state.request_id,
+                            "error": "outcome_summary_cache_not_populated",
+                            "message": (
+                                "The default ST-IM Select outcome summary cache is not populated "
+                                "for the requested filters."
+                            ),
+                            "refresh_command": (
+                                "python -m maintenance.refresh_stim_select_outcome_summary_cache"
+                            ),
+                        },
                     )
 
-            params: dict[str, Any] = {}
-            where = _stim_select_outcomes_base_where(
-                ex=ex,
-                start_date=applied_start_date,
-                end_date=applied_end_date,
-                params=params,
-            )
-            if limit_rank is not None:
-                params["limit_rank"] = int(limit_rank)
-
-            if default_window_applied and applied_end_date is None:
-                aggregate_row = {}
-                value_rows = []
+                applied_start_date = _to_date(cache_record.get("start_date"))
+                applied_end_date = _to_date(cache_record.get("end_date"))
+                if applied_start_date is None or applied_end_date is None:
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "request_id": request.state.request_id,
+                            "error": "outcome_summary_cache_invalid",
+                            "message": (
+                                "The default ST-IM Select outcome summary cache is missing "
+                                "its applied date window."
+                            ),
+                            "refresh_command": (
+                                "python -m maintenance.refresh_stim_select_outcome_summary_cache"
+                            ),
+                        },
+                    )
+                aggregate_row = cache_record
             else:
+                params: dict[str, Any] = {}
+                where = _stim_select_outcomes_base_where(
+                    ex=ex,
+                    start_date=applied_start_date,
+                    end_date=applied_end_date,
+                    params=params,
+                )
+                if limit_rank is not None:
+                    params["limit_rank"] = int(limit_rank)
+
                 aggregate_sql = _stim_select_outcomes_aggregate_sql(where=where, limit_rank=limit_rank)
                 values_sql = _stim_select_outcomes_values_sql(where=where, limit_rank=limit_rank)
                 aggregate_row = conn.execute(aggregate_sql, params).mappings().first()
                 value_rows = conn.execute(values_sql, params).mappings().all()
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception(
             "ST-IM Select outcome summary query failed; request_id=%s",
@@ -464,12 +514,19 @@ def stim_select_outcomes_summary(
     count = _to_int_or_zero(aggregate.get("outcome_count"))
     positive_count = _to_int_or_zero(aggregate.get("positive_return_count"))
     outperform_count = _to_int_or_zero(aggregate.get("outperform_base_count"))
-    outcome_values = [
-        float(value)
-        for row in value_rows
-        if (value := _to_decimal(dict(row).get("fpr_chg13"))) is not None
-    ]
-    median_fpr_chg13 = float(median(outcome_values)) if outcome_values else None
+    if cache_record is not None:
+        median_fpr_chg13 = _to_float(aggregate.get("median_fpr_chg13"))
+        positive_return_rate = _to_float(aggregate.get("positive_return_rate"))
+        outperform_base_rate = _to_float(aggregate.get("outperform_base_rate"))
+    else:
+        outcome_values = [
+            float(value)
+            for row in value_rows
+            if (value := _to_decimal(dict(row).get("fpr_chg13"))) is not None
+        ]
+        median_fpr_chg13 = float(median(outcome_values)) if outcome_values else None
+        positive_return_rate = _rate(positive_count, count)
+        outperform_base_rate = _rate(outperform_count, count)
 
     return {
         "request_id": request.state.request_id,
@@ -489,12 +546,12 @@ def stim_select_outcomes_summary(
             "average_fpr_chg13": _to_float(aggregate.get("average_fpr_chg13")),
             "median_fpr_chg13": median_fpr_chg13,
             "positive_return_count": positive_count,
-            "positive_return_rate": _rate(positive_count, count),
+            "positive_return_rate": positive_return_rate if positive_return_rate is not None else 0.0,
             "outperform_base_count": outperform_count,
-            "outperform_base_rate": _rate(outperform_count, count),
+            "outperform_base_rate": outperform_base_rate if outperform_base_rate is not None else 0.0,
             "base_period_mean_13wk": STIM_SELECT_BASE_13WK,
         },
-        "provenance": _stim_select_outcome_provenance(),
+        "provenance": _stim_select_outcome_provenance(cache_record=cache_record),
     }
 
 

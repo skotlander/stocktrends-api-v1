@@ -209,6 +209,18 @@ trailing 10-year window ending at the latest mature outcome date and returns
 supplied, the endpoint preserves the caller's date range and returns
 `filters.default_window_applied: false`.
 
+The default no-date summary is served from the precomputed
+`stim_select_outcome_summary_cache` and should be refreshed after weekly data
+updates with:
+
+```text
+python -m maintenance.refresh_stim_select_outcome_summary_cache
+```
+
+Explicit date-window requests may still execute the live historical aggregate.
+The endpoint is historical evidence for the ST-IM Select signal-selection rule,
+not current live selections.
+
 Only this exact path is public/free:
 
 * `/v1/selections/stim-select/outcomes/summary`

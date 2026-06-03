@@ -207,7 +207,18 @@ symbols, or individual historical symbols.
 
 When both `start_date` and `end_date` are omitted, the endpoint applies a
 trailing 10-year window ending at the latest mature outcome date and returns
-`filters.default_window_applied: true` with the applied dates.
+`filters.default_window_applied: true` with the applied dates. This default
+summary is served from the precomputed `stim_select_outcome_summary_cache`
+because the underlying historical outcome data changes weekly. Refresh it after
+weekly data updates:
+
+```text
+python -m maintenance.refresh_stim_select_outcome_summary_cache
+```
+
+Explicit `start_date` or `end_date` requests may still be computed live. This
+endpoint is historical signal-rule evidence, not current live ST-IM Select
+membership.
 
 ### Cognition Metadata
 

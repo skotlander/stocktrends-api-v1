@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -13,6 +13,7 @@ import middleware.metering as metering_module
 import payments.policy_provider as policy_provider
 import pricing.classifier as classifier_module
 import routers.selections as selections_router
+from services.stim_select_outcome_summary_cache import build_default_summary_key
 
 
 _OUTCOME_ROWS = [
@@ -137,9 +138,22 @@ class _Result:
         return self._rows[0] if self._rows else None
 
 
+def _subtract_years(value: date, years: int) -> date:
+    try:
+        return value.replace(year=value.year - years)
+    except ValueError:
+        return value.replace(year=value.year - years, month=2, day=28)
+
+
 class _Connection:
-    def __init__(self, rows: list[dict[str, Any]], executed: list[tuple[str, dict[str, Any]]]):
+    def __init__(
+        self,
+        rows: list[dict[str, Any]],
+        cache_rows: list[dict[str, Any]],
+        executed: list[tuple[str, dict[str, Any]]],
+    ):
         self._rows = rows
+        self._cache_rows = cache_rows
         self._executed = executed
 
     def __enter__(self):
@@ -193,6 +207,19 @@ class _Connection:
         params = params or {}
         sql = str(statement)
         self._executed.append((sql, params))
+
+        if "stim_select_outcome_summary_cache" in sql or (
+            {"summary_key", "signal_id", "horizon"}.issubset(params)
+        ):
+            summary_key = params.get("summary_key")
+            return _Result(
+                [
+                    row
+                    for row in self._cache_rows
+                    if row.get("summary_key") == summary_key
+                ][:1]
+            )
+
         rows = self._qualifying_rows(params)
         values = [row["fpr_chg13"] for row in rows]
 
@@ -225,13 +252,71 @@ class _Connection:
         return _Result([{"fpr_chg13": value} for value in values])
 
 
+def _cache_row_for(
+    rows: list[dict[str, Any]],
+    *,
+    exchange: str | None = None,
+    limit_rank: int | None = None,
+) -> dict[str, Any]:
+    conn = _Connection(rows, [], [])
+    latest_mature_weekdate = max(
+        (row["weekdate"] for row in conn._qualifying_rows({})),
+        default=None,
+    )
+    assert latest_mature_weekdate is not None
+    start_date = _subtract_years(latest_mature_weekdate, 10)
+    params: dict[str, Any] = {
+        "start_date": start_date,
+        "end_date": latest_mature_weekdate,
+    }
+    if exchange is not None:
+        params["exchange"] = exchange
+    if limit_rank is not None:
+        params["limit_rank"] = limit_rank
+
+    qualified = conn._qualifying_rows(params)
+    values = [row["fpr_chg13"] for row in qualified]
+    count = len(qualified)
+    positive_count = sum(1 for value in values if value > 0)
+    outperform_count = sum(1 for value in values if value > Decimal("2.19"))
+
+    return {
+        "summary_key": build_default_summary_key(exchange=exchange, limit_rank=limit_rank),
+        "signal_id": "stim_select",
+        "horizon": "13w",
+        "start_date": start_date,
+        "end_date": latest_mature_weekdate,
+        "exchange": exchange,
+        "limit_rank": limit_rank,
+        "default_window_applied": 1,
+        "outcome_count": count,
+        "first_weekdate": min((row["weekdate"] for row in qualified), default=None),
+        "latest_weekdate": max((row["weekdate"] for row in qualified), default=None),
+        "average_fpr_chg13": (sum(values, Decimal("0")) / count) if values else None,
+        "median_fpr_chg13": Decimal(str(selections_router.median(values))) if values else None,
+        "positive_return_count": positive_count,
+        "positive_return_rate": Decimal(str(positive_count / count)) if count else Decimal("0"),
+        "outperform_base_count": outperform_count,
+        "outperform_base_rate": Decimal(str(outperform_count / count)) if count else Decimal("0"),
+        "base_period_mean_13wk": Decimal("2.19"),
+        "generated_at": datetime(2024, 1, 20, 12, 0, 0),
+        "source_latest_mature_weekdate": latest_mature_weekdate,
+    }
+
+
 class _Engine:
     def __init__(self, rows: list[dict[str, Any]]):
         self.rows = rows
+        self.cache_rows = [
+            _cache_row_for(rows),
+            _cache_row_for(rows, limit_rank=1),
+            _cache_row_for(rows, limit_rank=10),
+            _cache_row_for(rows, exchange="B"),
+        ]
         self.executed: list[tuple[str, dict[str, Any]]] = []
 
     def connect(self):
-        return _Connection(self.rows, self.executed)
+        return _Connection(self.rows, self.cache_rows, self.executed)
 
 
 def _fake_authenticate(self, path: str, raw_key: str):
@@ -345,6 +430,12 @@ def test_stim_select_outcomes_summary_returns_metrics(client):
     assert outcomes["outperform_base_count"] == 2
     assert outcomes["outperform_base_rate"] == pytest.approx(0.5)
     assert outcomes["base_period_mean_13wk"] == 2.19
+    assert body["provenance"]["cache"]["served_from_cache"] is True
+    assert body["provenance"]["cache"]["summary_key"] == build_default_summary_key(
+        exchange=None,
+        limit_rank=None,
+    )
+    assert body["provenance"]["cache"]["source_latest_mature_weekdate"] == "2024-01-19"
 
 
 def test_stim_select_outcomes_summary_unbounded_binds_default_window(client, outcome_engine):
@@ -356,13 +447,29 @@ def test_stim_select_outcomes_summary_unbounded_binds_default_window(client, out
     assert body["filters"]["start_date"] == "2014-01-19"
     assert body["filters"]["end_date"] == "2024-01-19"
 
-    aggregate_params = next(
+    cache_params = next(
         params
-        for sql, params in outcome_engine.executed
-        if "outcome_count" in sql
+        for _sql, params in outcome_engine.executed
+        if "summary_key" in params
     )
-    assert aggregate_params["start_date"] == date(2014, 1, 19)
-    assert aggregate_params["end_date"] == date(2024, 1, 19)
+    assert cache_params["summary_key"] == build_default_summary_key(
+        exchange=None,
+        limit_rank=None,
+    )
+    assert not any("base_4wk" in params for _sql, params in outcome_engine.executed)
+
+
+def test_stim_select_outcomes_summary_cache_miss_returns_503(client, outcome_engine):
+    outcome_engine.cache_rows = []
+
+    response = client.get("/v1/selections/stim-select/outcomes/summary?limit_rank=10")
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["error"] == "outcome_summary_cache_not_populated"
+    assert detail["refresh_command"] == "python -m maintenance.refresh_stim_select_outcome_summary_cache"
+    assert any("summary_key" in params for _sql, params in outcome_engine.executed)
+    assert not any("base_4wk" in params for _sql, params in outcome_engine.executed)
 
 
 def test_stim_select_outcomes_summary_uses_mature_fpr_chg13_only(client):
@@ -391,7 +498,10 @@ def test_stim_select_outcomes_summary_empty_result_is_safe(client):
 
 
 def test_stim_select_outcomes_summary_sql_uses_stweekly_market_schema(client, outcome_engine):
-    response = client.get("/v1/selections/stim-select/outcomes/summary")
+    response = client.get(
+        "/v1/selections/stim-select/outcomes/summary"
+        "?start_date=2024-01-05&end_date=2024-01-19"
+    )
 
     assert response.status_code == 200
     executed_sql = "\n".join(sql for sql, _params in outcome_engine.executed)
@@ -483,6 +593,29 @@ def test_stim_select_outcomes_summary_limit_rank_is_per_week(client, outcome_eng
     assert body["filters"]["default_window_applied"] is True
     assert body["outcomes"]["count"] == 3
     assert body["outcomes"]["average_fpr_chg13"] == pytest.approx((5 + 10 + 2.19) / 3)
+    assert any("summary_key" in params for _sql, params in outcome_engine.executed)
+    assert not any("base_4wk" in params for _sql, params in outcome_engine.executed)
+    assert body["provenance"]["cache"]["summary_key"] == build_default_summary_key(
+        exchange=None,
+        limit_rank=1,
+    )
+
+
+def test_stim_select_outcomes_summary_explicit_date_limit_rank_uses_live_per_week_rank(
+    client,
+    outcome_engine,
+):
+    response = client.get(
+        "/v1/selections/stim-select/outcomes/summary"
+        "?start_date=2024-01-05&end_date=2024-01-19&limit_rank=1"
+    )
+
+    body = response.json()
+    assert body["filters"]["limit_rank"] == 1
+    assert body["filters"]["default_window_applied"] is False
+    assert body["outcomes"]["count"] == 3
+    assert body["outcomes"]["average_fpr_chg13"] == pytest.approx((5 + 10 + 2.19) / 3)
+    assert "cache" not in body["provenance"]
     executed_sql = "\n".join(sql for sql, _params in outcome_engine.executed)
     assert "ROW_NUMBER() OVER" in executed_sql
     assert "PARTITION BY a.weekdate" in executed_sql

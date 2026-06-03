@@ -774,11 +774,13 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         requires_payment=False,
         resource_description=(
             "Public aggregate historical outcome summary for observations meeting "
-            "Stock Trends Inference Model Select criteria."
+            "Stock Trends Inference Model Select criteria. The default no-date "
+            "summary is served from a precomputed weekly-refreshed cache."
         ),
         bazaar_output_description=(
             "Returns aggregate mature 13-week realized outcome metrics for ST-IM Select "
-            "signal-rule observations using fpr_chg13. No current selections or individual symbols are returned."
+            "signal-rule observations using fpr_chg13. No current selections or individual symbols are returned. "
+            "When both date filters are omitted, results come from the precomputed outcome summary cache."
         ),
         purpose="Summarize mature historical outcomes for the ST-IM Select signal-selection rule.",
         investment_agent_value=(
@@ -794,7 +796,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
                 "example": "2020-01-03",
                 "description": (
                     "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date "
-                    "filters are omitted, a trailing 10-year default window is applied."
+                    "filters are omitted, a cached trailing 10-year default window is applied."
                 ),
             },
             "end_date": {
@@ -804,7 +806,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
                 "example": "2024-12-27",
                 "description": (
                     "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date "
-                    "filters are omitted, the window ends at the latest mature outcome date."
+                    "filters are omitted, the cached window ends at the latest mature outcome date."
                 ),
             },
             "exchange": {
@@ -849,6 +851,9 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             "outcomes.outperform_base_rate",
             "outcomes.base_period_mean_13wk",
             "provenance.uses_mature_outcomes_only",
+            "provenance.cache.served_from_cache",
+            "provenance.cache.generated_at",
+            "provenance.cache.source_latest_mature_weekdate",
             "provenance.published_report_limited",
             "provenance.current_live_selections_excluded",
             "provenance.current_matching_symbols_excluded",
@@ -861,11 +866,11 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
                 "base_period_mean_13wk": 2.19,
             },
             "filters": {
-                "start_date": None,
-                "end_date": None,
+                "start_date": "YYYY-MM-DD",
+                "end_date": "YYYY-MM-DD",
                 "exchange": None,
                 "limit_rank": 10,
-                "default_window_applied": False,
+                "default_window_applied": True,
             },
             "outcomes": {
                 "horizon": "13w",
@@ -882,6 +887,11 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             },
             "provenance": {
                 "uses_mature_outcomes_only": True,
+                "cache": {
+                    "served_from_cache": True,
+                    "generated_at": "YYYY-MM-DDTHH:MM:SS",
+                    "source_latest_mature_weekdate": "YYYY-MM-DD",
+                },
                 "published_report_limited": False,
                 "current_live_selections_excluded": True,
                 "current_matching_symbols_excluded": True,
@@ -894,7 +904,9 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         analytical_role=ROLE_PROBABILISTIC_SIGNAL_OUTCOME_EVIDENCE,
         notes=[
             "Uses mature observations only: st_data.fpr_chg13 IS NOT NULL.",
-            "If start_date and end_date are both omitted, applies a trailing 10-year default window ending at the latest mature outcome date.",
+            "If start_date and end_date are both omitted, serves a precomputed trailing 10-year default window ending at the latest mature outcome date.",
+            "Refresh the stim_select_outcome_summary_cache after weekly data updates with python -m maintenance.refresh_stim_select_outcome_summary_cache.",
+            "Explicit date-window requests may still compute the historical aggregate live.",
             "This is signal-rule evidence, not a published-report-membership endpoint.",
             "No current selections, current matching stocks, or individual symbols are returned.",
         ],

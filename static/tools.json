@@ -736,7 +736,7 @@
       "name": "stim_select_outcomes_summary",
       "analytical_role": "probabilistic_signal_outcome_evidence",
       "title": "ST-IM Select Outcomes Summary",
-      "description": "Public aggregate historical outcome summary for observations meeting Stock Trends Inference Model Select criteria. Uses mature realized 13-week forward returns from fpr_chg13. When start_date and end_date are omitted, applies a trailing 10-year default window ending at the latest mature outcome date and returns filters.default_window_applied=true. Does not expose current selections or individual symbols.",
+      "description": "Public aggregate historical outcome summary for observations meeting Stock Trends Inference Model Select criteria. Uses mature realized 13-week forward returns from fpr_chg13. When start_date and end_date are omitted, serves a precomputed trailing 10-year default window ending at the latest mature outcome date and returns filters.default_window_applied=true. Refresh the cache after weekly data updates. Does not expose current selections or individual symbols.",
       "method": "GET",
       "path": "/selections/stim-select/outcomes/summary",
       "auth_required": false,
@@ -756,7 +756,7 @@
           "type": "string",
           "format": "date",
           "required": false,
-          "description": "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date filters are omitted, a trailing 10-year default window is applied."
+          "description": "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date filters are omitted, a cached trailing 10-year default window is applied."
         },
         {
           "name": "end_date",
@@ -766,7 +766,7 @@
           "type": "string",
           "format": "date",
           "required": false,
-          "description": "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date filters are omitted, the window ends at the latest mature outcome date."
+          "description": "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date filters are omitted, the cached window ends at the latest mature outcome date."
         },
         {
           "name": "exchange",
@@ -807,6 +807,14 @@
           "published_report_limited": false,
           "current_live_selections_excluded": true,
           "individual_symbols_excluded": true
+        },
+        "cache_behavior": {
+          "default_no_date_window_cached": true,
+          "cache_table": "stim_select_outcome_summary_cache",
+          "refresh_command": "python -m maintenance.refresh_stim_select_outcome_summary_cache",
+          "refresh_cadence": "after weekly data updates",
+          "explicit_date_windows_may_compute_live": true,
+          "historical_evidence_not_current_live_selections": true
         }
       }
     },
