@@ -205,7 +205,16 @@ def test_stim_select_outcomes_summary_static_tool_is_public(manifest):
     assert tool.get("access_type") == "free"
     assert tool.get("requires_payment") is False
     assert tool["interpretation_guidance"]["outcome_measurement"]["realized_return_field"] == "fpr_chg13"
+    assert tool["interpretation_guidance"]["outcome_measurement"]["realized_return_fields"] == [
+        "fpr_chg4",
+        "fpr_chg13",
+        "fpr_chg40",
+    ]
     assert tool["interpretation_guidance"]["business_boundary"]["aggregate_only"] is True
+    behavior = tool["interpretation_guidance"]["summary_table_behavior"]
+    assert behavior["summary_table"] == "stweekly.stim_select_outcome_summary"
+    assert behavior["default_no_date_window_reads_summary_table"] is True
+    assert {"exchange": None, "limit_rank": 10} in behavior["supported_default_rows"]
 
 
 def test_indicators_tools_present(manifest):

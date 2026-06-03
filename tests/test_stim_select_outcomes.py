@@ -13,7 +13,8 @@ import middleware.metering as metering_module
 import payments.policy_provider as policy_provider
 import pricing.classifier as classifier_module
 import routers.selections as selections_router
-from services.stim_select_outcome_summary_cache import build_default_summary_key
+from services import stim_select_outcome_summary as outcome_summary_service
+from services.stim_select_outcome_summary import build_default_summary_key
 
 
 _OUTCOME_ROWS = [
@@ -28,7 +29,9 @@ _OUTCOME_ROWS = [
         "x13wksd": Decimal("2.0"),
         "price": Decimal("12.0"),
         "volume": 5000,
+        "fpr_chg4": Decimal("1.0"),
         "fpr_chg13": Decimal("5.0"),
+        "fpr_chg40": Decimal("20.0"),
     },
     {
         "weekdate": date(2024, 1, 5),
@@ -41,7 +44,9 @@ _OUTCOME_ROWS = [
         "x13wksd": Decimal("1.0"),
         "price": Decimal("8.0"),
         "volume": 2500,
+        "fpr_chg4": Decimal("-2.0"),
         "fpr_chg13": Decimal("-1.0"),
+        "fpr_chg40": Decimal("-5.0"),
     },
     {
         "weekdate": date(2024, 1, 12),
@@ -54,7 +59,9 @@ _OUTCOME_ROWS = [
         "x13wksd": Decimal("1.5"),
         "price": Decimal("20.0"),
         "volume": 7000,
+        "fpr_chg4": Decimal("4.0"),
         "fpr_chg13": Decimal("10.0"),
+        "fpr_chg40": Decimal("30.0"),
     },
     {
         "weekdate": date(2024, 1, 12),
@@ -67,7 +74,9 @@ _OUTCOME_ROWS = [
         "x13wksd": Decimal("1.0"),
         "price": Decimal("20.0"),
         "volume": 7000,
+        "fpr_chg4": Decimal("5.0"),
         "fpr_chg13": None,
+        "fpr_chg40": Decimal("50.0"),
     },
     {
         "weekdate": date(2024, 1, 19),
@@ -80,7 +89,9 @@ _OUTCOME_ROWS = [
         "x13wksd": Decimal("1.2"),
         "price": Decimal("6.0"),
         "volume": 3000,
+        "fpr_chg4": Decimal("0.0"),
         "fpr_chg13": Decimal("2.19"),
+        "fpr_chg40": Decimal("6.45"),
     },
     {
         "weekdate": date(2024, 1, 19),
@@ -93,7 +104,9 @@ _OUTCOME_ROWS = [
         "x13wksd": Decimal("1.2"),
         "price": Decimal("1.99"),
         "volume": 3000,
+        "fpr_chg4": Decimal("99.0"),
         "fpr_chg13": Decimal("99.0"),
+        "fpr_chg40": Decimal("99.0"),
     },
     {
         "weekdate": date(2024, 1, 19),
@@ -106,7 +119,9 @@ _OUTCOME_ROWS = [
         "x13wksd": Decimal("1.2"),
         "price": Decimal("6.0"),
         "volume": 1000,
+        "fpr_chg4": Decimal("99.0"),
         "fpr_chg13": Decimal("99.0"),
+        "fpr_chg40": Decimal("99.0"),
     },
     {
         "weekdate": date(2024, 1, 19),
@@ -119,7 +134,9 @@ _OUTCOME_ROWS = [
         "x13wksd": Decimal("1.2"),
         "price": Decimal("6.0"),
         "volume": 3000,
+        "fpr_chg4": Decimal("99.0"),
         "fpr_chg13": Decimal("99.0"),
+        "fpr_chg40": Decimal("99.0"),
     },
 ]
 
@@ -149,12 +166,15 @@ class _Connection:
     def __init__(
         self,
         rows: list[dict[str, Any]],
-        cache_rows: list[dict[str, Any]],
+        summary_rows: list[dict[str, Any]],
         executed: list[tuple[str, dict[str, Any]]],
+        *,
+        summary_table_missing: bool = False,
     ):
         self._rows = rows
-        self._cache_rows = cache_rows
+        self._summary_rows = summary_rows
         self._executed = executed
+        self._summary_table_missing = summary_table_missing
 
     def __enter__(self):
         return self
@@ -208,20 +228,24 @@ class _Connection:
         sql = str(statement)
         self._executed.append((sql, params))
 
-        if "stim_select_outcome_summary_cache" in sql or (
-            {"summary_key", "signal_id", "horizon"}.issubset(params)
+        if "stim_select_outcome_summary" in sql or (
+            {"summary_key", "signal_id"}.issubset(params)
         ):
+            if self._summary_table_missing:
+                raise outcome_summary_service.OperationalError("missing summary table")
             summary_key = params.get("summary_key")
             return _Result(
                 [
                     row
-                    for row in self._cache_rows
+                    for row in self._summary_rows
                     if row.get("summary_key") == summary_key
                 ][:1]
             )
 
         rows = self._qualifying_rows(params)
         values = [row["fpr_chg13"] for row in rows]
+        values_4wk = [row["fpr_chg4"] for row in rows]
+        values_40wk = [row["fpr_chg40"] for row in rows]
 
         if "latest_mature_outcome_date" in sql:
             return _Result(
@@ -242,17 +266,34 @@ class _Connection:
                         "outcome_count": len(rows),
                         "first_weekdate": min((row["weekdate"] for row in rows), default=None),
                         "latest_weekdate": max((row["weekdate"] for row in rows), default=None),
+                        "average_fpr_chg4": (sum(values_4wk, Decimal("0")) / len(values_4wk)) if values_4wk else None,
                         "average_fpr_chg13": (sum(values, Decimal("0")) / len(values)) if values else None,
+                        "average_fpr_chg40": (sum(values_40wk, Decimal("0")) / len(values_40wk)) if values_40wk else None,
                         "positive_return_count": sum(1 for value in values if value > 0),
+                        "positive_return_count_4wk": sum(1 for value in values_4wk if value > 0),
+                        "positive_return_count_13wk": sum(1 for value in values if value > 0),
+                        "positive_return_count_40wk": sum(1 for value in values_40wk if value > 0),
                         "outperform_base_count": sum(1 for value in values if value > Decimal("2.19")),
+                        "outperform_base_count_4wk": sum(1 for value in values_4wk if value > Decimal("0")),
+                        "outperform_base_count_13wk": sum(1 for value in values if value > Decimal("2.19")),
+                        "outperform_base_count_40wk": sum(1 for value in values_40wk if value > Decimal("6.45")),
                     }
                 ]
             )
 
-        return _Result([{"fpr_chg13": value} for value in values])
+        return _Result(
+            [
+                {
+                    "fpr_chg4": row["fpr_chg4"],
+                    "fpr_chg13": row["fpr_chg13"],
+                    "fpr_chg40": row["fpr_chg40"],
+                }
+                for row in rows
+            ]
+        )
 
 
-def _cache_row_for(
+def _summary_row_for(
     rows: list[dict[str, Any]],
     *,
     exchange: str | None = None,
@@ -277,46 +318,65 @@ def _cache_row_for(
     qualified = conn._qualifying_rows(params)
     values = [row["fpr_chg13"] for row in qualified]
     count = len(qualified)
-    positive_count = sum(1 for value in values if value > 0)
-    outperform_count = sum(1 for value in values if value > Decimal("2.19"))
-
-    return {
+    summary = {
         "summary_key": build_default_summary_key(exchange=exchange, limit_rank=limit_rank),
         "signal_id": "stim_select",
-        "horizon": "13w",
         "start_date": start_date,
         "end_date": latest_mature_weekdate,
         "exchange": exchange,
         "limit_rank": limit_rank,
-        "default_window_applied": 1,
         "outcome_count": count,
         "first_weekdate": min((row["weekdate"] for row in qualified), default=None),
         "latest_weekdate": max((row["weekdate"] for row in qualified), default=None),
-        "average_fpr_chg13": (sum(values, Decimal("0")) / count) if values else None,
-        "median_fpr_chg13": Decimal(str(selections_router.median(values))) if values else None,
-        "positive_return_count": positive_count,
-        "positive_return_rate": Decimal(str(positive_count / count)) if count else Decimal("0"),
-        "outperform_base_count": outperform_count,
-        "outperform_base_rate": Decimal(str(outperform_count / count)) if count else Decimal("0"),
-        "base_period_mean_13wk": Decimal("2.19"),
         "generated_at": datetime(2024, 1, 20, 12, 0, 0),
         "source_latest_mature_weekdate": latest_mature_weekdate,
+        "base_period_mean_4wk": Decimal("0.00"),
+        "base_period_mean_13wk": Decimal("2.19"),
+        "base_period_mean_40wk": Decimal("6.45"),
     }
+    for horizon, definition in outcome_summary_service.HORIZON_DEFINITIONS.items():
+        field = definition["field"]
+        suffix = definition["suffix"]
+        base = definition["base"]
+        horizon_values = [row[field] for row in qualified]
+        positive_count = sum(1 for value in horizon_values if value > 0)
+        outperform_count = sum(1 for value in horizon_values if value > base)
+        summary[f"average_{field}"] = (
+            sum(horizon_values, Decimal("0")) / count if horizon_values else None
+        )
+        summary[f"median_{field}"] = (
+            Decimal(str(selections_router.median(horizon_values))) if horizon_values else None
+        )
+        summary[f"positive_return_count_{suffix}"] = positive_count
+        summary[f"positive_return_rate_{suffix}"] = (
+            Decimal(str(positive_count / count)) if count else Decimal("0")
+        )
+        summary[f"outperform_base_count_{suffix}"] = outperform_count
+        summary[f"outperform_base_rate_{suffix}"] = (
+            Decimal(str(outperform_count / count)) if count else Decimal("0")
+        )
+    return summary
 
 
 class _Engine:
     def __init__(self, rows: list[dict[str, Any]]):
         self.rows = rows
-        self.cache_rows = [
-            _cache_row_for(rows),
-            _cache_row_for(rows, limit_rank=1),
-            _cache_row_for(rows, limit_rank=10),
-            _cache_row_for(rows, exchange="B"),
+        self.summary_rows = [
+            _summary_row_for(rows),
+            _summary_row_for(rows, limit_rank=1),
+            _summary_row_for(rows, limit_rank=10),
+            _summary_row_for(rows, exchange="B"),
         ]
+        self.summary_table_missing = False
         self.executed: list[tuple[str, dict[str, Any]]] = []
 
     def connect(self):
-        return _Connection(self.rows, self.cache_rows, self.executed)
+        return _Connection(
+            self.rows,
+            self.summary_rows,
+            self.executed,
+            summary_table_missing=self.summary_table_missing,
+        )
 
 
 def _fake_authenticate(self, path: str, raw_key: str):
@@ -430,12 +490,23 @@ def test_stim_select_outcomes_summary_returns_metrics(client):
     assert outcomes["outperform_base_count"] == 2
     assert outcomes["outperform_base_rate"] == pytest.approx(0.5)
     assert outcomes["base_period_mean_13wk"] == 2.19
-    assert body["provenance"]["cache"]["served_from_cache"] is True
-    assert body["provenance"]["cache"]["summary_key"] == build_default_summary_key(
+    assert body["outcomes_by_horizon"]["4w"]["realized_return_field"] == "fpr_chg4"
+    assert body["outcomes_by_horizon"]["4w"]["average_fpr_chg"] == pytest.approx(0.75)
+    assert body["outcomes_by_horizon"]["4w"]["median_fpr_chg"] == pytest.approx(0.5)
+    assert body["outcomes_by_horizon"]["4w"]["positive_return_count"] == 2
+    assert body["outcomes_by_horizon"]["13w"]["realized_return_field"] == "fpr_chg13"
+    assert body["outcomes_by_horizon"]["13w"]["average_fpr_chg"] == pytest.approx(4.0475)
+    assert body["outcomes_by_horizon"]["40w"]["realized_return_field"] == "fpr_chg40"
+    assert body["outcomes_by_horizon"]["40w"]["average_fpr_chg"] == pytest.approx(12.8625)
+    assert body["outcomes_by_horizon"]["40w"]["median_fpr_chg"] == pytest.approx(13.225)
+    assert body["outcomes_by_horizon"]["40w"]["outperform_base_count"] == 2
+    assert body["provenance"]["summary_table"]["served_from_summary_table"] is True
+    assert body["provenance"]["summary_table"]["table"] == "stweekly.stim_select_outcome_summary"
+    assert body["provenance"]["summary_table"]["summary_key"] == build_default_summary_key(
         exchange=None,
         limit_rank=None,
     )
-    assert body["provenance"]["cache"]["source_latest_mature_weekdate"] == "2024-01-19"
+    assert body["provenance"]["summary_table"]["source_latest_mature_weekdate"] == "2024-01-19"
 
 
 def test_stim_select_outcomes_summary_unbounded_binds_default_window(client, outcome_engine):
@@ -459,15 +530,33 @@ def test_stim_select_outcomes_summary_unbounded_binds_default_window(client, out
     assert not any("base_4wk" in params for _sql, params in outcome_engine.executed)
 
 
-def test_stim_select_outcomes_summary_cache_miss_returns_503(client, outcome_engine):
-    outcome_engine.cache_rows = []
+def test_stim_select_outcomes_summary_missing_summary_row_returns_503(client, outcome_engine):
+    outcome_engine.summary_rows = []
 
     response = client.get("/v1/selections/stim-select/outcomes/summary?limit_rank=10")
 
     assert response.status_code == 503
     detail = response.json()["detail"]
-    assert detail["error"] == "outcome_summary_cache_not_populated"
-    assert detail["refresh_command"] == "python -m maintenance.refresh_stim_select_outcome_summary_cache"
+    assert detail == {
+        "error": "outcome_summary_not_available",
+        "message": "Historical summary table has not been populated.",
+        "refresh_required": True,
+    }
+    assert any("summary_key" in params for _sql, params in outcome_engine.executed)
+    assert not any("base_4wk" in params for _sql, params in outcome_engine.executed)
+
+
+def test_stim_select_outcomes_summary_missing_table_returns_503(client, outcome_engine):
+    outcome_engine.summary_table_missing = True
+
+    response = client.get("/v1/selections/stim-select/outcomes/summary?limit_rank=10")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == {
+        "error": "outcome_summary_not_available",
+        "message": "Historical summary table has not been created.",
+        "refresh_required": True,
+    }
     assert any("summary_key" in params for _sql, params in outcome_engine.executed)
     assert not any("base_4wk" in params for _sql, params in outcome_engine.executed)
 
@@ -508,6 +597,29 @@ def test_stim_select_outcomes_summary_sql_uses_stweekly_market_schema(client, ou
     assert "stdata.st_data" not in executed_sql
     assert "FROM stweekly.st_data a" in executed_sql
     assert "JOIN stweekly.st_returnmeans b" in executed_sql
+
+
+def test_stim_select_outcome_summary_generation_uses_stweekly_sources(monkeypatch):
+    monkeypatch.setattr(outcome_summary_service, "text", lambda sql: sql)
+    executed: list[tuple[str, dict[str, Any]]] = []
+    conn = _Connection(list(_OUTCOME_ROWS), [], executed)
+
+    record = outcome_summary_service.compute_summary_record(
+        conn,
+        exchange=None,
+        limit_rank=10,
+        generated_at=datetime(2024, 1, 20, 12, 0, 0),
+    )
+
+    executed_sql = "\n".join(sql for sql, _params in executed)
+    assert "FROM stweekly.st_data a" in executed_sql
+    assert "JOIN stweekly.st_returnmeans b" in executed_sql
+    assert "stdata.st_data" not in executed_sql
+    assert "ROW_NUMBER() OVER" in executed_sql
+    assert record["summary_key"] == build_default_summary_key(exchange=None, limit_rank=10)
+    assert record["average_fpr_chg4"] == pytest.approx(Decimal("0.75"))
+    assert record["average_fpr_chg13"] == pytest.approx(Decimal("4.0475"))
+    assert record["average_fpr_chg40"] == pytest.approx(Decimal("12.8625"))
 
 
 def test_stim_select_outcomes_summary_filters_start_date(client):
@@ -595,7 +707,9 @@ def test_stim_select_outcomes_summary_limit_rank_is_per_week(client, outcome_eng
     assert body["outcomes"]["average_fpr_chg13"] == pytest.approx((5 + 10 + 2.19) / 3)
     assert any("summary_key" in params for _sql, params in outcome_engine.executed)
     assert not any("base_4wk" in params for _sql, params in outcome_engine.executed)
-    assert body["provenance"]["cache"]["summary_key"] == build_default_summary_key(
+    assert body["outcomes_by_horizon"]["4w"]["count"] == 3
+    assert body["outcomes_by_horizon"]["40w"]["positive_return_count"] == 3
+    assert body["provenance"]["summary_table"]["summary_key"] == build_default_summary_key(
         exchange=None,
         limit_rank=1,
     )
@@ -713,6 +827,9 @@ def test_stim_select_outcomes_summary_openapi_documents_filters_and_boundary(cli
     operation = schema["paths"]["/selections/stim-select/outcomes/summary"]["get"]
     description = operation["description"]
     assert "fpr_chg13" in description
+    assert "fpr_chg4" in description
+    assert "fpr_chg40" in description
+    assert "stweekly.stim_select_outcome_summary" in description
     assert "Public aggregate historical outcome summary" in description
     assert "Does not expose current selections" in description
 
@@ -726,3 +843,4 @@ def test_stim_select_outcomes_summary_openapi_documents_filters_and_boundary(cli
     assert _schema_has_date_format(parameters["end_date"]["schema"])
     assert _schema_has_key_value(parameters["limit_rank"]["schema"], "minimum", 1)
     assert _schema_has_property(schema, "default_window_applied")
+    assert _schema_has_property(schema, "outcomes_by_horizon")

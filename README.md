@@ -199,26 +199,34 @@ GET /v1/selections/stim-select/outcomes/summary
 ```
 
 Public/free aggregate historical outcome evidence for observations meeting
-Stock Trends Inference Model Select criteria. The summary uses mature realized
-13-week forward returns from `st_data.fpr_chg13` and returns counts, date range,
-average/median return, positive-return rate, and 13-week base-period
-outperformance rate. It does not expose current selections, current matching
-symbols, or individual historical symbols.
+Stock Trends Inference Model Select criteria. The legacy `outcomes` block uses
+mature realized 13-week forward returns from `st_data.fpr_chg13` and remains
+backward-compatible. Default no-date responses also expose `outcomes_by_horizon`
+for realized 4-week, 13-week, and 40-week fields: `fpr_chg4`, `fpr_chg13`, and
+`fpr_chg40`. It does not expose current selections, current matching symbols, or
+individual historical symbols.
 
 When both `start_date` and `end_date` are omitted, the endpoint applies a
 trailing 10-year window ending at the latest mature outcome date and returns
 `filters.default_window_applied: true` with the applied dates. This default
-summary is served from the precomputed `stim_select_outcome_summary_cache`
-because the underlying historical outcome data changes weekly. Refresh it after
-weekly data updates:
+summary is served from the persistent historical summary table
+`stweekly.stim_select_outcome_summary`; the API does not create or populate this
+table during request handling. The response provenance includes `generated_at`
+and `source_latest_mature_weekdate` so clients can judge freshness.
+
+Supported default summary combinations are the all-exchange summary with no
+rank cutoff and the all-exchange summary with `limit_rank=10`; additional
+exchange or rank combinations can be refreshed on demand. Refresh can run
+manually, monthly, weekly, or after major data updates:
 
 ```text
 python -m maintenance.refresh_stim_select_outcome_summary_cache
 ```
 
-Explicit `start_date` or `end_date` requests may still be computed live. This
-endpoint is historical signal-rule evidence, not current live ST-IM Select
-membership.
+The SQL definition is in `docs/operations/stim_select_outcome_summary_table.sql`.
+Explicit `start_date` or `end_date` requests may still be computed live and
+preserve the existing 13-week response semantics. This endpoint is historical
+signal-rule evidence, not current live ST-IM Select membership.
 
 ### Cognition Metadata
 

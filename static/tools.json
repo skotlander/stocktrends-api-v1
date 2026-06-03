@@ -736,7 +736,7 @@
       "name": "stim_select_outcomes_summary",
       "analytical_role": "probabilistic_signal_outcome_evidence",
       "title": "ST-IM Select Outcomes Summary",
-      "description": "Public aggregate historical outcome summary for observations meeting Stock Trends Inference Model Select criteria. Uses mature realized 13-week forward returns from fpr_chg13. When start_date and end_date are omitted, serves a precomputed trailing 10-year default window ending at the latest mature outcome date and returns filters.default_window_applied=true. Refresh the cache after weekly data updates. Does not expose current selections or individual symbols.",
+      "description": "Public aggregate historical outcome summary for observations meeting Stock Trends Inference Model Select criteria. The legacy outcomes block uses mature realized 13-week forward returns from fpr_chg13. When start_date and end_date are omitted, reads the persistent stweekly.stim_select_outcome_summary table, returns filters.default_window_applied=true, and exposes generated_at plus source_latest_mature_weekdate provenance. Default no-date responses also include fpr_chg4, fpr_chg13, and fpr_chg40 metrics. Does not expose current selections or individual symbols.",
       "method": "GET",
       "path": "/selections/stim-select/outcomes/summary",
       "auth_required": false,
@@ -756,7 +756,7 @@
           "type": "string",
           "format": "date",
           "required": false,
-          "description": "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date filters are omitted, a cached trailing 10-year default window is applied."
+          "description": "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date filters are omitted, the persistent summary table's trailing 10-year default window is applied."
         },
         {
           "name": "end_date",
@@ -766,7 +766,7 @@
           "type": "string",
           "format": "date",
           "required": false,
-          "description": "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date filters are omitted, the cached window ends at the latest mature outcome date."
+          "description": "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date filters are omitted, the persistent summary table row defines the latest mature outcome date."
         },
         {
           "name": "exchange",
@@ -798,9 +798,13 @@
       "interpretation_guidance": {
         "outcome_measurement": {
           "realized_return_field": "fpr_chg13",
+          "realized_return_fields": ["fpr_chg4", "fpr_chg13", "fpr_chg40"],
           "horizon": "13 weeks",
+          "horizons": ["4 weeks", "13 weeks", "40 weeks"],
           "mature_outcomes_only": true,
-          "base_period_mean_13wk": 2.19
+          "base_period_mean_4wk": 0.0,
+          "base_period_mean_13wk": 2.19,
+          "base_period_mean_40wk": 6.45
         },
         "business_boundary": {
           "aggregate_only": true,
@@ -808,11 +812,17 @@
           "current_live_selections_excluded": true,
           "individual_symbols_excluded": true
         },
-        "cache_behavior": {
-          "default_no_date_window_cached": true,
-          "cache_table": "stim_select_outcome_summary_cache",
+        "summary_table_behavior": {
+          "default_no_date_window_reads_summary_table": true,
+          "summary_table": "stweekly.stim_select_outcome_summary",
           "refresh_command": "python -m maintenance.refresh_stim_select_outcome_summary_cache",
-          "refresh_cadence": "after weekly data updates",
+          "refresh_cadence": "manual, monthly, weekly, on-demand, or after major data updates",
+          "supported_default_rows": [
+            {"exchange": null, "limit_rank": null},
+            {"exchange": null, "limit_rank": 10}
+          ],
+          "generated_at": "Timestamp when the summary row was produced.",
+          "source_latest_mature_weekdate": "Latest mature historical signal weekdate included by the source query.",
           "explicit_date_windows_may_compute_live": true,
           "historical_evidence_not_current_live_selections": true
         }

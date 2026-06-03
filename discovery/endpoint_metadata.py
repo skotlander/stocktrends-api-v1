@@ -226,15 +226,25 @@ STIM_SELECT_SIGNAL_OUTCOME_GUIDANCE = {
     },
     "outcome_measurement": {
         "realized_return_field": "fpr_chg13",
+        "realized_return_fields": ["fpr_chg4", "fpr_chg13", "fpr_chg40"],
         "horizon": "13 weeks",
+        "horizons": ["4 weeks", "13 weeks", "40 weeks"],
         "mature_outcomes_only": True,
+        "base_period_mean_4wk": 0.0,
         "base_period_mean_13wk": 2.19,
+        "base_period_mean_40wk": 6.45,
     },
     "business_boundary": {
         "aggregate_only": True,
         "published_report_limited": False,
         "current_live_selections_excluded": True,
         "individual_symbols_excluded": True,
+    },
+    "summary_table_behavior": {
+        "default_no_date_window_reads_summary_table": True,
+        "summary_table": "stweekly.stim_select_outcome_summary",
+        "refresh_command": "python -m maintenance.refresh_stim_select_outcome_summary_cache",
+        "explicit_date_windows_may_compute_live": True,
     },
     "base_period_context_endpoint": "/v1/meta/stim",
 }
@@ -774,13 +784,14 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
         requires_payment=False,
         resource_description=(
             "Public aggregate historical outcome summary for observations meeting "
-            "Stock Trends Inference Model Select criteria. The default no-date "
-            "summary is served from a precomputed weekly-refreshed cache."
+            "Stock Trends Inference Model Select criteria. Default no-date "
+            "requests read the persistent stweekly.stim_select_outcome_summary table."
         ),
         bazaar_output_description=(
-            "Returns aggregate mature 13-week realized outcome metrics for ST-IM Select "
-            "signal-rule observations using fpr_chg13. No current selections or individual symbols are returned. "
-            "When both date filters are omitted, results come from the precomputed outcome summary cache."
+            "Returns aggregate mature realized outcome metrics for ST-IM Select "
+            "signal-rule observations. The legacy outcomes block uses fpr_chg13; "
+            "default no-date responses also include fpr_chg4, fpr_chg13, and fpr_chg40 "
+            "metrics from the persistent summary table. No current selections or individual symbols are returned."
         ),
         purpose="Summarize mature historical outcomes for the ST-IM Select signal-selection rule.",
         investment_agent_value=(
@@ -796,7 +807,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
                 "example": "2020-01-03",
                 "description": (
                     "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date "
-                    "filters are omitted, a cached trailing 10-year default window is applied."
+                    "filters are omitted, the persistent summary table's trailing 10-year default window is applied."
                 ),
             },
             "end_date": {
@@ -806,7 +817,7 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
                 "example": "2024-12-27",
                 "description": (
                     "Inclusive signal weekdate filter in YYYY-MM-DD format. If both date "
-                    "filters are omitted, the cached window ends at the latest mature outcome date."
+                    "filters are omitted, the persistent summary table row defines the latest mature outcome date."
                 ),
             },
             "exchange": {
@@ -850,10 +861,16 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             "outcomes.outperform_base_count",
             "outcomes.outperform_base_rate",
             "outcomes.base_period_mean_13wk",
+            "outcomes_by_horizon.4w.realized_return_field",
+            "outcomes_by_horizon.4w.average_fpr_chg",
+            "outcomes_by_horizon.13w.realized_return_field",
+            "outcomes_by_horizon.13w.average_fpr_chg",
+            "outcomes_by_horizon.40w.realized_return_field",
+            "outcomes_by_horizon.40w.average_fpr_chg",
             "provenance.uses_mature_outcomes_only",
-            "provenance.cache.served_from_cache",
-            "provenance.cache.generated_at",
-            "provenance.cache.source_latest_mature_weekdate",
+            "provenance.summary_table.served_from_summary_table",
+            "provenance.summary_table.generated_at",
+            "provenance.summary_table.source_latest_mature_weekdate",
             "provenance.published_report_limited",
             "provenance.current_live_selections_excluded",
             "provenance.current_matching_symbols_excluded",
@@ -885,10 +902,31 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
                 "outperform_base_rate": 0.52,
                 "base_period_mean_13wk": 2.19,
             },
+            "outcomes_by_horizon": {
+                "4w": {
+                    "horizon": "4w",
+                    "realized_return_field": "fpr_chg4",
+                    "average_fpr_chg": 1.23,
+                    "base_period_mean": 0.0,
+                },
+                "13w": {
+                    "horizon": "13w",
+                    "realized_return_field": "fpr_chg13",
+                    "average_fpr_chg": 4.56,
+                    "base_period_mean": 2.19,
+                },
+                "40w": {
+                    "horizon": "40w",
+                    "realized_return_field": "fpr_chg40",
+                    "average_fpr_chg": 8.9,
+                    "base_period_mean": 6.45,
+                },
+            },
             "provenance": {
                 "uses_mature_outcomes_only": True,
-                "cache": {
-                    "served_from_cache": True,
+                "summary_table": {
+                    "served_from_summary_table": True,
+                    "table": "stweekly.stim_select_outcome_summary",
                     "generated_at": "YYYY-MM-DDTHH:MM:SS",
                     "source_latest_mature_weekdate": "YYYY-MM-DD",
                 },
@@ -898,14 +936,16 @@ _ENDPOINT_METADATA_BY_PATH: dict[str, dict[str, Any]] = {
             },
         },
         output_summary=(
-            "Aggregate historical count, date range, average/median fpr_chg13, positive-return "
-            "rate, and 13-week base-period outperformance rate for ST-IM Select signal observations."
+            "Aggregate historical count, date range, realized return averages/medians, positive-return "
+            "rates, and base-period outperformance rates for ST-IM Select signal observations."
         ),
         analytical_role=ROLE_PROBABILISTIC_SIGNAL_OUTCOME_EVIDENCE,
         notes=[
             "Uses mature observations only: st_data.fpr_chg13 IS NOT NULL.",
-            "If start_date and end_date are both omitted, serves a precomputed trailing 10-year default window ending at the latest mature outcome date.",
-            "Refresh the stim_select_outcome_summary_cache after weekly data updates with python -m maintenance.refresh_stim_select_outcome_summary_cache.",
+            "If start_date and end_date are both omitted, reads stweekly.stim_select_outcome_summary and never runs the expensive live historical aggregate.",
+            "Default no-date responses expose generated_at and source_latest_mature_weekdate from the persistent summary table.",
+            "Supported default rows should include exchange=NULL with limit_rank=NULL and exchange=NULL with limit_rank=10; additional rows can be refreshed on demand.",
+            "Refresh stweekly.stim_select_outcome_summary manually, monthly, weekly, or after major data updates with python -m maintenance.refresh_stim_select_outcome_summary_cache.",
             "Explicit date-window requests may still compute the historical aggregate live.",
             "This is signal-rule evidence, not a published-report-membership endpoint.",
             "No current selections, current matching stocks, or individual symbols are returned.",

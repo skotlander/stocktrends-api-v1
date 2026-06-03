@@ -198,10 +198,13 @@ AND stweekly.st_data.exchange = stweekly.st_returnmeans.exchange
 AND stweekly.st_data.symbol = stweekly.st_returnmeans.symbol
 ```
 
-It uses `stweekly.st_data.fpr_chg13` as the realized 13-week forward return. It
-does not reconstruct forward returns from future price joins. It is not limited
-to published reports and does not return current selections, current matching
-symbols, current candidates, or individual historical symbols.
+The legacy `outcomes` response uses `stweekly.st_data.fpr_chg13` as the realized
+13-week forward return. Default no-date responses also expose multi-horizon
+historical evidence for `stweekly.st_data.fpr_chg4`, `fpr_chg13`, and
+`fpr_chg40`. The endpoint does not reconstruct forward returns from future price
+joins. It is not limited to published reports and does not return current
+selections, current matching symbols, current candidates, or individual
+historical symbols.
 
 When `start_date` and `end_date` are both omitted, the endpoint applies a
 trailing 10-year window ending at the latest mature outcome date and returns
@@ -209,13 +212,35 @@ trailing 10-year window ending at the latest mature outcome date and returns
 supplied, the endpoint preserves the caller's date range and returns
 `filters.default_window_applied: false`.
 
-The default no-date summary is served from the precomputed
-`stim_select_outcome_summary_cache` and should be refreshed after weekly data
+The default no-date summary is served from the persistent historical summary
+table `stweekly.stim_select_outcome_summary`. The API reads this table only; it
+does not create, populate, or refresh the table during request handling. Missing
+table or missing summary rows return `503` with
+`error: outcome_summary_not_available` and `refresh_required: true`.
+
+Refresh may run manually, monthly, weekly, on demand, or after major data
 updates with:
 
 ```text
 python -m maintenance.refresh_stim_select_outcome_summary_cache
 ```
+
+The table creation SQL is documented in:
+
+```text
+docs/operations/stim_select_outcome_summary_table.sql
+```
+
+Supported default rows should include at least:
+
+* `exchange = NULL`, `limit_rank = NULL`
+* `exchange = NULL`, `limit_rank = 10`
+
+Additional exchange or `limit_rank` rows can be generated as needed. Default
+responses expose `generated_at` and `source_latest_mature_weekdate` in
+provenance. `generated_at` is when the summary row was produced.
+`source_latest_mature_weekdate` is the latest historical signal weekdate
+included by the mature-outcome source query.
 
 Explicit date-window requests may still execute the live historical aggregate.
 The endpoint is historical evidence for the ST-IM Select signal-selection rule,

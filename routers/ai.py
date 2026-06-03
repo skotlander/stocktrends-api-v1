@@ -1266,7 +1266,11 @@ def ai_context():
             "stim_select_outcomes": {
                 "endpoints": ["/v1/selections/stim-select/outcomes/summary"],
                 "use_when": "public aggregate evidence for historical ST-IM Select signal-rule outcomes",
-                "semantics": "mature realized 13-week outcomes from fpr_chg13 for observations meeting ST-IM Select criteria",
+                "semantics": (
+                    "historical realized outcome evidence for observations meeting ST-IM Select criteria; "
+                    "legacy outcomes use fpr_chg13, while default no-date responses read "
+                    "stweekly.stim_select_outcome_summary and expose fpr_chg4, fpr_chg13, and fpr_chg40 metrics"
+                ),
                 "business_boundary": "aggregate only; no current selections, current matching symbols, or individual symbols",
                 "interpret_with": ["/v1/meta/inference", "/v1/meta/stim"],
             },
