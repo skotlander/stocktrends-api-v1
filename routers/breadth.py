@@ -310,7 +310,7 @@ def breadth_sector_latest(
     cs_only: bool = Query(default=True, description="Common Stocks only (recommended for breadth)."),
     include_unknown: bool = Query(default=False, description="Include rows where industry_id mapping is missing."),
     min_price: float | None = Query(default=None, description="Optional min price filter."),
-    min_volume: int | None = Query(default=None, description="Optional min weekly volume filter (legacy: volume * 100)."),
+    min_volume: int | None = Query(default=None, description="Optional min weekly volume filter in actual shares traded (e.g., 100000 = 100,000 shares)."),
     vol_scale: int = Query(default=100, description="Legacy volume scaling multiplier used in historical rules."),
     limit: int = Query(default=5000, ge=1, le=50000, description="Safety limit on number of groups returned."),
 ):

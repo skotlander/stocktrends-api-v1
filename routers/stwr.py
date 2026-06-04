@@ -10,6 +10,7 @@ from sqlalchemy import text
 
 from db import get_engine
 from routers.signals import VALID_EXCHANGES
+from utils.volume import volume_to_actual_shares
 
 router = APIRouter(prefix="/stwr", tags=["stwr"])
 
@@ -903,6 +904,7 @@ def stwr_reports_latest(
     data = [dict(r) for r in rows]
     for d in data:
         d["symbol_exchange"] = f'{d["symbol"]}-{d["exchange"]}'
+        d["volume"] = volume_to_actual_shares(d.get("volume"))
 
     return {
         "request_id": request.state.request_id,
@@ -999,6 +1001,7 @@ def stwr_reports_history(
     flat = [dict(r) for r in rows]
     for d in flat:
         d["symbol_exchange"] = f'{d["symbol"]}-{d["exchange"]}'
+        d["volume"] = volume_to_actual_shares(d.get("volume"))
 
     if not group_by_week:
         return {
