@@ -1,0 +1,126 @@
+{
+  "artifact_id": "editorial_preview:ALL:2026-04-11:editorial:d856afd65053d4b5",
+  "artifact_type": "editorial_preview",
+  "content_hash": "sha256:57f3902e854ee3196217470ce8041f965dc8976b81ee5e794a82741dc2008180",
+  "exchange": "ALL",
+  "generated_at": "2026-04-12T06:00:00+00:00",
+  "lineage": {
+    "artifact_hash": "sha256:d856afd65053d4b5530d825b5980a08419790dea9a1a523b43dd3392dd7564eb",
+    "schema_refs": [
+      "public:1"
+    ],
+    "schema_version": "1",
+    "source_artifact_refs": [
+      "editorial_preview_source"
+    ],
+    "source_endpoint_refs": [],
+    "source_signal_refs": [
+      "editorial_preview"
+    ]
+  },
+  "payload": {
+    "audit": {
+      "artifact_hash": "sha256:d856afd65053d4b5530d825b5980a08419790dea9a1a523b43dd3392dd7564eb",
+      "exchange": "ALL",
+      "generated_at": "2026-04-12T06:00:00+00:00",
+      "lineage": {
+        "artifact_hash": "sha256:d856afd65053d4b5530d825b5980a08419790dea9a1a523b43dd3392dd7564eb",
+        "schema_refs": [
+          "public:1"
+        ],
+        "schema_version": "1",
+        "source_artifact_refs": [
+          "editorial_preview_source"
+        ],
+        "source_endpoint_refs": [],
+        "source_signal_refs": [
+          "editorial_preview"
+        ]
+      },
+      "provider": {
+        "description": "Stock Trends Inference Model (ST-IM): a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+        "forecast_horizons": [
+          "4_week",
+          "13_week",
+          "40_week"
+        ],
+        "provider_id": "st_im",
+        "provider_name": "Stock Trends Inference Model (ST-IM)",
+        "provider_type": "stock_trends_inference_model",
+        "schema_version": "1",
+        "supports_causal_attribution": false,
+        "supports_counterfactuals": false,
+        "supports_probability_distributions": true
+      },
+      "publication": {
+        "access_tier": "public_schema",
+        "publication_status": "publish_ready",
+        "schema_version": "1",
+        "summary": "Publication state is public-safe and transport-independent."
+      },
+      "quality_flags": [],
+      "revision_accepted": false,
+      "revision_route": "",
+      "run_id": "editorial",
+      "schema_version": "1",
+      "validation": {
+        "quality_flags": [],
+        "schema_version": "1",
+        "summary": "Validation state is public-safe and fail-closed.",
+        "validation_status": "validated",
+        "warnings": []
+      },
+      "weekdate": "2026-04-11"
+    },
+    "excerpt": "The latest Stock Trends evidence shows selective participation in confirmed sectors.",
+    "exchange": "ALL",
+    "generated_at": "2026-04-12T06:00:00+00:00",
+    "lineage": {
+      "artifact_hash": "sha256:d856afd65053d4b5530d825b5980a08419790dea9a1a523b43dd3392dd7564eb",
+      "schema_refs": [
+        "public:1"
+      ],
+      "schema_version": "1",
+      "source_artifact_refs": [
+        "editorial_preview_source"
+      ],
+      "source_endpoint_refs": [],
+      "source_signal_refs": [
+        "editorial_preview"
+      ]
+    },
+    "primary_theme": "Selective Strength",
+    "product_type": "editorial_preview",
+    "publication": {
+      "access_tier": "public_schema",
+      "publication_status": "publish_ready",
+      "schema_version": "1",
+      "summary": "Publication state is public-safe and transport-independent."
+    },
+    "schema_version": "1",
+    "subheading": "Breadth improves while leadership remains selective",
+    "title": "Selective Strength Defines the Market",
+    "weekdate": "2026-04-11"
+  },
+  "provider": {
+    "description": "Stock Trends Inference Model (ST-IM): a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+    "forecast_horizons": [
+      "4_week",
+      "13_week",
+      "40_week"
+    ],
+    "provider_id": "st_im",
+    "provider_name": "Stock Trends Inference Model (ST-IM)",
+    "provider_type": "stock_trends_inference_model",
+    "schema_version": "1",
+    "supports_causal_attribution": false,
+    "supports_counterfactuals": false,
+    "supports_probability_distributions": true
+  },
+  "publication_status": "publish_ready",
+  "published_at": "2026-04-12T06:00:00+00:00",
+  "revision": 1,
+  "schema_version": "1",
+  "validation_status": "validated",
+  "weekdate": "2026-04-11"
+}

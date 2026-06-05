@@ -1,0 +1,150 @@
+{
+  "$id": "PublicArtifactEnvelope.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PublicArtifactEnvelope.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_id",
+    "artifact_type",
+    "publication_status",
+    "validation_status",
+    "generated_at",
+    "published_at",
+    "weekdate",
+    "exchange",
+    "provider",
+    "lineage",
+    "payload",
+    "revision",
+    "content_hash"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "artifact_type": {
+            "const": "discovery_metadata"
+          }
+        },
+        "required": [
+          "artifact_type"
+        ]
+      },
+      "then": {
+        "properties": {
+          "published_at": {
+            "oneOf": [
+              {
+                "const": "static"
+              },
+              {
+                "type": "string",
+                "format": "date-time"
+              }
+            ]
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "not": {
+              "const": "static"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1"
+    },
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact_type": {
+      "type": "string",
+      "enum": [
+        "market_guidance",
+        "market_research_report",
+        "editorial_preview",
+        "discovery_metadata"
+      ]
+    },
+    "publication_status": {
+      "type": "string",
+      "enum": [
+        "publish_ready",
+        "product_grade",
+        "agent_actionable",
+        "published"
+      ]
+    },
+    "validation_status": {
+      "type": "string",
+      "enum": [
+        "validated",
+        "validated_with_warnings"
+      ]
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "published_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "weekdate": {
+      "type": "string"
+    },
+    "exchange": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "object"
+    },
+    "lineage": {
+      "type": "object"
+    },
+    "payload": {},
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "content_hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "source_endpoints": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "input_snapshot_id": {
+      "type": "string"
+    },
+    "validation_summary": {
+      "type": "object"
+    },
+    "guardrail_summary": {
+      "type": "object"
+    },
+    "warnings": {
+      "type": "array"
+    },
+    "expires_at": {
+      "type": "string"
+    },
+    "access_tier": {
+      "type": "string"
+    }
+  }
+}

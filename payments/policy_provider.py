@@ -97,6 +97,12 @@ _PUBLIC_STOCKTRENDS_STRATEGY_METADATA_DETAIL_PREFIX = (
     f"{_PUBLIC_STOCKTRENDS_STRATEGY_METADATA_LIST_PATH}/"
 )
 _PUBLIC_STIM_SELECT_OUTCOME_SUMMARY_PATH = "/v1/selections/stim-select/outcomes/summary"
+_PUBLIC_INTELLIGENCE_DISCOVERY_PATH = "/v1/intelligence/discovery"
+_PUBLIC_INTELLIGENCE_GUIDANCE_LATEST_PATH = "/v1/intelligence/guidance/latest"
+_PUBLIC_INTELLIGENCE_GUIDANCE_DETAIL_PREFIX = "/v1/intelligence/guidance/"
+_PUBLIC_INTELLIGENCE_RESEARCH_LATEST_PATH = "/v1/intelligence/research/latest"
+_PUBLIC_INTELLIGENCE_RESEARCH_DETAIL_PREFIX = "/v1/intelligence/research/"
+_PUBLIC_INTELLIGENCE_EDITORIAL_PREVIEW_PATH = "/v1/intelligence/editorial/latest/preview"
 
 
 def is_public_stocktrends_portfolio_metadata_path(path: str) -> bool:
@@ -180,6 +186,29 @@ def is_public_stocktrends_strategy_path(path: str) -> bool:
 def is_public_stim_select_outcome_summary_path(path: str) -> bool:
     path = path.split("?", 1)[0]
     return path == _PUBLIC_STIM_SELECT_OUTCOME_SUMMARY_PATH
+
+
+def _is_single_child_path(path: str, prefix: str) -> bool:
+    if not path.startswith(prefix):
+        return False
+    suffix = path[len(prefix):]
+    return bool(suffix) and "/" not in suffix
+
+
+def is_public_intelligence_path(path: str) -> bool:
+    path = path.split("?", 1)[0]
+    if path in {
+        _PUBLIC_INTELLIGENCE_DISCOVERY_PATH,
+        _PUBLIC_INTELLIGENCE_GUIDANCE_LATEST_PATH,
+        _PUBLIC_INTELLIGENCE_RESEARCH_LATEST_PATH,
+        _PUBLIC_INTELLIGENCE_EDITORIAL_PREVIEW_PATH,
+    }:
+        return True
+
+    return (
+        _is_single_child_path(path, _PUBLIC_INTELLIGENCE_GUIDANCE_DETAIL_PREFIX)
+        or _is_single_child_path(path, _PUBLIC_INTELLIGENCE_RESEARCH_DETAIL_PREFIX)
+    )
 
 
 def is_public_stocktrends_path(path: str) -> bool:
@@ -568,7 +597,7 @@ def _lookup_exact_endpoint_policy(
     if not method:
         return None
 
-    if is_public_stocktrends_path(path):
+    if is_public_stocktrends_path(path) or is_public_intelligence_path(path):
         return None
 
     normalized_method = method.strip().upper()
@@ -952,7 +981,7 @@ def get_accepted_payment_methods_for_path(
     config = get_runtime_payment_policy_config()
     normalized_method = (enforced_payment_method or "").strip().lower()
 
-    if is_public_stocktrends_path(path):
+    if is_public_stocktrends_path(path) or is_public_intelligence_path(path):
         return config.accepted_payment_methods_default
 
     endpoint_allowed_rails = get_allowed_payment_rails_for_path(path, method)

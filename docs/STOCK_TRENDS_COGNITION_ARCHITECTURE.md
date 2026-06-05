@@ -181,6 +181,20 @@ Discovery and schema surfaces should carry enough metadata for autonomous agents
 - MPP session metadata
 - future MCP tool manifests
 
+### Public Intelligence Artifact Bridge
+
+The `/v1/intelligence/*` API routes serve published Stock Trends intelligence
+artifacts as read-only `PublicArtifactEnvelope.v1` exports. The API side reads
+only the configured exported manifest and artifact envelopes, validates the
+schema and deterministic `content_hash`, and fails closed for invalid or
+unpublished content.
+
+This bridge is a distribution boundary, not a reasoning runtime. FastAPI must
+not call Agent graph nodes, Agent services, generation code, or private Agent
+filesystem internals to satisfy these requests. If API-layer canonical URLs or
+pricing metadata are added later, they must be added as API response metadata or
+payment/discovery metadata rather than by mutating the Agent-exported envelope.
+
 ### Payment Surfaces
 
 Payment rails are economic transport layers, not cognition layers. x402 and MPP metadata may expose compact reasoning previews, but pricing, payment verification, and metering must remain separate from inference semantics.

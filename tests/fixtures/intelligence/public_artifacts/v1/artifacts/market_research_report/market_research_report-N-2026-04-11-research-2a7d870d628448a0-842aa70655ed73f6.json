@@ -1,0 +1,251 @@
+{
+  "artifact_id": "market_research_report:N:2026-04-11:research:2a7d870d628448a0",
+  "artifact_type": "market_research_report",
+  "content_hash": "sha256:842aa70655ed73f6803ffad268b690a11c7f7d3f4ce0178ca08a96e040bdf115",
+  "exchange": "N",
+  "generated_at": "2026-04-12T06:00:00+00:00",
+  "lineage": {
+    "artifact_hash": "sha256:2a7d870d628448a05a7a7f0fae1fde1bd3ce2acb7e795f31fcd25f0543cabe8c",
+    "schema_refs": [
+      "public:1"
+    ],
+    "schema_version": "1",
+    "source_artifact_refs": [
+      "market_research_source"
+    ],
+    "source_endpoint_refs": [],
+    "source_signal_refs": [
+      "breadth",
+      "selection_trend",
+      "leadership",
+      "alignment",
+      "theme_to_action_bridge"
+    ]
+  },
+  "payload": {
+    "audit": {
+      "artifact_hash": "sha256:2a7d870d628448a05a7a7f0fae1fde1bd3ce2acb7e795f31fcd25f0543cabe8c",
+      "exchange": "N",
+      "generated_at": "2026-04-12T06:00:00+00:00",
+      "lineage": {
+        "artifact_hash": "sha256:2a7d870d628448a05a7a7f0fae1fde1bd3ce2acb7e795f31fcd25f0543cabe8c",
+        "schema_refs": [
+          "public:1"
+        ],
+        "schema_version": "1",
+        "source_artifact_refs": [
+          "market_research_source"
+        ],
+        "source_endpoint_refs": [],
+        "source_signal_refs": [
+          "breadth",
+          "selection_trend",
+          "leadership",
+          "alignment",
+          "theme_to_action_bridge"
+        ]
+      },
+      "provider": {
+        "description": "Stock Trends Inference Model (ST-IM): a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+        "forecast_horizons": [
+          "4_week",
+          "13_week",
+          "40_week"
+        ],
+        "provider_id": "st_im",
+        "provider_name": "Stock Trends Inference Model (ST-IM)",
+        "provider_type": "stock_trends_inference_model",
+        "schema_version": "1",
+        "supports_causal_attribution": false,
+        "supports_counterfactuals": false,
+        "supports_probability_distributions": true
+      },
+      "publication": {
+        "access_tier": "public_schema",
+        "publication_status": "publish_ready",
+        "schema_version": "1",
+        "summary": "Publication state is public-safe and transport-independent."
+      },
+      "quality_flags": [],
+      "revision_accepted": false,
+      "revision_route": "",
+      "run_id": "research",
+      "schema_version": "1",
+      "validation": {
+        "quality_flags": [],
+        "schema_version": "1",
+        "summary": "Validation state is public-safe and fail-closed.",
+        "validation_status": "validated",
+        "warnings": []
+      },
+      "weekdate": "2026-04-11"
+    },
+    "caution_flags": [],
+    "disclaimer": "This Stock Trends intelligence product is non-advisory market structure context. It is not investment advice and does not account for individual portfolio circumstances.",
+    "exchange": "N",
+    "framework_note": "Stock Trends public intelligence is derived from Stock Trends signal data and framed probabilistically. RSI means relative performance versus the benchmark with baseline 100. ST-IM means Stock Trends Inference Model: a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+    "generated_at": "2026-04-12T06:00:00+00:00",
+    "lineage": {
+      "artifact_hash": "sha256:2a7d870d628448a05a7a7f0fae1fde1bd3ce2acb7e795f31fcd25f0543cabe8c",
+      "schema_refs": [
+        "public:1"
+      ],
+      "schema_version": "1",
+      "source_artifact_refs": [
+        "market_research_source"
+      ],
+      "source_endpoint_refs": [],
+      "source_signal_refs": [
+        "breadth",
+        "selection_trend",
+        "leadership",
+        "alignment",
+        "theme_to_action_bridge"
+      ]
+    },
+    "market_posture": "selective_advance",
+    "primary_theme": "Hard Asset Leadership",
+    "product_type": "market_research_report",
+    "provider": {
+      "description": "Stock Trends Inference Model (ST-IM): a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+      "forecast_horizons": [
+        "4_week",
+        "13_week",
+        "40_week"
+      ],
+      "provider_id": "st_im",
+      "provider_name": "Stock Trends Inference Model (ST-IM)",
+      "provider_type": "stock_trends_inference_model",
+      "schema_version": "1",
+      "supports_causal_attribution": false,
+      "supports_counterfactuals": false,
+      "supports_probability_distributions": true
+    },
+    "publication": {
+      "access_tier": "public_schema",
+      "publication_status": "publish_ready",
+      "schema_version": "1",
+      "summary": "Publication state is public-safe and transport-independent."
+    },
+    "risk_stance": "constructive_with_selectivity",
+    "schema_version": "1",
+    "sections": [
+      {
+        "evidence_refs": [
+          "breadth",
+          "breadth_trend"
+        ],
+        "summary": "Breadth is bullish with 58.0% bullish and a improving breadth trend.",
+        "title": "Market Structure"
+      },
+      {
+        "evidence_refs": [
+          "selection_trend"
+        ],
+        "summary": "The ST-IM Select universe is expanding.",
+        "title": "Selection Trend"
+      },
+      {
+        "evidence_refs": [
+          "leadership"
+        ],
+        "summary": "RSI=100 leadership is moderate.",
+        "title": "Leadership Confirmation"
+      },
+      {
+        "evidence_refs": [
+          "alignment"
+        ],
+        "summary": "Confirmed sector evidence is concentrated in Energy, Finance",
+        "title": "Sector Confirmation"
+      },
+      {
+        "evidence_refs": [
+          "theme_to_action_bridge"
+        ],
+        "summary": "Confirmed sector evidence remains selective.",
+        "title": "Structural Implication"
+      }
+    ],
+    "structural_implication": "Confirmed sector evidence remains selective.",
+    "structured_findings": [
+      {
+        "evidence_refs": [
+          "breadth",
+          "breadth_trend"
+        ],
+        "summary": "Breadth is bullish with 58.0% bullish and a improving breadth trend.",
+        "title": "Market Structure"
+      },
+      {
+        "evidence_refs": [
+          "selection_trend"
+        ],
+        "summary": "The ST-IM Select universe is expanding.",
+        "title": "Selection Trend"
+      },
+      {
+        "evidence_refs": [
+          "leadership"
+        ],
+        "summary": "RSI=100 leadership is moderate.",
+        "title": "Leadership Confirmation"
+      },
+      {
+        "evidence_refs": [
+          "alignment"
+        ],
+        "summary": "Confirmed sector evidence is concentrated in Energy, Finance",
+        "title": "Sector Confirmation"
+      },
+      {
+        "evidence_refs": [
+          "theme_to_action_bridge"
+        ],
+        "summary": "Confirmed sector evidence remains selective.",
+        "title": "Structural Implication"
+      }
+    ],
+    "summary": "Confirmed sector evidence remains selective.",
+    "theme_to_action_bridge": {
+      "available": true,
+      "confirmed_sectors": [
+        "Energy",
+        "Finance"
+      ],
+      "market_posture": "selective_advance",
+      "risk_stance": "constructive_with_selectivity",
+      "structural_implication": "Confirmed sector evidence remains selective."
+    },
+    "title": "Hard Asset Leadership - Stock Trends Market Research",
+    "validation": {
+      "quality_flags": [],
+      "schema_version": "1",
+      "summary": "Validation state is public-safe and fail-closed.",
+      "validation_status": "validated",
+      "warnings": []
+    },
+    "weekdate": "2026-04-11"
+  },
+  "provider": {
+    "description": "Stock Trends Inference Model (ST-IM): a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+    "forecast_horizons": [
+      "4_week",
+      "13_week",
+      "40_week"
+    ],
+    "provider_id": "st_im",
+    "provider_name": "Stock Trends Inference Model (ST-IM)",
+    "provider_type": "stock_trends_inference_model",
+    "schema_version": "1",
+    "supports_causal_attribution": false,
+    "supports_counterfactuals": false,
+    "supports_probability_distributions": true
+  },
+  "publication_status": "publish_ready",
+  "published_at": "2026-04-12T06:00:00+00:00",
+  "revision": 1,
+  "schema_version": "1",
+  "validation_status": "validated",
+  "weekdate": "2026-04-11"
+}

@@ -41,6 +41,21 @@ Current public/free Stock Trends portfolio endpoints include:
 * `GET /v1/stocktrends/strategies/{strategy_id}`
 * `GET /v1/stocktrends/portfolios/{port_id}/strategy`
 * `GET /v1/selections/stim-select/outcomes/summary`
+* `GET /v1/intelligence/discovery`
+* `GET /v1/intelligence/guidance/latest`
+* `GET /v1/intelligence/guidance/{artifact_id}`
+* `GET /v1/intelligence/research/latest`
+* `GET /v1/intelligence/research/{artifact_id}`
+* `GET /v1/intelligence/editorial/latest/preview`
+
+The `/v1/intelligence/*` Public Intelligence Artifact Bridge routes are
+read-only artifact-serving routes. They consume only exported
+`PublicArtifactEnvelope.v1` files referenced by `manifest.json` under
+`ST_INTELLIGENCE_ARTIFACTS_DIR`; they do not call Agent graph nodes, Agent
+services, generation code, or raw Agent filesystem internals. PR 2 classifies
+these exact paths as public/free and non-metered to avoid partial pricing state.
+PR 3 will add the intelligence pricing and payment policy for guidance and
+research routes.
 
 Official Stock Trends portfolio returns history is sourced from
 `stp_returnslog`, the canonical portfolio performance history. Do not

@@ -1,0 +1,99 @@
+{
+  "artifact_id": "discovery_metadata:none:none:static:a5a1bead64e33d41",
+  "artifact_type": "discovery_metadata",
+  "content_hash": "sha256:f681141b7149dc22f68d21263a1ffb030c564764e294f1820f49158bb537b342",
+  "exchange": "",
+  "generated_at": "static",
+  "lineage": {
+    "schema_refs": [
+      "public:1"
+    ],
+    "schema_version": "1",
+    "source_artifact_refs": [
+      "discovery_metadata_source"
+    ],
+    "source_endpoint_refs": [],
+    "source_signal_refs": [
+      "discovery_metadata"
+    ]
+  },
+  "payload": {
+    "access_tiers": [
+      {
+        "description": "Public metadata and preview-safe product contracts.",
+        "tier": "public_schema"
+      },
+      {
+        "description": "Reserved for future metered Stock Trends intelligence products.",
+        "tier": "premium_intelligence_placeholder"
+      }
+    ],
+    "capability_tags": [
+      "market_guidance",
+      "market_research",
+      "editorial_preview",
+      "artifact_audit",
+      "provider_metadata",
+      "agentic_discovery"
+    ],
+    "disclaimer": "This Stock Trends intelligence product is non-advisory market structure context. It is not investment advice and does not account for individual portfolio circumstances.",
+    "framework_note": "Stock Trends public intelligence is derived from Stock Trends signal data and framed probabilistically. RSI means relative performance versus the benchmark with baseline 100. ST-IM means Stock Trends Inference Model: a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+    "schema_version": "1",
+    "schema_versions": {
+      "inference_contract": "1",
+      "public_contract": "1"
+    },
+    "service_name": "Stock Trends Cognition Runtime",
+    "supported_artifact_types": [
+      "discovery_metadata",
+      "editorial_preview",
+      "market_editorial",
+      "market_guidance",
+      "market_research_report"
+    ],
+    "supported_providers": [
+      {
+        "description": "Stock Trends Inference Model (ST-IM): a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+        "forecast_horizons": [
+          "4_week",
+          "13_week",
+          "40_week"
+        ],
+        "provider_id": "st_im",
+        "provider_name": "Stock Trends Inference Model (ST-IM)",
+        "provider_type": "stock_trends_inference_model",
+        "schema_version": "1",
+        "supports_causal_attribution": false,
+        "supports_counterfactuals": false,
+        "supports_probability_distributions": true
+      }
+    ],
+    "supported_report_types": [
+      "market_editorial",
+      "market_research_report",
+      "sector_report",
+      "instrument_report"
+    ]
+  },
+  "provider": {
+    "description": "Stock Trends Inference Model (ST-IM): a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+    "forecast_horizons": [
+      "4_week",
+      "13_week",
+      "40_week"
+    ],
+    "provider_id": "st_im",
+    "provider_name": "Stock Trends Inference Model (ST-IM)",
+    "provider_type": "stock_trends_inference_model",
+    "schema_version": "1",
+    "supports_causal_attribution": false,
+    "supports_counterfactuals": false,
+    "supports_probability_distributions": true
+  },
+  "publication_status": "published",
+  "published_at": "static",
+  "revision": 1,
+  "schema_version": "1",
+  "validation_status": "validated",
+  "weekdate": ""
+}
