@@ -229,6 +229,28 @@ Explicit `start_date` or `end_date` requests may still be computed live and
 preserve the existing 13-week response semantics. This endpoint is historical
 signal-rule evidence, not current live ST-IM Select membership.
 
+### Published Intelligence Artifacts
+
+```text
+GET /v1/intelligence/discovery
+GET /v1/intelligence/guidance/latest
+GET /v1/intelligence/guidance/{artifact_id}
+GET /v1/intelligence/research/latest
+GET /v1/intelligence/research/{artifact_id}
+GET /v1/intelligence/editorial/latest/preview
+```
+
+Read-only access to published Stock Trends Intelligence Agent artifact
+envelopes exported as `PublicArtifactEnvelope.v1` plus `manifest.json`. The API
+reads only exported public envelopes from `ST_INTELLIGENCE_ARTIFACTS_DIR`; it
+does not call Agent graph nodes, Agent services, generation code, or raw Agent
+filesystem internals. Invalid manifests return unavailable responses and
+invalid, unpublished, expired, or hash-mismatched artifacts fail closed.
+
+PR 2 classifies these bridge routes as public/free and non-metered so the
+read-only contract can ship without partial pricing rules. PR 3 will add the
+intelligence pricing and payment policy for guidance and research routes.
+
 ### Cognition Metadata
 
 ```text

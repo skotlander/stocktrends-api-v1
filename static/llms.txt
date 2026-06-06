@@ -139,6 +139,21 @@ https://developer.stocktrends.com/mpp
 * `GET /leadership/rotation/history`
   Historical leadership rotation
 
+### Published Intelligence Artifacts
+
+* `GET /intelligence/discovery`
+  Latest valid published discovery metadata envelope for available Stock Trends intelligence artifacts.
+* `GET /intelligence/guidance/latest`
+  Latest valid published market guidance envelope. PR 2 serves this bridge route as public/free; PR 3 will add intelligence pricing and payment policy.
+* `GET /intelligence/guidance/{artifact_id}`
+  Published market guidance envelope by manifest artifact id. Wrong artifact types return not found.
+* `GET /intelligence/research/latest`
+  Latest valid published market research report envelope. PR 2 serves this bridge route as public/free; PR 3 will add intelligence pricing and payment policy.
+* `GET /intelligence/research/{artifact_id}`
+  Published market research report envelope by manifest artifact id. Wrong artifact types return not found.
+* `GET /intelligence/editorial/latest/preview`
+  Latest valid published editorial preview envelope. Preview only; no generation occurs on request.
+
 ### AI Discovery
 
 * `GET /ai/tools`

@@ -6,6 +6,7 @@ from payments.policy_provider import (
     get_effective_endpoint_payment_policy,
     is_agent_pay_route,
     is_free_metered_path,
+    is_public_intelligence_path,
     is_public_stocktrends_path,
 )
 
@@ -63,6 +64,10 @@ NON_METERED_PATHS = {
     "/v1/meta/stwr",
     "/v1/leadership/definitions",
     "/v1/selections/stim-select/outcomes/summary",
+    "/v1/intelligence/discovery",
+    "/v1/intelligence/guidance/latest",
+    "/v1/intelligence/research/latest",
+    "/v1/intelligence/editorial/latest/preview",
     # MCP tools manifest: public discovery surface, no metering.
     "/v1/ai/tools",
     # Free proof-of-value endpoint: non-metered, no billing record.
@@ -235,7 +240,7 @@ def classify_request(
     - Non-/v1 probe traffic is never treated as paid API usage
     """
 
-    if path in NON_METERED_PATHS or is_public_stocktrends_path(path):
+    if path in NON_METERED_PATHS or is_public_stocktrends_path(path) or is_public_intelligence_path(path):
         return _free_decision()
 
     if _is_noise_path(path):

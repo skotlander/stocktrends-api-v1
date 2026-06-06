@@ -1,0 +1,187 @@
+{
+  "artifact_id": "market_guidance:N:2026-04-11:guidance:aff9aaeee1660a31",
+  "artifact_type": "market_guidance",
+  "content_hash": "sha256:d72268b0a7d15ff1966e0a179fb252fcb5da9c0d47decff7c42835e9ced12df0",
+  "exchange": "N",
+  "generated_at": "2026-04-12T06:00:00+00:00",
+  "lineage": {
+    "artifact_hash": "sha256:aff9aaeee1660a313be644343b24c97c6206ab0cd99a981d189b9c283b4fbbc3",
+    "schema_refs": [
+      "public:1"
+    ],
+    "schema_version": "1",
+    "source_artifact_refs": [
+      "market_guidance_source"
+    ],
+    "source_endpoint_refs": [],
+    "source_signal_refs": [
+      "market_posture",
+      "risk_stance",
+      "breadth_confirmation",
+      "leadership_confirmation",
+      "selection_trend",
+      "sector_confirmation"
+    ]
+  },
+  "payload": {
+    "audit": {
+      "artifact_hash": "sha256:aff9aaeee1660a313be644343b24c97c6206ab0cd99a981d189b9c283b4fbbc3",
+      "exchange": "N",
+      "generated_at": "2026-04-12T06:00:00+00:00",
+      "lineage": {
+        "artifact_hash": "sha256:aff9aaeee1660a313be644343b24c97c6206ab0cd99a981d189b9c283b4fbbc3",
+        "schema_refs": [
+          "public:1"
+        ],
+        "schema_version": "1",
+        "source_artifact_refs": [
+          "market_guidance_source"
+        ],
+        "source_endpoint_refs": [],
+        "source_signal_refs": [
+          "market_posture",
+          "risk_stance",
+          "breadth_confirmation",
+          "leadership_confirmation",
+          "selection_trend",
+          "sector_confirmation"
+        ]
+      },
+      "provider": {
+        "description": "Stock Trends Inference Model (ST-IM): a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+        "forecast_horizons": [
+          "4_week",
+          "13_week",
+          "40_week"
+        ],
+        "provider_id": "st_im",
+        "provider_name": "Stock Trends Inference Model (ST-IM)",
+        "provider_type": "stock_trends_inference_model",
+        "schema_version": "1",
+        "supports_causal_attribution": false,
+        "supports_counterfactuals": false,
+        "supports_probability_distributions": true
+      },
+      "publication": {
+        "access_tier": "public_schema",
+        "publication_status": "agent_actionable",
+        "schema_version": "1",
+        "summary": "Publication state is public-safe and transport-independent."
+      },
+      "quality_flags": [],
+      "revision_accepted": false,
+      "revision_route": "",
+      "run_id": "guidance",
+      "schema_version": "1",
+      "validation": {
+        "quality_flags": [],
+        "schema_version": "1",
+        "summary": "Validation state is public-safe and fail-closed.",
+        "validation_status": "validated",
+        "warnings": []
+      },
+      "weekdate": "2026-04-11"
+    },
+    "breadth_confirmation": "positive",
+    "caution_flags": [
+      {
+        "description": "",
+        "flag": "breadth_trend_declining",
+        "severity": ""
+      }
+    ],
+    "confidence_level": "moderate",
+    "confirmed_sectors": [
+      "Technology",
+      "Health Care"
+    ],
+    "disclaimer": "This Stock Trends intelligence product is non-advisory market structure context.",
+    "exchange": "N",
+    "framework_note": "Stock Trends intelligence is signal-derived and probabilistic.",
+    "generated_at": "2026-04-12T06:00:00+00:00",
+    "leadership_confirmation": "moderate",
+    "lineage": {
+      "artifact_hash": "sha256:aff9aaeee1660a313be644343b24c97c6206ab0cd99a981d189b9c283b4fbbc3",
+      "schema_refs": [
+        "public:1"
+      ],
+      "schema_version": "1",
+      "source_artifact_refs": [
+        "market_guidance_source"
+      ],
+      "source_endpoint_refs": [],
+      "source_signal_refs": [
+        "market_posture",
+        "risk_stance",
+        "breadth_confirmation",
+        "leadership_confirmation",
+        "selection_trend",
+        "sector_confirmation"
+      ]
+    },
+    "market_posture": "selective_advance",
+    "product_type": "market_guidance",
+    "provider": {
+      "description": "Stock Trends Inference Model (ST-IM): a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+      "forecast_horizons": [
+        "4_week",
+        "13_week",
+        "40_week"
+      ],
+      "provider_id": "st_im",
+      "provider_name": "Stock Trends Inference Model (ST-IM)",
+      "provider_type": "stock_trends_inference_model",
+      "schema_version": "1",
+      "supports_causal_attribution": false,
+      "supports_counterfactuals": false,
+      "supports_probability_distributions": true
+    },
+    "publication": {
+      "access_tier": "public_schema",
+      "publication_status": "agent_actionable",
+      "schema_version": "1",
+      "summary": "Publication state is public-safe and transport-independent."
+    },
+    "risk_stance": "constructive_with_selectivity",
+    "schema_version": "1",
+    "sector_confirmation": {
+      "four_signal": [
+        "Technology"
+      ],
+      "three_signal": [
+        "Health Care"
+      ],
+      "two_signal": []
+    },
+    "selection_trend": "expanding",
+    "validation": {
+      "quality_flags": [],
+      "schema_version": "1",
+      "summary": "Validation state is public-safe and fail-closed.",
+      "validation_status": "validated",
+      "warnings": []
+    },
+    "weekdate": "2026-04-11"
+  },
+  "provider": {
+    "description": "Stock Trends Inference Model (ST-IM): a probabilistic model producing forward return expectations and statistical distributions across 4-week, 13-week, and 40-week horizons.",
+    "forecast_horizons": [
+      "4_week",
+      "13_week",
+      "40_week"
+    ],
+    "provider_id": "st_im",
+    "provider_name": "Stock Trends Inference Model (ST-IM)",
+    "provider_type": "stock_trends_inference_model",
+    "schema_version": "1",
+    "supports_causal_attribution": false,
+    "supports_counterfactuals": false,
+    "supports_probability_distributions": true
+  },
+  "publication_status": "agent_actionable",
+  "published_at": "2026-04-12T06:00:00+00:00",
+  "revision": 1,
+  "schema_version": "1",
+  "validation_status": "validated",
+  "weekdate": "2026-04-11"
+}

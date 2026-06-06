@@ -15,6 +15,7 @@ from payments.policy_provider import (
     is_agent_pay_auth_candidate,
     is_agent_pay_enforcement_path,
     is_free_metered_path,
+    is_public_intelligence_path,
     is_public_stocktrends_path,
 )
 
@@ -80,6 +81,10 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
             "/v1/meta/stwr",
             "/v1/leadership/definitions",
             "/v1/selections/stim-select/outcomes/summary",
+            "/v1/intelligence/discovery",
+            "/v1/intelligence/guidance/latest",
+            "/v1/intelligence/research/latest",
+            "/v1/intelligence/editorial/latest/preview",
             # Workflow catalog is public discovery — no auth required.
             "/v1/workflows",
             # Discovery endpoints — public like /v1/docs and /v1/openapi.json.
@@ -256,6 +261,7 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         if (
             path in self.public_paths
             or is_public_stocktrends_path(path)
+            or is_public_intelligence_path(path)
             or any(path.startswith(prefix) for prefix in self.public_prefixes)
         ):
             return await call_next(request)
