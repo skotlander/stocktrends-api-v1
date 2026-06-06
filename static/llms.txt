@@ -155,6 +155,7 @@ https://developer.stocktrends.com/mpp
   Public/free. Latest valid published or publish-ready editorial preview envelope. Preview only; no generation occurs on request.
 
 The API reads only exported `PublicArtifactEnvelope.v1` files from the configured artifact store and does not call Stock Trends Intelligence Agent internals. Invalid manifests and schema/hash/expiration/publication-status failures fail closed.
+Paid guidance and research routes check artifact availability before any subscription, x402, or MPP payment challenge. Missing stores return `503`; absent, invalid, expired, or hash-mismatched artifacts fail closed before payment and do not advertise paid rails.
 
 ### AI Discovery
 
@@ -439,6 +440,7 @@ Usage may be associated with:
 Agents should treat the live pricing catalog and relevant response headers as authoritative for endpoint cost behavior.
 
 For x402 calls, agents should treat the HTTP 402 response as the final pre-payment planning surface. The response body may include `stocktrends_preview` with endpoint purpose, investment-agent value, workflow role, required inputs, safe example request, response shape, synthetic example object, related endpoints, pricing_rule_id, resolved STC cost, and supported rails. This preview is structural and must not be treated as paid market data.
+For paid Intelligence artifact calls, this HTTP 402 preview is emitted only after the API confirms that a matching exported artifact is available and serveable.
 
 ---
 

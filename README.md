@@ -263,6 +263,11 @@ Discovery metadata and editorial preview may serve `published` or
 `published` or `product_grade` exports. Initial pricing-rule seed SQL is in
 `docs/operations/intelligence_pricing_rules.sql`.
 
+Paid guidance and research routes check artifact availability before any payment
+challenge or machine-payment authorization. Missing stores return `503`; absent,
+invalid, expired, or hash-mismatched artifacts fail closed before payment, do
+not advertise subscription/x402/MPP, and do not create paid economics rows.
+
 ### Cognition Metadata
 
 ```text

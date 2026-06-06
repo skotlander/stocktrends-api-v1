@@ -18,6 +18,9 @@ from payments.policy_provider import (
     is_public_intelligence_path,
     is_public_stocktrends_path,
 )
+from services.intelligence_artifact_availability import (
+    check_intelligence_artifact_availability,
+)
 
 _ENABLE_AGENT_PAY = os.getenv("ENABLE_AGENT_PAY", "false").lower() == "true"
 
@@ -267,6 +270,13 @@ class ApiKeyMiddleware(BaseHTTPMiddleware):
         # OPTIONS preflight requests are handled by CORSMiddleware (outermost).
         # Pass through unconditionally so auth enforcement never blocks preflights.
         if request.method == "OPTIONS":
+            return await call_next(request)
+
+        availability = check_intelligence_artifact_availability(request.method, path)
+        if availability is not None and not availability.available:
+            request.state.auth_mode = "availability_gate"
+            request.state.actor_type = "unknown"
+            request.state.intelligence_artifact_availability = availability
             return await call_next(request)
 
         raw_key = extract_api_key(request)

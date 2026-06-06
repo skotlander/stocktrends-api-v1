@@ -60,6 +60,18 @@ and editorial preview remain public/free. Guidance and research artifacts are
 paid intelligence products served through the normal subscription, x402, and MPP
 economic boundary.
 
+Paid Intelligence Artifact routes also have a pre-payment availability boundary.
+Before the API issues a subscription/x402/MPP payment challenge or accepts a
+machine-payment attempt, it confirms that the configured artifact store is
+available and that the requested guidance or research artifact exists, validates,
+and is serveable. If the store is missing or unreadable, the request returns
+`503` with `intelligence_artifact_store_unavailable`. If a matching artifact is
+absent or fails existing schema/hash/publication validation, the request fails
+closed according to the store convention, typically `404` with
+`intelligence_artifact_not_found`. These unavailable responses do not advertise
+subscription, x402, or MPP methods and do not create paid economics records.
+Only available artifacts proceed to the normal payment lifecycle.
+
 Initial active STC rules for paid guidance and research artifacts are documented
 in `docs/operations/intelligence_pricing_rules.sql`:
 

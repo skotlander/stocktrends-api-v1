@@ -1832,6 +1832,7 @@ _ENDPOINT_METADATA_BY_PATH.update(
             },
             notes=[
                 "Paid guidance routes allow publication_status published or product_grade only.",
+                "Payment challenges are emitted only after a matching serveable artifact is available.",
                 "The API reads exported envelopes only; it does not call Agent graph nodes or generation services.",
                 "Discovery metadata and editorial preview remain public/free.",
             ],
@@ -1907,6 +1908,7 @@ _ENDPOINT_METADATA_BY_PATH.update(
             notes=[
                 "A manifest id for another artifact type returns 404.",
                 "Paid guidance routes allow publication_status published or product_grade only.",
+                "Payment challenges are emitted only after this artifact_id resolves to a serveable exported envelope.",
             ],
             related_endpoints=[
                 "/v1/intelligence/discovery",
@@ -1972,6 +1974,7 @@ _ENDPOINT_METADATA_BY_PATH.update(
             },
             notes=[
                 "Paid research routes allow publication_status published or product_grade only.",
+                "Payment challenges are emitted only after a matching serveable artifact is available.",
                 "The API reads exported envelopes only; it does not call Agent graph nodes or generation services.",
                 "Discovery metadata and editorial preview remain public/free.",
             ],
@@ -2047,6 +2050,7 @@ _ENDPOINT_METADATA_BY_PATH.update(
             notes=[
                 "A manifest id for another artifact type returns 404.",
                 "Paid research routes allow publication_status published or product_grade only.",
+                "Payment challenges are emitted only after this artifact_id resolves to a serveable exported envelope.",
             ],
             related_endpoints=[
                 "/v1/intelligence/discovery",
