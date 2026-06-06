@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -13,6 +14,13 @@ import routers.instruments as instruments_router
 import routers.workflows as workflows_router
 from payments.enforcement import PaymentEnforcementResult
 from routers.workflows import WORKFLOW_REGISTRY
+from services.intelligence_artifact_store import STORE_ENV_VAR
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+INTELLIGENCE_FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "intelligence" / "public_artifacts" / "v1"
+GUIDANCE_ID = "market_guidance:N:2026-04-11:guidance:aff9aaeee1660a31"
+RESEARCH_ID = "market_research_report:N:2026-04-11:research:2a7d870d628448a0"
 
 
 class _Result:
@@ -161,6 +169,7 @@ def agent_pay_client(monkeypatch):
     monkeypatch.setattr(metering_module, "ENFORCE_AGENT_PAY", True)
     monkeypatch.setattr(classifier_module, "ENABLE_AGENT_PAY", True)
     monkeypatch.setattr(classifier_module, "ENFORCE_AGENT_PAY", True)
+    monkeypatch.setenv(STORE_ENV_VAR, str(INTELLIGENCE_FIXTURE_ROOT))
     monkeypatch.setattr(
         metering_module,
         "enforce_payment_rail",
@@ -178,9 +187,9 @@ def agent_pay_client(monkeypatch):
         ("/v1/leadership/summary/latest", "leadership_summary_latest_paid"),
         ("/v1/leadership/rotation/history", "leadership_rotation_history_paid"),
         ("/v1/intelligence/guidance/latest", "intelligence_guidance_latest"),
-        ("/v1/intelligence/guidance/example-artifact", "intelligence_guidance_by_id"),
+        (f"/v1/intelligence/guidance/{GUIDANCE_ID}", "intelligence_guidance_by_id"),
         ("/v1/intelligence/research/latest", "intelligence_research_latest"),
-        ("/v1/intelligence/research/example-artifact", "intelligence_research_by_id"),
+        (f"/v1/intelligence/research/{RESEARCH_ID}", "intelligence_research_by_id"),
     ],
 )
 def test_paid_agent_pay_endpoints_return_402_without_api_key_or_payment(

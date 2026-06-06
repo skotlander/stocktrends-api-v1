@@ -199,6 +199,13 @@ Discovery metadata and editorial preview are public/free planning surfaces.
 Guidance and research artifacts are paid intelligence products and must remain
 inside the normal Stock Trends API economic boundary: endpoint payment policy,
 STC pricing catalog, payment enforcement, and request economics logging.
+That economic boundary begins only after API-side artifact availability is
+confirmed. Paid guidance and research routes first verify that the exported
+artifact store is configured and readable and that the requested
+`PublicArtifactEnvelope.v1` exists, validates, and is serveable. Missing stores,
+missing artifacts, hash/schema failures, expired artifacts, or unserveable
+publication statuses fail closed with `503` or `404` and no subscription, x402,
+or MPP payment invitation.
 
 Serveability is explicit by artifact type. Discovery metadata and editorial
 preview may serve `published` or `publish_ready` exports; paid guidance and

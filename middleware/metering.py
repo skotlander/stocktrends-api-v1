@@ -23,12 +23,15 @@ from payments.policy_provider import (
     is_agent_pay_enforcement_path,
 )
 from discovery.preview import get_endpoint_preview
-from pricing.classifier import classify_request
+from pricing.classifier import PricingDecision, classify_request
 from payments.x402 import (
     is_x402_payment_method,
     validate_x402_payment,
     encode_payment_response_header,
     X402_DEFAULT_TOKEN_DECIMALS,
+)
+from services.intelligence_artifact_availability import (
+    intelligence_artifact_availability_error_detail,
 )
 
 logger = logging.getLogger("stocktrends_api.metering")
@@ -211,6 +214,20 @@ def _apply_quota_headers(response, request: Request, decision) -> None:
 
 def should_log_economics(decision) -> bool:
     return bool(decision.econ_pricing_rule_id)
+
+
+def availability_gate_decision(error_code: str | None) -> PricingDecision:
+    return PricingDecision(
+        is_metered=0,
+        access_granted=False,
+        deny_reason=error_code,
+        log_pricing_rule_id="default_free",
+        log_payment_method="none",
+        econ_pricing_rule_id=None,
+        econ_payment_required=0,
+        econ_payment_status=None,
+        econ_payment_method=None,
+    )
 
 
 def normalize_workflow_type(auth_mode: str | None, agent_identifier: str | None) -> str:
@@ -880,6 +897,60 @@ class MeteringMiddleware(BaseHTTPMiddleware):
         actor_type = getattr(request.state, "actor_type", "unknown")
 
         agent_identifier = normalize_agent_identifier(agent_id_header, agent_vendor_header)
+
+        availability = getattr(request.state, "intelligence_artifact_availability", None)
+        if availability is not None:
+            error_code = getattr(availability, "error_code", None)
+            decision = availability_gate_decision(error_code)
+            response = JSONResponse(
+                status_code=getattr(availability, "status_code", None) or 503,
+                content={
+                    "detail": intelligence_artifact_availability_error_detail(
+                        availability,
+                        request_id=request_id,
+                    ),
+                },
+            )
+            apply_pricing_headers(
+                response,
+                pricing_rule_id=None,
+                payment_required=False,
+                accepted_methods="none",
+            )
+
+            latency_ms = int((time.time() - start_time) * 1000)
+            event = build_request_event(
+                request_id=request_id,
+                environment="production",
+                api_key_id=api_key_id,
+                customer_id=customer_id,
+                subscription_id=subscription_id,
+                plan_code=plan_code,
+                actor_type=actor_type,
+                workflow_type=normalize_workflow_type(auth_mode, agent_identifier),
+                agent_identifier=agent_identifier,
+                agent_registry_id=None,
+                path=path,
+                method=method,
+                query_string=query_string,
+                request=request,
+                status_code=response.status_code,
+                success=0,
+                latency_ms=latency_ms,
+                response=response,
+                decision=decision,
+                payment_rail="none",
+                payment_method="none",
+                error_code=error_code,
+                notes=getattr(availability, "message", None),
+            )
+
+            try:
+                log_api_request_event(event)
+            except Exception as e:
+                logger.error("Metering request-log insert failed: %s", e, exc_info=True)
+
+            return response
 
         if customer_id:
             agent_record, agent_auto_registered = ensure_agent_record(

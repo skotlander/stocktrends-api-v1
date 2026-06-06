@@ -55,6 +55,15 @@ def _save_manifest(root: Path, manifest: dict) -> None:
     _write_json(root / "manifest.json", manifest)
 
 
+def _remove_artifact_type(root: Path, artifact_type: str) -> None:
+    manifest = _load_manifest(root)
+    manifest["artifacts"] = [
+        entry for entry in manifest["artifacts"] if entry["artifact_type"] != artifact_type
+    ]
+    manifest["artifact_count"] = len(manifest["artifacts"])
+    _save_manifest(root, manifest)
+
+
 def _entry_for(manifest: dict, artifact_type: str) -> dict:
     return next(entry for entry in manifest["artifacts"] if entry["artifact_type"] == artifact_type)
 
@@ -115,6 +124,24 @@ def _enable_agent_pay(monkeypatch):
     monkeypatch.setattr(metering_module, "VALIDATE_AGENT_PAY_HEADERS", False)
     monkeypatch.setattr(classifier_module, "ENABLE_AGENT_PAY", True)
     monkeypatch.setattr(classifier_module, "ENFORCE_AGENT_PAY", True)
+
+
+def _challenge_result(path: str) -> PaymentEnforcementResult:
+    return PaymentEnforcementResult(
+        outcome="challenge",
+        challenge_body={
+            "error": "payment_required",
+            "detail": "Payment is required to access this endpoint.",
+            "protocol": "x402",
+            "resource": path,
+            "pricing": {"amount_usd": "0.250000", "unit": "request"},
+            "accepted_payment_methods": ["x402"],
+            "payment_required": {"x402Version": 2, "accepts": []},
+        },
+        payment_required_header="eyJ0ZXN0Ijp0cnVlfQ==",
+        payment_network="eip155:8453",
+        payment_token="0xtoken",
+    )
 
 
 @pytest.fixture
@@ -190,6 +217,43 @@ def paid_machine_client(monkeypatch, artifact_root):
 
     with TestClient(main.app) as client:
         yield client, economics_rows
+
+
+@pytest.fixture
+def availability_gate_client(monkeypatch):
+    economics_rows: list[dict] = []
+    request_events: list[dict] = []
+
+    _stub_runtime_side_effects(monkeypatch, cost=Decimal("0.25"))
+    _enable_agent_pay(monkeypatch)
+    monkeypatch.setattr(
+        metering_module,
+        "log_api_request_economics",
+        lambda econ: economics_rows.append(dict(econ)),
+    )
+    monkeypatch.setattr(
+        metering_module,
+        "log_api_request_event",
+        lambda event: request_events.append(dict(event)),
+    )
+    monkeypatch.setattr(
+        metering_module,
+        "enforce_payment_rail",
+        lambda **kwargs: _challenge_result(kwargs["path"]),
+    )
+
+    with TestClient(main.app) as client:
+        yield client, economics_rows, request_events
+
+
+def _assert_unavailable_response_has_no_payment_challenge(response, economics_rows: list[dict]) -> None:
+    assert response.status_code != 402
+    assert "payment-required" not in response.headers
+    assert response.headers["x-stocktrends-payment-required"] == "false"
+    assert response.headers["x-stocktrends-accepted-payment-methods"] == "none"
+    assert "x-stocktrends-pricing-rule" not in response.headers
+    assert "stocktrends_preview" not in json.dumps(response.json())
+    assert economics_rows == []
 
 
 def test_api_loads_vendored_agent_fixtures(artifact_root):
@@ -577,6 +641,133 @@ def test_paid_intelligence_machine_payment_rails_work(paid_machine_client, payme
     assert row["payment_rail"] == payment_method
     assert row["payment_method"] == payment_method
     assert row["request_id"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/intelligence/guidance/latest",
+        "/v1/intelligence/research/latest",
+        f"/v1/intelligence/guidance/{GUIDANCE_ID}",
+        f"/v1/intelligence/research/{RESEARCH_ID}",
+    ],
+)
+def test_missing_store_paid_intelligence_returns_503_before_payment(
+    monkeypatch,
+    availability_gate_client,
+    path,
+):
+    client, economics_rows, _request_events = availability_gate_client
+    monkeypatch.delenv(STORE_ENV_VAR, raising=False)
+
+    response = client.get(path)
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"] == "intelligence_artifact_store_unavailable"
+    _assert_unavailable_response_has_no_payment_challenge(response, economics_rows)
+
+
+@pytest.mark.parametrize(
+    ("artifact_type", "path"),
+    [
+        ("market_guidance", "/v1/intelligence/guidance/latest"),
+        ("market_research_report", "/v1/intelligence/research/latest"),
+    ],
+)
+def test_configured_store_missing_latest_artifact_returns_404_before_payment(
+    monkeypatch,
+    artifact_root,
+    availability_gate_client,
+    artifact_type,
+    path,
+):
+    client, economics_rows, _request_events = availability_gate_client
+    _remove_artifact_type(artifact_root, artifact_type)
+    monkeypatch.setenv(STORE_ENV_VAR, str(artifact_root))
+
+    response = client.get(path)
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "intelligence_artifact_not_found"
+    _assert_unavailable_response_has_no_payment_challenge(response, economics_rows)
+
+
+def test_invalid_manifest_returns_503_before_payment(
+    monkeypatch,
+    artifact_root,
+    availability_gate_client,
+):
+    client, economics_rows, _request_events = availability_gate_client
+    (artifact_root / "manifest.json").write_text("{", encoding="utf-8")
+    monkeypatch.setenv(STORE_ENV_VAR, str(artifact_root))
+
+    response = client.get("/v1/intelligence/guidance/latest")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["error"] == "intelligence_artifact_store_unavailable"
+    _assert_unavailable_response_has_no_payment_challenge(response, economics_rows)
+
+
+def test_invalid_artifact_schema_returns_404_before_payment(
+    monkeypatch,
+    artifact_root,
+    availability_gate_client,
+):
+    client, economics_rows, _request_events = availability_gate_client
+    _rewrite_artifact(artifact_root, "market_guidance", {"schema_version": "2"})
+    monkeypatch.setenv(STORE_ENV_VAR, str(artifact_root))
+
+    response = client.get("/v1/intelligence/guidance/latest")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "intelligence_artifact_not_found"
+    _assert_unavailable_response_has_no_payment_challenge(response, economics_rows)
+
+
+def test_hash_mismatch_returns_404_before_payment(
+    monkeypatch,
+    artifact_root,
+    availability_gate_client,
+):
+    client, economics_rows, _request_events = availability_gate_client
+    manifest = _load_manifest(artifact_root)
+    entry = _entry_for(manifest, "market_guidance")
+    entry["content_hash"] = "sha256:" + ("0" * 64)
+    _save_manifest(artifact_root, manifest)
+    monkeypatch.setenv(STORE_ENV_VAR, str(artifact_root))
+
+    response = client.get("/v1/intelligence/guidance/latest")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["error"] == "intelligence_artifact_not_found"
+    _assert_unavailable_response_has_no_payment_challenge(response, economics_rows)
+
+
+@pytest.mark.parametrize(
+    ("path", "pricing_rule_id"),
+    [
+        ("/v1/intelligence/guidance/latest", "intelligence_guidance_latest"),
+        ("/v1/intelligence/research/latest", "intelligence_research_latest"),
+    ],
+)
+def test_valid_paid_intelligence_artifact_still_returns_402_with_preview(
+    monkeypatch,
+    artifact_root,
+    availability_gate_client,
+    path,
+    pricing_rule_id,
+):
+    client, _economics_rows, _request_events = availability_gate_client
+    monkeypatch.setenv(STORE_ENV_VAR, str(artifact_root))
+
+    response = client.get(path)
+
+    assert response.status_code == 402
+    assert response.headers["x-stocktrends-pricing-rule"] == pricing_rule_id
+    assert response.headers["x-stocktrends-payment-required"] == "true"
+    assert response.headers["x-stocktrends-accepted-payment-methods"] == "subscription,x402,mpp"
+    assert "payment-required" in response.headers
+    assert response.json()["stocktrends_preview"]["pricing"]["pricing_rule_id"] == pricing_rule_id
 
 
 def test_missing_store_returns_503(monkeypatch):

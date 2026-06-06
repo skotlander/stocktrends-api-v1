@@ -28,6 +28,7 @@ from __future__ import annotations
 import base64
 import json
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,6 +41,7 @@ import pricing.classifier as classifier_module
 from payments.enforcement import PaymentEnforcementResult
 from discovery.preview import get_endpoint_preview, _PREVIEW_BY_PATH
 from pricing.classifier import PricingDecision
+from services.intelligence_artifact_store import STORE_ENV_VAR
 
 
 # ---------------------------------------------------------------------------
@@ -49,6 +51,10 @@ from pricing.classifier import PricingDecision
 _KNOWN_PREVIEW_PATH = "/v1/indicators/latest"
 _INDICATORS_HISTORY_PATH = "/v1/indicators/history"
 _DEVELOPER_ORIGIN = "https://developer.stocktrends.com"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_INTELLIGENCE_FIXTURE_ROOT = _REPO_ROOT / "tests" / "fixtures" / "intelligence" / "public_artifacts" / "v1"
+_GUIDANCE_ID = "market_guidance:N:2026-04-11:guidance:aff9aaeee1660a31"
+_RESEARCH_ID = "market_research_report:N:2026-04-11:research:2a7d870d628448a0"
 
 _CHALLENGE_BODY_TEMPLATE = {
     "error": "payment_required",
@@ -112,6 +118,7 @@ def _stub_runtime(monkeypatch, *, enforce_result: PaymentEnforcementResult, path
     """Patch metering-layer side effects and enforcement for agent-pay challenge tests."""
     monkeypatch.setattr(metering_module, "log_api_request_event", lambda *a, **kw: None)
     monkeypatch.setattr(metering_module, "log_api_request_economics", lambda *a, **kw: None)
+    monkeypatch.setenv(STORE_ENV_VAR, str(_INTELLIGENCE_FIXTURE_ROOT))
     monkeypatch.setattr(
         metering_module,
         "resolve_economic_amounts",
@@ -363,9 +370,9 @@ class TestDiscoveryPreview:
         ("path", "pricing_rule_id"),
         [
             ("/v1/intelligence/guidance/latest", "intelligence_guidance_latest"),
-            ("/v1/intelligence/guidance/artifact-1", "intelligence_guidance_by_id"),
+            (f"/v1/intelligence/guidance/{_GUIDANCE_ID}", "intelligence_guidance_by_id"),
             ("/v1/intelligence/research/latest", "intelligence_research_latest"),
-            ("/v1/intelligence/research/artifact-1", "intelligence_research_by_id"),
+            (f"/v1/intelligence/research/{_RESEARCH_ID}", "intelligence_research_by_id"),
         ],
     )
     def test_intelligence_paid_previews_are_machine_payable(self, path, pricing_rule_id):
@@ -552,14 +559,14 @@ def test_stim_latest_no_payment_request_still_returns_402(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("path", "pricing_rule_id"),
-    [
-        ("/v1/intelligence/guidance/latest", "intelligence_guidance_latest"),
-        ("/v1/intelligence/guidance/artifact-1", "intelligence_guidance_by_id"),
-        ("/v1/intelligence/research/latest", "intelligence_research_latest"),
-        ("/v1/intelligence/research/artifact-1", "intelligence_research_by_id"),
-    ],
-)
+        ("path", "pricing_rule_id"),
+        [
+            ("/v1/intelligence/guidance/latest", "intelligence_guidance_latest"),
+            (f"/v1/intelligence/guidance/{_GUIDANCE_ID}", "intelligence_guidance_by_id"),
+            ("/v1/intelligence/research/latest", "intelligence_research_latest"),
+            (f"/v1/intelligence/research/{_RESEARCH_ID}", "intelligence_research_by_id"),
+        ],
+    )
 def test_paid_intelligence_routes_return_402_with_preview(monkeypatch, path, pricing_rule_id):
     _stub_runtime(monkeypatch, enforce_result=_make_challenge_result(path))
     with TestClient(main.app) as client:
