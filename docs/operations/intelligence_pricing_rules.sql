@@ -5,12 +5,23 @@
 --
 -- STC remains the source of truth. Payment rails translate these STC costs;
 -- rails must not define independent endpoint prices.
+--
+-- Deployment note:
+--   Before running this ON DUPLICATE KEY UPDATE seed, confirm
+--   api_pricing_rules has UNIQUE(rule_name). If rule_name is not unique,
+--   use a DELETE-then-INSERT deployment procedure instead.
+--
+-- Route precedence:
+--   Exact /latest routes use priority=10.
+--   By-id template routes use priority=20 so exact routes sort first if
+--   a deployment loader applies priority-based endpoint matching.
 
 INSERT INTO api_pricing_rules (
     rule_name,
     endpoint_pattern,
     endpoint_family,
     api_version,
+    priority,
     access_type,
     cost_per_request,
     cost_unit,
@@ -23,6 +34,7 @@ INSERT INTO api_pricing_rules (
         '/v1/intelligence/guidance/latest',
         'intelligence',
         'v1',
+        10,
         'paid',
         0.250000,
         'STC',
@@ -35,6 +47,7 @@ INSERT INTO api_pricing_rules (
         '/v1/intelligence/guidance/{artifact_id}',
         'intelligence',
         'v1',
+        20,
         'paid',
         0.250000,
         'STC',
@@ -47,6 +60,7 @@ INSERT INTO api_pricing_rules (
         '/v1/intelligence/research/latest',
         'intelligence',
         'v1',
+        10,
         'paid',
         0.500000,
         'STC',
@@ -59,6 +73,7 @@ INSERT INTO api_pricing_rules (
         '/v1/intelligence/research/{artifact_id}',
         'intelligence',
         'v1',
+        20,
         'paid',
         0.500000,
         'STC',
@@ -70,6 +85,7 @@ ON DUPLICATE KEY UPDATE
     endpoint_pattern = VALUES(endpoint_pattern),
     endpoint_family = VALUES(endpoint_family),
     api_version = VALUES(api_version),
+    priority = VALUES(priority),
     access_type = VALUES(access_type),
     cost_per_request = VALUES(cost_per_request),
     cost_unit = VALUES(cost_unit),
