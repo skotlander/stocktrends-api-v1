@@ -7,14 +7,24 @@
 -- rails must not define independent endpoint prices.
 --
 -- Deployment note:
---   Before running this ON DUPLICATE KEY UPDATE seed, confirm
---   api_pricing_rules has UNIQUE(rule_name). If rule_name is not unique,
---   use a DELETE-then-INSERT deployment procedure instead.
+--   Production api_pricing_rules has no UNIQUE(rule_name), so
+--   ON DUPLICATE KEY UPDATE is unsafe and would duplicate rows. This seed
+--   intentionally deletes the four rule_name rows first, then inserts them.
 --
 -- Route precedence:
 --   Exact /latest routes use priority=10.
 --   By-id template routes use priority=20 so exact routes sort first if
 --   a deployment loader applies priority-based endpoint matching.
+
+START TRANSACTION;
+
+DELETE FROM api_pricing_rules
+WHERE rule_name IN (
+    'intelligence_guidance_latest',
+    'intelligence_guidance_by_id',
+    'intelligence_research_latest',
+    'intelligence_research_by_id'
+);
 
 INSERT INTO api_pricing_rules (
     rule_name,
@@ -80,15 +90,6 @@ INSERT INTO api_pricing_rules (
         0,
         1,
         1
-    )
-ON DUPLICATE KEY UPDATE
-    endpoint_pattern = VALUES(endpoint_pattern),
-    endpoint_family = VALUES(endpoint_family),
-    api_version = VALUES(api_version),
-    priority = VALUES(priority),
-    access_type = VALUES(access_type),
-    cost_per_request = VALUES(cost_per_request),
-    cost_unit = VALUES(cost_unit),
-    requires_subscription = VALUES(requires_subscription),
-    requires_payment = VALUES(requires_payment),
-    is_active = VALUES(is_active);
+    );
+
+COMMIT;
